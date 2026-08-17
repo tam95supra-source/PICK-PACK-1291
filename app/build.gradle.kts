@@ -7,21 +7,42 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "vn.pickpack1291.app.beta"
+        applicationId = "vn.pickpack1291.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0-beta.1"
+    }
+
+    flavorDimensions += "channel"
+    productFlavors {
+        create("beta") {
+            dimension = "channel"
+            applicationId = "vn.pickpack1291.app.beta.publicbeta"
+            versionCode = 3
+            versionName = "0.3.0-beta.1"
+            manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
+            buildConfigField("String", "CHANNEL", "\"BETA\"")
+        }
+        create("stable") {
+            dimension = "channel"
+            applicationId = "vn.pickpack1291.app.stable"
+            versionCode = 1
+            versionName = "0.1.0-stable"
+            manifestPlaceholders["appLabel"] = "Pick Pack 1291"
+            buildConfigField("String", "CHANNEL", "\"STABLE\"")
+        }
     }
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".publicbeta"
-            versionNameSuffix = "-publicbeta"
+            isMinifyEnabled = false
         }
         release {
             isMinifyEnabled = false
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
@@ -30,4 +51,5 @@ android {
     }
 }
 
-// Public Beta uses the server-side authoritative Beta API; no Google credential is embedded in Android.
+// Beta and Stable share the same functional source and automatic update client.
+// Long-lived OTA requires a fixed signing key injected outside this public repository.
