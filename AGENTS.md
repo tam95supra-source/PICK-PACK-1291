@@ -46,3 +46,11 @@ Before a material implementation change, verify that it directly serves the late
 ## 6. Architecture enforcement
 
 Read and obey `ARCHITECTURE_GUARDRAILS.md` and `README.md` before changing runtime architecture. CI architecture gates are intentional and must not be bypassed to make a build pass.
+
+## 7. Owner workstation constraint — no local command line
+
+- The owner's company-managed computer cannot run CMD, PowerShell, Terminal, shell scripts, or other local command-line workflows.
+- Do not instruct the owner to execute `cmd`, PowerShell, `bash`, `clasp`, `git`, `gh`, `adb`, Gradle, Node/npm/npx, Java/keytool, OpenSSL, or similar local CLI commands.
+- Owner-facing setup and administration must preferentially use browser/UI workflows such as GitHub web UI, Google Workspace/Apps Script UI, Drive UI, or repository-hosted CI/automation.
+- If a required task normally needs a local CLI, redesign it so CI/automation performs the command-line portion and the owner only performs browser-based authorization, secret entry, or explicit approval.
+- If a browser-only path is genuinely impossible, state the blocker explicitly instead of giving unusable local terminal instructions.
