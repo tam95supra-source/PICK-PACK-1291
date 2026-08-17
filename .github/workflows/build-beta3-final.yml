@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/build-beta3-final.yml'
+      - 'app/src/main/java/vn/pickpack1291/app/beta/UpdateManager.kt'
   workflow_dispatch:
 
 permissions:
@@ -29,10 +30,11 @@ jobs:
           grep -q 'android:icon="@drawable/owner_launcher"' app/src/main/AndroidManifest.xml
           grep -q 'versionCode = 9' app/build.gradle.kts
           grep -q 'versionName = "0.4.2-beta.3"' app/build.gradle.kts
+          ! grep -R 'BetaApiClient()' app/src/main/java/vn/pickpack1291/app/beta
           curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/h.json
           grep -q '"sheet_read":true' /tmp/h.json
           grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json
-          echo 'Backend + exact artwork source gate: PASS'
+          echo 'Backend + exact artwork source + context API gate: PASS'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
