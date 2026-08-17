@@ -36,12 +36,15 @@ jobs:
           grep -q 'd180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e' .github/workflows/beta-preview.yml
           git diff --check
 
-      - name: Commit release configuration atomically
+      - name: Commit Gradle config and reviewed workflow template
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p ops
+          cp .github/workflows/beta-preview.yml ops/beta-preview.fixed-signing-beta2.yml
+          git checkout -- .github/workflows/beta-preview.yml
           git config user.name 'pick-pack-1291-ci'
           git config user.email 'actions@users.noreply.github.com'
-          git add app/build.gradle.kts .github/workflows/beta-preview.yml
-          git commit -m 'release: fixed signing and public beta 0.3.0-beta.2'
+          git add app/build.gradle.kts ops/beta-preview.fixed-signing-beta2.yml
+          git commit -m 'release: stage fixed signing public beta 0.3.0-beta.2'
           git push origin HEAD:main
