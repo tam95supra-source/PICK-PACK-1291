@@ -1,0 +1,42 @@
+name: Fix Beta3 Apply Workflow Schema
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/fix-apply-beta3-schema.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  fix-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch create-deployment request and dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/apply-icon-session-beta3.yml')
+          s=p.read_text()
+          old="open('/tmp/temp-deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'temporary owner artwork fetch'}}))"
+          new="open('/tmp/temp-deploy.json','w').write(json.dumps({'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'temporary owner artwork fetch'}))"
+          assert old in s, 'target schema line not found'
+          p.write_text(s.replace(old,new,1))
+          PY
+          git config user.name 'tam95supra-source'
+          git config user.email 'tam95.supra@gmail.com'
+          git add .github/workflows/apply-icon-session-beta3.yml
+          git rm .github/workflows/fix-apply-beta3-schema.yml
+          git commit -m 'ci: correct Apps Script temporary deployment create payload'
+          git push origin main
+          sleep 3
+          gh workflow run apply-icon-session-beta3.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo 'Corrected workflow dispatched.'
