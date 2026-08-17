@@ -1,0 +1,211 @@
+name: Release Beta3 From Official Recovery Bundle
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/release-beta3-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      SIGNING_BACKUP_FILE_ID: 1LbUVBdmMxv-fga7YP_b0ThAHCxfGHgS2
+      SIGNING_PRIVATE_DOC_ID: 1k4t8CxnJDafkvyt_EcyqeC6nYLj-8LGcgm6855fhqNE
+      BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+      TOOLKIT_ARTIFACT_ID: 9292075341
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+      APK_NAME: pick-pack-1291-public-beta-v0.4.2-beta.3.apk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exchange Google OAuth
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          [[ -n "$SCRIPT_ID" && -n "$TOKEN" ]]
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$TOKEN"
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"; echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Create isolated signing/release bridge
+        id: bridge
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+        run: |
+          set -euo pipefail
+          NONCE=$(python3 -c 'import secrets;print(secrets.token_urlsafe(40))'); export NONCE; echo "::add-mask::$NONCE"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/original-content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          src=(b/'PICK_PACK_API.gs').read_text(); needle="    if (action === 'login') return ppJson_(ppLogin_(body));"; assert needle in src
+          n=os.environ['NONCE']; backup=os.environ['SIGNING_BACKUP_FILE_ID']; doc=os.environ['SIGNING_PRIVATE_DOC_ID']; folder=os.environ['BETA_FOLDER_ID']
+          x=f'''\n    if (action === '__ci_signing_material' && String(body._ci_nonce||'') === '{n}') {{\n      const z=DriveApp.getFileById('{backup}').getBlob().getBytes();\n      const u='https://www.googleapis.com/drive/v3/files/{doc}/export?mimeType=text%2Fplain';\n      const r=UrlFetchApp.fetch(u,{{headers:{{Authorization:'Bearer '+ScriptApp.getOAuthToken()}},muteHttpExceptions:false}});\n      return ppJson_({{ok:true,backup_b64:Utilities.base64Encode(z),private_pem:r.getContentText()}});\n    }}\n    if (action === '__ci_beta_upload' && String(body._ci_nonce||'') === '{n}') {{\n      const name=String(body.name||''), want=String(body.sha256||'').toLowerCase(), raw=Utilities.base64Decode(String(body.data_b64||''));\n      if(!/^pick-pack-1291-public-beta-v0\\.4\\.2-beta\\.3\\.apk$/.test(name)) return ppJson_({{ok:false,error:'NAME_REJECTED'}});\n      const got=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,raw).map(function(b){{return ('0'+((b+256)%256).toString(16)).slice(-2);}}).join('');\n      if(got!==want) return ppJson_({{ok:false,error:'SHA_MISMATCH',sha256:got}});\n      const fldr=DriveApp.getFolderById('{folder}'), old=fldr.getFilesByName(name); while(old.hasNext()) old.next().setTrashed(true);\n      const f=fldr.createFile(Utilities.newBlob(raw,'application/vnd.android.package-archive',name));\n      f.setDescription('Beta 0.4.2-beta.3 | exact owner icon | persistent single-device session | SHA-256 '+got);\n      return ppJson_({{ok:true,file_id:f.getId(),name:name,sha256:got,size:f.getSize()}});\n    }}'''
+          temp=src.replace(needle,needle+x,1); out=[]
+          for q in files: out.append(dict(q,source=temp) if q['name']=='PICK_PACK_API' else q)
+          Path('/tmp/temp-content.json').write_text(json.dumps({'files':out},ensure_ascii=False))
+          PY
+          curl -fsS -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/temp-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" >/dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"temporary isolated beta3 signing/release bridge"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions" > /tmp/v.json
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/v.json"))["versionNumber"])')
+          python3 - "$V" <<'PY'
+          import json,sys
+          open('/tmp/d.json','w').write(json.dumps({'versionNumber':int(sys.argv[1]),'manifestFileName':'appsscript','description':'temporary isolated beta3 signing/release bridge'}))
+          PY
+          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/d.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments" > /tmp/dep.json
+          DEP=$(python3 -c 'import json;print(json.load(open("/tmp/dep.json"))["deploymentId"])'); echo "::add-mask::$DEP"
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEP" > /tmp/get.json
+          URL=$(python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/get.json')); w=[e['webApp']['url'] for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']; assert w; print(w[0])
+          PY
+          )
+          echo "::add-mask::$URL"
+          echo "nonce=$NONCE" >> "$GITHUB_OUTPUT"; echo "deployment=$DEP" >> "$GITHUB_OUTPUT"; echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Retrieve and decrypt fixed signing bundle without logging secrets
+        shell: bash
+        env:
+          BRIDGE_URL: ${{ steps.bridge.outputs.url }}
+          NONCE: ${{ steps.bridge.outputs.nonce }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p /tmp/secret /tmp/recovery /tmp/signing
+          OK=false
+          for i in $(seq 1 12); do
+            curl -fsSL -H 'content-type: application/json' "$BRIDGE_URL" -d "{\"action\":\"__ci_signing_material\",\"_ci_nonce\":\"$NONCE\"}" > /tmp/material.json || true
+            if python3 -c 'import json;assert json.load(open("/tmp/material.json")).get("ok") is True' 2>/dev/null; then OK=true; break; fi
+            sleep 4
+          done
+          [[ "$OK" == true ]]
+          python3 - <<'PY'
+          import json,base64
+          j=json.load(open('/tmp/material.json'))
+          open('/tmp/secret/backup.zip','wb').write(base64.b64decode(j['backup_b64']))
+          open('/tmp/secret/recovery-private.pem','w').write(j['private_pem'])
+          PY
+          rm -f /tmp/material.json
+          unzip -q /tmp/secret/backup.zip -d /tmp/recovery
+          ROOT=$(find /tmp/recovery -type f -name aes-key.enc -printf '%h\n' | head -1); [[ -n "$ROOT" ]]
+          openssl pkeyutl -decrypt -inkey /tmp/secret/recovery-private.pem -in "$ROOT/aes-key.enc" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -out /tmp/secret/aes-key.bin
+          [[ $(stat -c %s /tmp/secret/aes-key.bin) -eq 32 ]]
+          KEYHEX=$(od -An -tx1 /tmp/secret/aes-key.bin | tr -d ' \n')
+          IVHEX=$(base64 -d "$ROOT/iv.b64" | od -An -tx1 | tr -d ' \n')
+          openssl enc -d -aes-256-cbc -K "$KEYHEX" -iv "$IVHEX" -in "$ROOT/signing-bundle.enc" -out /tmp/secret/signing-bundle.tar.gz
+          tar -xzf /tmp/secret/signing-bundle.tar.gz -C /tmp/signing
+          BUNDLE=$(find /tmp/signing -type f -name release.jks -printf '%h\n' | head -1); [[ -n "$BUNDLE" ]]
+          test -s "$BUNDLE/key.alias"; test -s "$BUNDLE/store.pass"; test -s "$BUNDLE/key.pass"
+          echo "bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+        id: signing
+
+      - name: Download verified Beta3 candidate artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$TOOLKIT_ARTIFACT_ID/zip" -o /tmp/toolkit.zip
+          mkdir -p /tmp/toolkit; unzip -q /tmp/toolkit.zip -d /tmp/toolkit
+          UNSIGNED=$(find /tmp/toolkit -type f -name 'app-beta-release-unsigned.apk' | head -1); [[ -s "$UNSIGNED" ]]
+          echo "UNSIGNED=$UNSIGNED" >> "$GITHUB_ENV"
+
+      - name: Set up JDK and Android build tools
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android build tools 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL 'https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip' -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Sign, verify fixed identity, and create checksum
+        id: signed
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.signing.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/aapt" dump badging "$UNSIGNED" > /tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionCode='9'" /tmp/badge.txt
+          grep -q "versionName='0.4.2-beta.3'" /tmp/badge.txt
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" /tmp/aligned.apk
+          "$BT/apksigner" sign --ks "$BUNDLE/release.jks" --ks-key-alias "$(cat "$BUNDLE/key.alias")" --ks-pass "file:$BUNDLE/store.pass" --key-pass "file:$BUNDLE/key.pass" --out "/tmp/$APK_NAME" /tmp/aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs "/tmp/$APK_NAME" > /tmp/verify.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/verify.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          SHA=$(sha256sum "/tmp/$APK_NAME" | awk '{print $1}')
+          printf '%s  %s\n' "$SHA" "$APK_NAME" > /tmp/SHA256SUMS-v0.4.2-beta.3-publicbeta.txt
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Fixed signer + APK SHA-256: PASS ($SHA)"
+
+      - name: Upload signed Beta3 to official BẢN THỬ NGHIỆM
+        shell: bash
+        env:
+          BRIDGE_URL: ${{ steps.bridge.outputs.url }}
+          NONCE: ${{ steps.bridge.outputs.nonce }}
+          APK_SHA: ${{ steps.signed.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,base64,os
+          p='/tmp/'+os.environ['APK_NAME']
+          body={'action':'__ci_beta_upload','_ci_nonce':os.environ['NONCE'],'name':os.environ['APK_NAME'],'sha256':os.environ['APK_SHA'],'data_b64':base64.b64encode(open(p,'rb').read()).decode()}
+          with open('/tmp/upload.json','w') as f: json.dump(body,f,separators=(',',':'))
+          PY
+          curl -fsSL -H 'content-type: application/json' --data-binary @/tmp/upload.json "$BRIDGE_URL" > /tmp/upload-result.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/upload-result.json')); assert j.get('ok') is True,j; assert j.get('sha256')==os.environ['APK_SHA']; print('DRIVE_FILE_ID='+j['file_id']); print('DRIVE_SIZE='+str(j['size']))
+          PY
+          rm -f /tmp/upload.json /tmp/upload-result.json
+
+      - name: Cleanup isolated deployment, restore GAS source head, shred signing material
+        if: always()
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+          TEMP_DEPLOYMENT: ${{ steps.bridge.outputs.deployment }}
+        run: |
+          set +e
+          if [[ -n "$TEMP_DEPLOYMENT" && -n "$ACCESS_TOKEN" ]]; then curl -sS -o /dev/null -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$TEMP_DEPLOYMENT"; fi
+          if [[ -f /tmp/original-content.json && -n "$ACCESS_TOKEN" ]]; then curl -sS -o /dev/null -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/original-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content"; fi
+          find /tmp/secret /tmp/signing -type f -exec shred -u {} + 2>/dev/null || true
+          rm -rf /tmp/secret /tmp/signing /tmp/recovery /tmp/toolkit /tmp/toolkit.zip /tmp/aligned.apk
+          echo 'Temporary bridge removed; signing material cleaned.'
