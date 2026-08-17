@@ -29,3 +29,5 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+// Beta preview build is intentionally backend-disconnected until the authoritative API is deployed.
