@@ -37,9 +37,9 @@ class OperationsActivity : Activity() {
     private val ink = Color.rgb(22,33,49)
     private val muted = Color.rgb(96,108,124)
     private val line = Color.rgb(218,225,234)
-    private val api = BetaApiClient()
-    private val syncApi = BetaApiClient()
-    private val cacheApi = BetaApiClient()
+    private val api by lazy { BetaApiClient(applicationContext) }
+    private val syncApi by lazy { BetaApiClient(applicationContext) }
+    private val cacheApi by lazy { BetaApiClient(applicationContext) }
 
     private lateinit var module: String
     private lateinit var login: String
@@ -66,7 +66,7 @@ class OperationsActivity : Activity() {
                 }
             }
 
-            override fun onAuthExpired() { finish() }
+            override fun onAuthExpired() { api.clearSession(); finishAffinity() }
         })
     }
 
@@ -226,7 +226,7 @@ class OperationsActivity : Activity() {
 
     private fun settingsScreen(){
         screenState = "SETTINGS"
-        val root=baseRoot("CÀI ĐẶT");val body=body();body.addView(section("Tài khoản"));body.addView(listCard("$name • ${roleText(role)}","Tài khoản: $login${if(position.isBlank())"" else " • Vị trí: $position"}"));body.addView(gap(7));body.addView(primary("ĐỔI MẬT KHẨU",navy){changePasswordDialog()},matchWrap());if(isAdmin()){body.addView(gap(7));body.addView(primary("QUẢN LÝ TÀI KHOẢN",blue){accountManager()},matchWrap())};body.addView(section("Đồng bộ / dữ liệu"));val sync=info("Đang đọc trạng thái Google Sheet...");body.addView(sync,matchWrap());api.call("sync_status"){r->runOnUiThread{if(r.ok){val j=r.json?:JSONObject();sync.text="Google Sheet rev ${j.optLong("server_seq")} • Master rev ${j.optLong("master_revision")} • cache máy rev ${MasterDataCache.revision(this@OperationsActivity)}"}else sync.text="Không đọc được trạng thái Google Sheet"}};body.addView(section("Cập nhật"));body.addView(info("${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}\nTự kiểm tra phiên bản mới: BẬT. App kiểm tra khi mở/foreground và tự hiện thông báo cập nhật."));body.addView(section("Nhật ký"));body.addView(primary("GỬI BÁO LỖI / CHẨN ĐOÁN",teal){sendDiagnostic()},matchWrap());body.addView(section("Thiết bị"));body.addView(info("Android ${Build.VERSION.RELEASE} • ${Build.MANUFACTURER} ${Build.MODEL}"));body.addView(gap(14));body.addView(primary("ĐĂNG XUẤT",red){api.call("logout"){runOnUiThread{finishAffinity()}}},matchWrap());attach(root,body)
+        val root=baseRoot("CÀI ĐẶT");val body=body();body.addView(section("Tài khoản"));body.addView(listCard("$name • ${roleText(role)}","Tài khoản: $login${if(position.isBlank())"" else " • Vị trí: $position"}"));body.addView(gap(7));body.addView(primary("ĐỔI MẬT KHẨU",navy){changePasswordDialog()},matchWrap());if(isAdmin()){body.addView(gap(7));body.addView(primary("QUẢN LÝ TÀI KHOẢN",blue){accountManager()},matchWrap())};body.addView(section("Đồng bộ / dữ liệu"));val sync=info("Đang đọc trạng thái Google Sheet...");body.addView(sync,matchWrap());api.call("sync_status"){r->runOnUiThread{if(r.ok){val j=r.json?:JSONObject();sync.text="Google Sheet rev ${j.optLong("server_seq")} • Master rev ${j.optLong("master_revision")} • cache máy rev ${MasterDataCache.revision(this@OperationsActivity)}"}else sync.text="Không đọc được trạng thái Google Sheet"}};body.addView(section("Cập nhật"));body.addView(info("${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}\nTự kiểm tra phiên bản mới: BẬT. App kiểm tra khi mở/foreground và tự hiện thông báo cập nhật."));body.addView(section("Nhật ký"));body.addView(primary("GỬI BÁO LỖI / CHẨN ĐOÁN",teal){sendDiagnostic()},matchWrap());body.addView(section("Thiết bị"));body.addView(info("Android ${Build.VERSION.RELEASE} • ${Build.MANUFACTURER} ${Build.MODEL}"));body.addView(gap(14));body.addView(primary("ĐĂNG XUẤT",red){api.call("logout"){runOnUiThread{api.clearSession();finishAffinity()}}},matchWrap());attach(root,body)
     }
 
     private fun changePasswordDialog(){
@@ -252,7 +252,7 @@ class OperationsActivity : Activity() {
     private fun attach(root:LinearLayout,body:LinearLayout){root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setContentView(host(root))}
     private fun appBar(title:String)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(9),dp(7),dp(10),dp(7));addView(txt("‹",31f,Color.WHITE,false).apply{gravity=Gravity.CENTER;setOnClickListener{navigateBack()}},size(dp(42),dp(45)));addView(txt(title,17f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("● SYNC",9.5f,Color.rgb(218,229,248),true).apply{gravity=Gravity.CENTER;setPadding(dp(8),dp(5),dp(8),dp(5))};addView(syncText,size(dp(86),dp(36)))}
 
-    private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){AlertDialog.Builder(this).setTitle("Phiên đã hết hạn").setMessage("Quay lại màn hình đăng nhập.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}
+    private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}
     private fun showError(raw:String){val msg=when{raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"MNV đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"MNV không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};AlertDialog.Builder(this).setTitle("Không thực hiện được").setMessage(msg).setPositiveButton("OK",null).show()}
 
     private fun employeeCard(e:JSONObject)=column(surface).apply{setPadding(dp(13),dp(11),dp(13),dp(11));background=outlineBg(surface,9);addView(txt("${e.optString("mnv")} • ${e.optString("full_name")}",15f,navy,true));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}",10.5f,ink,false));addView(txt("${dash(e.optString("department"))} • Site ${dash(e.optString("site"))} • Kho ${dash(e.optString("warehouse"))}",10f,muted,false))}

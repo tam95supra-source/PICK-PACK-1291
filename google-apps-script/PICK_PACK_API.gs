@@ -40,7 +40,7 @@ function doPost(e) {
     const auth = ppAuthenticate_(body);
     if (!auth) return ppJson_({ok:false,error:'UNAUTHORIZED'}, 401);
 
-    if (action === 'logout') return ppJson_({ok:true});
+    if (action === 'logout') return ppJson_(ppLogout_(auth));
     if (action === 'password_challenge') return ppJson_(ppPasswordChallenge_(auth));
     if (action === 'change_password') return ppJson_(ppChangePassword_(auth, body));
     if (action === 'employee_context') return ppJson_(ppEmployeeContext_(body));
@@ -119,7 +119,7 @@ function ppJson_(obj) {
 
 function ppHealth_() {
   const rows = ppValues_(PP.STAFF);
-  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.2',sheet_read:rows.length>1,business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
+  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.2',sheet_read:rows.length>1,auth_session_model:'SINGLE_ACTIVE_DEVICE_V1',business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
 }
 
 function ppSs_() { return SpreadsheetApp.openById(PP.SHEET_ID); }
@@ -427,15 +427,18 @@ function ppLoginChallenge_(body) {
 function ppLogin_(body) {
   const login=String(body.login_id||'').trim(), id=String(body.challenge_id||''), proof=String(body.proof||''), c=ppTakeChallenge_(id,'LOGIN',login), a=ppAccount_(login), p=a?ppVerifierParts_(a.verifier):null;
   if(!c||!a||a.status!=='ACTIVE'||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'INVALID_CREDENTIALS'};
-  const exp=Date.now()+12*60*60*1000, token=ppMakeToken_(a,exp);
-  return {ok:true,token:token,expires_at:new Date(exp).toISOString(),account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||''}};
+  const session=ppBindSession_(a.login_id,ppDeviceId_(body)), token=ppMakeToken_(a,session);
+  return {ok:true,token:token,account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||''},session:{issued_at:session.issued_at,device_label:String(body._device_label||'').slice(0,120)}};
 }
 function ppPasswordChallenge_(auth) {
   const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:auth.login_id,purpose:'PASSWORD',challenge:challenge}),120); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
 }
 function ppChangePassword_(auth,body) {
   const id=String(body.challenge_id||''),proof=String(body.proof||''),newVerifier=String(body.new_verifier||''),c=ppTakeChallenge_(id,'PASSWORD',auth.login_id),p=ppVerifierParts_(auth.verifier),np=ppVerifierParts_(newVerifier); if(!c||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'CURRENT_PASSWORD_INVALID'}; if(!np)return {ok:false,error:'PASSWORD_POLICY'};
-  ppSheet_(PP.ADMIN).getRange(auth.row,2).setValue(newVerifier); ppEnsureAdminHeaders_(); ppSheet_(PP.ADMIN).getRange(auth.row,10).setValue(auth.login_id); ppSheet_(PP.ADMIN).getRange(auth.row,11).setValue(ppNowVisible_()); ppBumpRevision_(); ppBumpMasterRevision_(); return {ok:true};
+  ppSheet_(PP.ADMIN).getRange(auth.row,2).setValue(newVerifier); ppEnsureAdminHeaders_(); ppSheet_(PP.ADMIN).getRange(auth.row,10).setValue(auth.login_id); ppSheet_(PP.ADMIN).getRange(auth.row,11).setValue(ppNowVisible_()); ppBumpRevision_(); ppBumpMasterRevision_();
+  const fresh=ppAccount_(auth.login_id), session=ppActiveSession_(auth.login_id);
+  const token=(fresh&&session&&session.session_id===auth._session_id&&session.device_id===auth._device_id)?ppMakeToken_(fresh,session):'';
+  return {ok:true,token:token,account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||''}:null};
 }
 function ppAccountList_(auth) {
   if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
@@ -451,18 +454,28 @@ function ppAccountUpsert_(auth,body) {
   ppBumpRevision_(); ppBumpMasterRevision_(); return {ok:true};
 }
 function ppAccountStatus_(auth,body) {
-  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'}; const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),t=ppAccount_(login); if(!t||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'}; if(t.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&t.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'}; ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);sh.getRange(t.row,9).setValue(status);sh.getRange(t.row,10).setValue(auth.login_id);sh.getRange(t.row,11).setValue(ppNowVisible_());ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'}; const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),t=ppAccount_(login); if(!t||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'}; if(t.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&t.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'}; ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);sh.getRange(t.row,9).setValue(status);sh.getRange(t.row,10).setValue(auth.login_id);sh.getRange(t.row,11).setValue(ppNowVisible_());if(status==='DISABLED')ppClearActiveSessionForLogin_(login);ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
 }
 
 function ppAuthenticate_(body) {
-  const token=String(body._token||''); const parts=token.split('.'); if(parts.length!==2)return null;
+  const token=String(body._token||''), parts=token.split('.'); if(parts.length!==2)return null;
   const secret=ppTokenSecret_(), expected=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(parts[0]).getBytes(),secret)); if(!ppSafeEq_(expected,parts[1]))return null;
-  let payload; try{payload=JSON.parse(Utilities.newBlob(ppB64uDecode_(parts[0])).getDataAsString());}catch(_){return null;} if(!payload||Number(payload.e||0)<Date.now())return null;
-  const a=ppAccount_(String(payload.l||'')); if(!a||a.status!=='ACTIVE'||a.role!==payload.r||ppSha256Hex_(a.verifier)!==payload.v)return null; return a;
+  let payload; try{payload=JSON.parse(Utilities.newBlob(ppB64uDecode_(parts[0])).getDataAsString());}catch(_){return null;}
+  const a=payload?ppAccount_(String(payload.l||'')):null; if(!a||a.status!=='ACTIVE'||a.role!==payload.r||ppSha256Hex_(a.verifier)!==payload.v)return null;
+  if(payload.s){const active=ppActiveSession_(a.login_id);if(!active||active.session_id!==payload.s||active.device_id!==payload.d)return null;}
+  else {if(Number(payload.e||0)<Date.now()||ppActiveSession_(a.login_id))return null;}
+  return Object.assign({},a,{_session_id:String(payload.s||''),_device_id:String(payload.d||'')});
 }
-function ppMakeToken_(a,exp) {
-  const payload=ppB64u_(Utilities.newBlob(JSON.stringify({l:a.login_id,r:a.role,e:exp,v:ppSha256Hex_(a.verifier)})).getBytes()), sig=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(payload).getBytes(),ppTokenSecret_())); return payload+'.'+sig;
+function ppMakeToken_(a,session) {
+  const raw={l:a.login_id,r:a.role,v:ppSha256Hex_(a.verifier),s:session.session_id,d:session.device_id};
+  const payload=ppB64u_(Utilities.newBlob(JSON.stringify(raw)).getBytes()),sig=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(payload).getBytes(),ppTokenSecret_()));return payload+'.'+sig;
 }
+function ppSessionKey_(login){return 'PP_ACTIVE_SESSION_'+ppSha256Hex_(String(login||'')).slice(0,48);}
+function ppActiveSession_(login){const raw=PropertiesService.getScriptProperties().getProperty(ppSessionKey_(login));if(!raw)return null;try{return JSON.parse(raw);}catch(_){return null;}}
+function ppDeviceId_(body){const direct=String(body._device_id||'').trim().slice(0,180);if(direct)return direct;return 'legacy-'+ppSha256Hex_(String(body._device_label||'unknown')).slice(0,48);}
+function ppBindSession_(login,deviceId){const lock=LockService.getScriptLock();lock.waitLock(10000);try{const cur=ppActiveSession_(login);const session={session_id:(cur&&cur.device_id===deviceId&&cur.session_id)?cur.session_id:Utilities.getUuid(),device_id:deviceId,issued_at:ppNowIso_()};PropertiesService.getScriptProperties().setProperty(ppSessionKey_(login),JSON.stringify(session));return session;}finally{lock.releaseLock();}}
+function ppClearActiveSessionForLogin_(login){PropertiesService.getScriptProperties().deleteProperty(ppSessionKey_(login));}
+function ppLogout_(auth){const lock=LockService.getScriptLock();lock.waitLock(10000);try{const cur=ppActiveSession_(auth.login_id);if(cur&&cur.session_id===auth._session_id&&cur.device_id===auth._device_id)ppClearActiveSessionForLogin_(auth.login_id);return {ok:true};}finally{lock.releaseLock();}}
 function ppTokenSecret_() {const p=PropertiesService.getScriptProperties();let v=p.getProperty('PP_TOKEN_SECRET');if(!v){v=ppB64u_(ppRandom_(32));p.setProperty('PP_TOKEN_SECRET',v);}return ppB64uDecode_(v);}
 function ppTakeChallenge_(id,purpose,login) {if(!id)return null;const cache=CacheService.getScriptCache(),key='PP_CHAL_'+id,raw=cache.get(key);cache.remove(key);if(!raw)return null;try{const c=JSON.parse(raw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}}
 function ppVerifyProof_(keyB64,challenge,proof) {try{const expected=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(challenge).getBytes(),ppB64uDecode_(keyB64)));return ppSafeEq_(expected,proof);}catch(_){return false;}}

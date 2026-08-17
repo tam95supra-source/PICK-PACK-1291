@@ -35,7 +35,7 @@ class MainActivity : Activity() {
     private val muted = Color.rgb(96, 108, 124)
     private val line = Color.rgb(218, 225, 234)
 
-    private val api = BetaApiClient()
+    private val api by lazy { BetaApiClient(applicationContext) }
     private var screen = "LOGIN"
     private var accountLogin = ""
     private var accountName = ""
@@ -65,7 +65,7 @@ class MainActivity : Activity() {
         }
         body.addView(gap(6))
         body.addView(ImageView(this).apply {
-            setImageResource(R.drawable.app_icon)
+            setImageResource(R.drawable.owner_launcher)
             scaleType = ImageView.ScaleType.CENTER_CROP
         }, size(dp(92), dp(92)))
         body.addView(gap(7))

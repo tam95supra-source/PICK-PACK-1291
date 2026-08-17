@@ -37,9 +37,9 @@ class FullBetaActivity : Activity() {
     private val muted = Color.rgb(96, 108, 124)
     private val line = Color.rgb(218, 225, 234)
 
-    private val api = BetaApiClient()
-    private val syncApi = BetaApiClient()
-    private val cacheApi = BetaApiClient()
+    private val api by lazy { BetaApiClient(applicationContext) }
+    private val syncApi by lazy { BetaApiClient(applicationContext) }
+    private val cacheApi by lazy { BetaApiClient(applicationContext) }
     private var accountLogin = ""
     private var accountName = ""
     private var accountRole = ""
@@ -75,7 +75,7 @@ class FullBetaActivity : Activity() {
         LocalLogManager.installCrashHandler(this)
         LocalLogManager.createDailyIfNeeded(this)
         MasterDataCache.hydrate(this)
-        login()
+        restoreOrLogin()
     }
 
     override fun onStart() {
@@ -89,15 +89,25 @@ class FullBetaActivity : Activity() {
         super.onStop()
     }
 
+    private fun restoreOrLogin() {
+        val saved = api.restoredAccount()
+        if (api.token.isNullOrBlank() || saved == null) { login(); return }
+        accountLogin = saved.optString("login_id")
+        accountName = saved.optString("display_name", accountLogin)
+        accountRole = saved.optString("role", "USER")
+        accountPosition = saved.optString("position", "")
+        dashboard()
+        foregroundSync.start()
+    }
+
     private fun login() {
         foregroundSync.stop()
-        api.clearToken()
         liveEmployeeMnv = ""
         currentScreen = "LOGIN"
         accountLogin = ""; accountName = ""; accountRole = ""; accountPosition = ""
         val body = column(bg).apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(22), dp(24), dp(22), dp(58)) }
         body.addView(gap(6))
-        body.addView(ImageView(this).apply { setImageResource(R.drawable.app_icon); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(88), dp(88)))
+        body.addView(ImageView(this).apply { setImageResource(R.drawable.owner_launcher); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(88), dp(88)))
         body.addView(gap(7))
         body.addView(txt("PICK PACK 1291", 21f, navy, true).center())
         body.addView(txt("SUPRA DC HƯNG YÊN", 10.5f, navy, true).center())
@@ -284,7 +294,7 @@ class FullBetaActivity : Activity() {
     private fun navigateBack(){when(currentScreen){"EMPLOYEE"->employeeScan();"SCAN"->dashboard();"DASHBOARD"->finish();else->dashboard()}}
     private fun refreshMasterCache(){cacheApi.call("master_snapshot"){r->if(r.ok&&r.json!=null)MasterDataCache.save(applicationContext,r.json)}}
     private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){if(currentScreen!="LOGIN"&&currentScreen!="DASHBOARD")navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(27)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(23),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION") val t=i.systemWindowInsetTop;@Suppress("DEPRECATION") val b=i.systemWindowInsetBottom;top=t;bottom=b};v.setPadding(0,top+dp(7),0,bottom+dp(3));i};root.requestApplyInsets();return root}
-    private fun sessionExpired(){AlertDialog.Builder(this).setTitle("Phiên đã hết hạn").setMessage("Đăng nhập lại để tiếp tục.").setCancelable(false).setPositiveButton("ĐĂNG NHẬP"){_,_->login()}.show()}
+    private fun sessionExpired(){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản này đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi. Đăng nhập lại để tiếp tục.").setCancelable(false).setPositiveButton("ĐĂNG NHẬP"){_,_->login()}.show()}
     private fun showError(raw:String){val msg=when{raw.contains("INVALID_CREDENTIALS")->"Sai tài khoản hoặc mật khẩu.";raw.contains("LOGIN_TEMP_LOCKED")->"Tài khoản tạm khóa 15 phút do đăng nhập sai nhiều lần.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy MNV.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Kiểm tra lại.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack đã được dùng trong ngày.";raw.contains("UNAUTHORIZED")->"Phiên đăng nhập đã hết hạn.";else->raw};AlertDialog.Builder(this).setTitle("Không thực hiện được").setMessage(msg).setPositiveButton("OK",null).show()}
     private fun roleText(r:String)=when(r){"SUPERADMIN"->"Superadmin";"ADMIN"->"Admin";"USER"->"Điều phối";else->BuildConfig.CHANNEL}
     private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Bangkok")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}catch(_:Throwable){v}}

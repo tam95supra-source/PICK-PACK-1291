@@ -1,6 +1,8 @@
 package vn.pickpack1291.app.beta
 
+import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,6 +15,7 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import java.util.concurrent.Executors
+import java.util.UUID
 
 /**
  * Pick Pack transport for the approved architecture:
@@ -21,15 +24,66 @@ import java.util.concurrent.Executors
  * No Supabase/database endpoint is used here. Password plaintext never leaves
  * the Android process: authentication uses PBKDF2 + challenge/HMAC proof.
  */
-class BetaApiClient {
+class BetaApiClient(context: Context) {
     data class Result(val ok: Boolean, val code: Int, val json: JSONObject?, val error: String?)
 
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val executor = Executors.newSingleThreadExecutor()
+    private val deviceId: String by lazy {
+        val androidId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID).orEmpty()
+        if (androidId.isNotBlank() && androidId != "9774d56d682e549c") {
+            "android-" + sha256Text("PickPack1291|$androidId")
+        } else {
+            val saved = prefs.getString(KEY_DEVICE_ID, null)
+            val id = saved ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }
+            "install-$id"
+        }
+    }
+
+    init {
+        synchronized(sessionLock) {
+            if (sharedToken == null) sharedToken = prefs.getString(KEY_TOKEN, null)
+        }
+    }
 
     val token: String?
         get() = sharedToken
 
-    fun clearToken() { sharedToken = null }
+    fun clearToken() = clearSession()
+
+    fun clearSession() {
+        synchronized(sessionLock) { sharedToken = null }
+        prefs.edit().remove(KEY_TOKEN).remove(KEY_LOGIN).remove(KEY_NAME).remove(KEY_ROLE).remove(KEY_POSITION).apply()
+    }
+
+    fun restoredAccount(): JSONObject? {
+        if (token.isNullOrBlank()) return null
+        val login = prefs.getString(KEY_LOGIN, "").orEmpty()
+        if (login.isBlank()) return null
+        return JSONObject().apply {
+            put("login_id", login)
+            put("display_name", prefs.getString(KEY_NAME, login).orEmpty().ifBlank { login })
+            put("role", prefs.getString(KEY_ROLE, "USER").orEmpty().ifBlank { "USER" })
+            put("position", prefs.getString(KEY_POSITION, "").orEmpty())
+        }
+    }
+
+    private fun persistSession(newToken: String, account: JSONObject?) {
+        synchronized(sessionLock) { sharedToken = newToken }
+        val e = prefs.edit().putString(KEY_TOKEN, newToken)
+        if (account != null) {
+            val login = account.optString("login_id")
+            if (login.isNotBlank()) e.putString(KEY_LOGIN, login)
+            e.putString(KEY_NAME, account.optString("display_name", login))
+            e.putString(KEY_ROLE, account.optString("role", "USER"))
+            e.putString(KEY_POSITION, account.optString("position", ""))
+        }
+        e.apply()
+    }
+
+    private fun sha256Text(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     fun login(loginId: String, password: String, callback: (Result) -> Unit) {
         executor.execute {
@@ -54,7 +108,10 @@ class BetaApiClient {
                     put("challenge_id", j.getString("challenge_id"))
                     put("proof", proof)
                 }, authenticated = false)
-                if (result.ok) sharedToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+                if (result.ok) {
+                    val newToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+                    if (newToken != null) persistSession(newToken, result.json.optJSONObject("account"))
+                }
                 callback(result)
             } catch (t: Throwable) {
                 callback(failure(t))
@@ -70,7 +127,11 @@ class BetaApiClient {
                     "account_upsert" -> accountUpsert(payload)
                     else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
                 }
-                if (result.code == 401) sharedToken = null
+                if (result.ok) {
+                    val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+                    if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
+                }
+                if (result.code == 401) clearSession()
                 callback(result)
             } catch (t: Throwable) {
                 callback(failure(t))
@@ -135,6 +196,7 @@ class BetaApiClient {
         val body = JSONObject(payload.toString()).apply {
             put("_app_version", BuildConfig.VERSION_NAME)
             put("_app_channel", BuildConfig.CHANNEL)
+            put("_device_id", deviceId)
             put("_device_label", "${Build.MANUFACTURER} ${Build.MODEL}")
             if (authenticated) {
                 val t = sharedToken ?: return Result(false, 401, JSONObject().put("ok", false).put("error", "UNAUTHORIZED"), "UNAUTHORIZED")
@@ -272,6 +334,14 @@ class BetaApiClient {
 
     companion object {
         @Volatile private var sharedToken: String? = null
+        private val sessionLock = Any()
+        private const val PREFS_NAME = "pick_pack_auth_session_v2"
+        private const val KEY_TOKEN = "token"
+        private const val KEY_LOGIN = "login_id"
+        private const val KEY_NAME = "display_name"
+        private const val KEY_ROLE = "role"
+        private const val KEY_POSITION = "position"
+        private const val KEY_DEVICE_ID = "device_id"
         private const val RELEASES_URL = "https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30"
     }
 }
