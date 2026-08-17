@@ -1,0 +1,47 @@
+name: Apply Fixed Signing Beta2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/apply_fixed_signing_beta2.py'
+      - 'scripts/apply_fixed_signing_beta2_runner.py'
+      - '.github/workflows/apply-fixed-signing-beta2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply fixed signing and Beta2 patch
+        run: python3 scripts/apply_fixed_signing_beta2_runner.py
+
+      - name: Verify patched release workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 4' app/build.gradle.kts
+          grep -q 'versionName = "0.3.0-beta.2"' app/build.gradle.kts
+          grep -q 'id-token: write' .github/workflows/beta-preview.yml
+          grep -q 'pick-pack-ci-signing' .github/workflows/beta-preview.yml
+          grep -q 'assembleBetaRelease' .github/workflows/beta-preview.yml
+          grep -q 'd180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e' .github/workflows/beta-preview.yml
+          git diff --check
+
+      - name: Commit release configuration atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'pick-pack-1291-ci'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/build.gradle.kts .github/workflows/beta-preview.yml
+          git commit -m 'release: fixed signing and public beta 0.3.0-beta.2'
+          git push origin HEAD:main
