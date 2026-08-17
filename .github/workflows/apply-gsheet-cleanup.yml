@@ -1,0 +1,34 @@
+name: Apply GSheet Architecture Cleanup
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/apply-gsheet-cleanup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply approved architecture cleanup
+        run: python3 scripts/apply_gsheet_cleanup.py
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes'
+            exit 0
+          fi
+          git commit -m 'refactor: remove Supabase runtime artifacts'
+          git push origin HEAD:main
