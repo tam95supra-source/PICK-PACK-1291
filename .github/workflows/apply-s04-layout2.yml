@@ -1,0 +1,630 @@
+name: Apply S04 Layout 2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/apply-s04-layout2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply S04 source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def p(path): return Path(path)
+          def read(path): return p(path).read_text(encoding='utf-8')
+          def write(path, value): p(path).write_text(value, encoding='utf-8')
+          def repl(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'MISSING REPLACEMENT: {label}')
+              return text.replace(old, new, 1)
+          def between(text, start, end, new, label):
+              a=text.find(start)
+              b=text.find(end, a+len(start)) if a>=0 else -1
+              if a<0 or b<0:
+                  raise SystemExit(f'MISSING RANGE: {label}')
+              return text[:a]+new+text[b:]
+
+          # ---------- shared theme ----------
+          write('app/src/main/java/vn/pickpack1291/app/beta/ThemeManager.kt', r'''package vn.pickpack1291.app.beta
+
+import android.content.Context
+import android.graphics.Color
+
+object ThemeManager {
+    data class Palette(val primary:Int,val dark:Int,val soft:Int,val background:Int,val line:Int)
+    private const val PREFS="pp1291_theme"
+    private const val KEY="theme_index"
+    private val palettes=arrayOf(
+        Palette(Color.rgb(37,99,235),Color.rgb(30,64,175),Color.rgb(239,246,255),Color.rgb(248,250,252),Color.rgb(219,228,242)),
+        Palette(Color.rgb(13,148,136),Color.rgb(15,118,110),Color.rgb(236,253,250),Color.rgb(248,250,250),Color.rgb(214,229,226)),
+        Palette(Color.rgb(34,160,72),Color.rgb(21,128,61),Color.rgb(240,253,244),Color.rgb(249,251,249),Color.rgb(218,232,221)),
+        Palette(Color.rgb(234,112,18),Color.rgb(194,65,12),Color.rgb(255,247,237),Color.rgb(252,250,248),Color.rgb(235,224,213)),
+        Palette(Color.rgb(220,55,55),Color.rgb(185,28,28),Color.rgb(254,242,242),Color.rgb(252,249,249),Color.rgb(236,220,220)),
+        Palette(Color.rgb(124,58,237),Color.rgb(91,33,182),Color.rgb(245,243,255),Color.rgb(250,249,252),Color.rgb(229,222,240)),
+        Palette(Color.rgb(100,116,139),Color.rgb(51,65,85),Color.rgb(241,245,249),Color.rgb(248,250,252),Color.rgb(226,232,240))
+    )
+    fun selectedIndex(context:Context)=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getInt(KEY,1).coerceIn(0,palettes.lastIndex)
+    fun select(context:Context,index:Int){context.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().putInt(KEY,index.coerceIn(0,palettes.lastIndex)).apply()}
+    fun palette(context:Context)=palettes[selectedIndex(context)]
+    fun primary(context:Context)=palette(context).primary
+    fun primaryDark(context:Context)=palette(context).dark
+    fun soft(context:Context)=palette(context).soft
+    fun background(context:Context)=palette(context).background
+    fun line(context:Context)=palette(context).line
+    fun swatches()=palettes.map{it.primary}
+}
+''')
+
+          # ---------- top transient notification queue ----------
+          write('app/src/main/java/vn/pickpack1291/app/beta/TopNotice.kt', r'''package vn.pickpack1291.app.beta
+
+import android.app.Activity
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
+
+object TopNotice {
+    enum class Kind { INFO, SUCCESS, WARNING, ERROR }
+    private const val TAG="PP_TOP_NOTICE_STACK"
+    fun show(activity:Activity,message:String,kind:Kind=Kind.INFO){
+        activity.runOnUiThread{
+            val host=activity.findViewById<ViewGroup>(android.R.id.content) ?: return@runOnUiThread
+            var stack=host.findViewWithTag<LinearLayout>(TAG)
+            if(stack==null){
+                stack=LinearLayout(activity).apply{tag=TAG;orientation=LinearLayout.VERTICAL;setPadding(dp(activity,10),dp(activity,8),dp(activity,10),0);elevation=dp(activity,18).toFloat()}
+                host.addView(stack,FrameLayout.LayoutParams(-1,-2,Gravity.TOP))
+            }
+            while(stack.childCount>=3)stack.removeViewAt(0)
+            val palette=ThemeManager.palette(activity)
+            val (fg,bg,prefix)=when(kind){
+                Kind.ERROR->Triple(Color.rgb(153,27,27),Color.rgb(254,226,226),"! ")
+                Kind.WARNING->Triple(Color.rgb(146,64,14),Color.rgb(255,237,213),"! ")
+                Kind.SUCCESS->Triple(palette.dark,palette.soft,"✓ ")
+                Kind.INFO->Triple(palette.dark,palette.soft,"ⓘ ")
+            }
+            val item=TextView(activity).apply{
+                text=prefix+message;textSize=11.5f;setTextColor(fg);typeface=Typeface.DEFAULT_BOLD
+                setPadding(dp(activity,12),dp(activity,9),dp(activity,12),dp(activity,9));maxLines=3
+                background=GradientDrawable().apply{setColor(bg);cornerRadius=dp(activity,8).toFloat()}
+            }
+            stack.addView(item,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(activity,5)})
+            item.postDelayed({
+                val parent=item.parent as? ViewGroup ?: return@postDelayed
+                parent.removeView(item)
+                if(parent.childCount==0)(parent.parent as? ViewGroup)?.removeView(parent)
+            },3000)
+        }
+    }
+    private fun dp(a:Activity,v:Int)=(v*a.resources.displayMetrics.density).toInt()
+}
+''')
+
+          # ---------- local app operation history ----------
+          write('app/src/main/java/vn/pickpack1291/app/beta/AppHistory.kt', r'''package vn.pickpack1291.app.beta
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+
+object AppHistory {
+    private const val PREFS="pp1291_app_history"
+    private const val KEY="items"
+    private const val LIMIT=200
+    @Synchronized fun record(context:Context,action:String,synced:Boolean,detail:String=""){
+        val prefs=context.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
+        val old=runCatching{JSONArray(prefs.getString(KEY,"[]"))}.getOrDefault(JSONArray())
+        val out=JSONArray().put(JSONObject().put("at",System.currentTimeMillis()).put("action",action).put("synced",synced).put("detail",detail.take(180)))
+        for(i in 0 until minOf(old.length(),LIMIT-1))out.put(old.optJSONObject(i)?:continue)
+        prefs.edit().putString(KEY,out.toString()).apply()
+    }
+    fun items(context:Context):JSONArray=runCatching{JSONArray(context.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(KEY,"[]"))}.getOrDefault(JSONArray())
+    fun label(action:String)=when(action){
+        "enter"->"Vào ca";"exit"->"Ra ca";"resource_change"->"Đổi tài nguyên";"labor_start"->"Bắt đầu công nhật";"labor_finish"->"Hoàn thành công nhật";
+        "change_password"->"Đổi mật khẩu";"change_email"->"Đổi mail";"account_upsert"->"Cập nhật tài khoản";"account_status"->"Đổi trạng thái tài khoản";
+        "staff_upsert"->"Thêm / sửa nhân sự";"staff_delete"->"Xóa nhân sự";"diagnostic_log"->"Gửi log";else->action
+    }
+}
+''')
+
+          # ---------- log ACK lifecycle ----------
+          t=read('app/src/main/java/vn/pickpack1291/app/beta/LocalLogManager.kt')
+          t=repl(t,
+'''    fun uploadAutomaticPending(context: Context, api: BetaApiClient) {
+        val files = logDir(context).listFiles()?.filter { it.name.startsWith("CRASH_") || it.name.startsWith("ANDROID_DAILY_") }?.sortedBy { it.lastModified() }.orEmpty()
+        uploadNext(api, files, 0)
+    }
+''',
+'''    fun uploadAutomaticPending(context: Context, api: BetaApiClient) {
+        val files = logDir(context).listFiles()?.filter { it.name.startsWith("CRASH_") || it.name.startsWith("ANDROID_DAILY_") }?.sortedBy { it.lastModified() }.orEmpty()
+        uploadNext(api, files, 0)
+    }
+
+    fun pendingCount(context: Context): Int = logDir(context).listFiles()?.count { it.isFile } ?: 0
+''','log pending count')
+          start='    private fun uploadFile(api: BetaApiClient, file: File, type: String, callback: (BetaApiClient.Result) -> Unit) {'
+          end='    private fun StringBuilder.appendCommon(context: Context) {'
+          new=r'''    private fun uploadFile(api: BetaApiClient, file: File, type: String, callback: (BetaApiClient.Result) -> Unit) {
+        val eventId = UUID.randomUUID().toString()
+        val payload = JSONObject().put("text", runCatching { file.readText().take(60000) }.getOrDefault("LOG_READ_FAILED")).put("file_name", file.name)
+        api.call("diagnostic_log", JSONObject()
+            .put("event_id", eventId)
+            .put("log_type", type)
+            .put("channel", BuildConfig.CHANNEL)
+            .put("app_version", BuildConfig.VERSION_NAME)
+            .put("payload", payload)) { result ->
+            val ack = result.json?.optString("ack_event_id").orEmpty()
+            if (result.ok && ack == eventId) callback(result)
+            else callback(BetaApiClient.Result(false, if(result.code>0)result.code else 502, result.json, result.error ?: "LOG_ACK_MISMATCH"))
+        }
+    }
+
+'''
+          t=between(t,start,end,new,'log ack upload')
+          write('app/src/main/java/vn/pickpack1291/app/beta/LocalLogManager.kt',t)
+
+          # ---------- API client email persistence + history ----------
+          t=read('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt')
+          t=repl(t,'.remove(KEY_ROLE).remove(KEY_POSITION).apply()','.remove(KEY_ROLE).remove(KEY_POSITION).remove(KEY_EMAIL).apply()','clear email')
+          t=repl(t,'            put("position", prefs.getString(KEY_POSITION, "").orEmpty())\n','            put("position", prefs.getString(KEY_POSITION, "").orEmpty())\n            put("email", prefs.getString(KEY_EMAIL, "").orEmpty())\n','restore email')
+          t=repl(t,'            e.putString(KEY_POSITION, account.optString("position", ""))\n','            e.putString(KEY_POSITION, account.optString("position", ""))\n            e.putString(KEY_EMAIL, account.optString("email", ""))\n','persist email')
+          start='    fun call(action: String, payload: JSONObject = JSONObject(), callback: (Result) -> Unit) {'
+          end='    fun health(callback: (Result) -> Unit) {'
+          new=r'''    fun call(action: String, payload: JSONObject = JSONObject(), callback: (Result) -> Unit) {
+        executor.execute {
+            try {
+                val result = when (action) {
+                    "change_password" -> changePassword(payload)
+                    "account_upsert" -> accountUpsert(payload)
+                    else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
+                }
+                if (result.ok) {
+                    val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+                    if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
+                }
+                if (result.code == 401) clearSession()
+                val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
+                if(action in tracked) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())
+                callback(result)
+            } catch (t: Throwable) {
+                val result=failure(t)
+                val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
+                if(action in tracked) AppHistory.record(appContext,action,false,result.error.orEmpty())
+                callback(result)
+            }
+        }
+    }
+
+'''
+          t=between(t,start,end,new,'api call history')
+          t=repl(t,'        private const val KEY_POSITION = "position"\n','        private const val KEY_POSITION = "position"\n        private const val KEY_EMAIL = "email"\n','email key')
+          write('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt',t)
+
+          # ---------- FullBeta launcher UI ----------
+          path='app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt'; t=read(path)
+          old='''    private val navy = Color.rgb(15, 78, 74)\n    private val blue = Color.rgb(13, 148, 136)\n    private val red = Color.rgb(218, 45, 53)\n    private val green = Color.rgb(36, 153, 85)\n    private val orange = Color.rgb(217, 119, 6)\n    private val teal = Color.rgb(15, 118, 110)\n    private val bg = Color.rgb(247, 250, 249)\n    private val surface = Color.WHITE\n    private val ink = Color.rgb(24, 44, 42)\n    private val muted = Color.rgb(100, 116, 139)\n    private val line = Color.rgb(214, 229, 226)\n'''
+          new='''    private val navy:Int get() = ThemeManager.primaryDark(this)\n    private val blue:Int get() = ThemeManager.primary(this)\n    private val red = Color.rgb(218, 45, 53)\n    private val green = Color.rgb(36, 153, 85)\n    private val orange = Color.rgb(217, 119, 6)\n    private val teal:Int get() = ThemeManager.primary(this)\n    private val bg:Int get() = ThemeManager.background(this)\n    private val surface = Color.WHITE\n    private val ink = Color.rgb(24, 44, 42)\n    private val muted = Color.rgb(100, 116, 139)\n    private val line:Int get() = ThemeManager.line(this)\n'''
+          t=repl(t,old,new,'full theme')
+          t=repl(t,'    private var accountPosition = ""\n','    private var accountPosition = ""\n    private var accountEmail = ""\n','full email var')
+          t=repl(t,'        accountPosition = saved.optString("position", "")\n        dashboard()\n','        accountPosition = saved.optString("position", "")\n        accountEmail = saved.optString("email", "")\n        LocalLogManager.uploadAutomaticPending(this, api)\n        dashboard()\n','restore logs and email')
+          t=repl(t,'        accountLogin = ""; accountName = ""; accountRole = ""; accountPosition = ""\n','        accountLogin = ""; accountName = ""; accountRole = ""; accountPosition = ""; accountEmail = ""\n','login reset email')
+          t=repl(t,'                accountPosition = a.optString("position", "")\n','                accountPosition = a.optString("position", "")\n                accountEmail = a.optString("email", "")\n','login email')
+          t=t.replace('syncText?.text = "●  GOOGLE SHEET LIVE • Rev ${status.serverSeq}"','syncText?.text = "✓ Online • R${status.serverSeq}"')
+          t=t.replace('syncText?.text = "●  Mất kết nối Google Sheet"','syncText?.text = "! Offline"')
+          old_block='''                    AlertDialog.Builder(this@FullBetaActivity)\n                        .setTitle("Đã tiếp nhận")\n                        .setMessage("Nếu tài khoản hợp lệ, mật khẩu mới đã được gửi tới quản trị viên. Liên hệ quản trị viên để nhận mật khẩu mới.")\n                        .setPositiveButton("OK", null).show()\n'''
+          if old_block in t:
+              t=t.replace(old_block,'                    TopNotice.show(this@FullBetaActivity,"Nếu tài khoản hợp lệ, mật khẩu mới đã được gửi tới mail đã cấu hình.",TopNotice.Kind.SUCCESS)\n',1)
+          start='    private fun dashboard() {'; end='    private fun openModule(module: String, mnv: String = "") {'
+          new=r'''    private fun dashboard() {
+        currentScreen = "DASHBOARD"
+        liveEmployeeMnv = ""
+        val root=column(bg)
+        root.addView(appBar("PICK PACK 1291",false))
+        val body=column(bg).apply{setPadding(dp(12),dp(10),dp(12),dp(92))}
+        body.addView(txt("Nghiệp vụ",15f,ink,true));body.addView(txt("${accountName.ifBlank{accountLogin}} • ${roleText(accountRole)}",9.8f,muted,false));body.addView(gap(9))
+        val hero=column(surface).apply{
+            setPadding(dp(14),dp(14),dp(14),dp(14));background=outlineBg(surface,12);setOnClickListener{employeeScan()}
+            addView(row(surface).apply{
+                addView(txt("▣",27f,teal,true).apply{gravity=Gravity.CENTER},size(dp(52),dp(58)))
+                addView(column(surface).apply{addView(txt("QUÉT QR NHÂN SỰ",15f,teal,true));addView(txt("Quét hoặc nhập MNV, Enter/OK để xử lý",10f,muted,false))},LinearLayout.LayoutParams(0,-2,1f))
+                addView(txt("›",25f,teal,false).apply{gravity=Gravity.CENTER},size(dp(30),dp(58)))
+            },matchWrap())
+        }
+        body.addView(hero,matchWrap());body.addView(gap(8))
+        if(accountRole=="ADMIN"||accountRole=="SUPERADMIN") body.addView(menuRow("◉","Công nhật","Bắt đầu / hoàn thành công nhật") { openModule("LABOR") })
+        body.addView(menuRow("▥","Báo cáo nhân sự","Báo cáo vận hành theo ca / ngày") { openModule("REPORT") })
+        body.addView(menuRow("☷","Theo dõi ca","Phiên làm việc và công nhật hôm nay") { openModule("LISTS") })
+        body.addView(menuRow("↔","Tài nguyên","PDA, User Pick, Bàn Pack / User Pack") { openModule("RESOURCES") })
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f))
+        setScreen(root);refreshStatus()
+    }
+
+'''
+          t=between(t,start,end,new,'full dashboard')
+          t=t.replace('putExtra("position", accountPosition); putExtra("mnv", mnv)','putExtra("position", accountPosition); putExtra("email", accountEmail); putExtra("mnv", mnv)')
+          start='    private fun employeeScan() {'; end='    private fun loadEmployee(mnv: String, button: Button? = null) {'
+          new=r'''    private fun employeeScan() {
+        currentScreen = "SCAN"; liveEmployeeMnv = ""
+        val root=column(bg);root.addView(appBar("QUÉT QR NHÂN SỰ",true))
+        val body=column(bg).apply{setPadding(dp(16),dp(16),dp(16),dp(92))}
+        val mnv=mnvInput("Quét QR hoặc nhập MNV")
+        body.addView(labelled("Mã nhân viên",mnv));body.addView(gap(6))
+        body.addView(txt("Nhận Enter/OK từ PDA hoặc bàn phím để chạy ngay.",9.8f,muted,false))
+        var busy=false
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét MNV.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;loadEmployee(v);mnv.postDelayed({busy=false},600)}
+        bindScannerEnter(mnv){submit()}
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);mnv.requestFocus()
+    }
+
+'''
+          t=between(t,start,end,new,'full scan no button')
+          start='    private fun appBar(title:String,back:Boolean)='; end='    private fun fullCard('
+          new=r'''    private fun appBar(title:String,back:Boolean)=row(navy).apply{
+        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(6),dp(8),dp(6))
+        addView(txt(if(back)"‹" else "",if(back)30f else 20f,Color.WHITE,false).apply{gravity=Gravity.CENTER;if(back)setOnClickListener{navigateBack()}},size(dp(40),dp(44)))
+        addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        syncText=txt("↻ Đang nối",8.8f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(4),dp(4),dp(4),dp(4))}
+        addView(syncText,size(dp(102),dp(40)))
+    }
+    private fun menuRow(icon:String,title:String,sub:String,click:()->Unit)=row(surface).apply{
+        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(11),dp(9),dp(9),dp(9));background=outlineBg(surface,10)
+        addView(txt(icon,22f,teal,true).apply{gravity=Gravity.CENTER},size(dp(45),dp(50)))
+        addView(column(surface).apply{addView(txt(title,12.8f,ink,true));addView(txt(sub,9.7f,muted,false))},LinearLayout.LayoutParams(0,-2,1f))
+        addView(txt("›",22f,teal,false).apply{gravity=Gravity.CENTER},size(dp(26),dp(48)))
+        setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(7)}
+    }
+
+'''
+          t=between(t,start,end,new,'full appbar')
+          # refresh compact status
+          t=re.sub(r'    private fun refreshStatus\(\) \{.*?\n\n', '''    private fun refreshStatus(){syncApi.call("sync_status"){r->runOnUiThread{if(r.code==401){sessionExpired();return@runOnUiThread};val j=r.json;if(r.ok&&j!=null){syncText?.text="✓ Online • R${j.optLong("server_seq",0)}";syncText?.setTextColor(Color.WHITE)}else{syncText?.text="! Offline";syncText?.setTextColor(Color.WHITE)}}}}\n\n''', t, count=1, flags=re.S)
+          # host + fixed bottom navigation
+          start='    private fun host(content:View):View{'; end='    private fun sessionExpired()'
+          new=r'''    private fun host(content:View):View{
+        val root=EdgeSwipeBackLayout(this){if(currentScreen!="LOGIN"&&currentScreen!="DASHBOARD")navigateBack()}.apply{setBackgroundColor(bg)}
+        val navHeight=if(currentScreen=="LOGIN")0 else dp(62)
+        root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(22)+navHeight})
+        if(currentScreen!="LOGIN")root.addView(bottomNav("BUSINESS"),FrameLayout.LayoutParams(-1,navHeight,Gravity.BOTTOM).apply{bottomMargin=dp(20)})
+        root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM))
+        root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i};root.requestApplyInsets();return root
+    }
+    private fun bottomNav(active:String)=row(surface).apply{
+        gravity=Gravity.CENTER;setPadding(dp(3),dp(3),dp(3),dp(3));background=GradientDrawable().apply{setColor(surface);setStroke(dp(1),line)}
+        val items=listOf(arrayOf("▦","Nghiệp vụ","BUSINESS"),arrayOf("◉","Nhân sự","STAFF"),arrayOf("◷","Lịch sử","HISTORY"),arrayOf("↻","Đồng bộ","SYNC"),arrayOf("⚙","Cài đặt","SETTINGS"))
+        items.forEach{it->addView(column(surface).apply{gravity=Gravity.CENTER;addView(txt(it[0],17f,if(it[2]==active)teal else muted,true).center());addView(txt(it[1],8.4f,if(it[2]==active)teal else muted,it[2]==active).apply{gravity=Gravity.CENTER;maxLines=1});setOnClickListener{if(it[2]=="BUSINESS")dashboard() else openModule(it[2])}},LinearLayout.LayoutParams(0,-1,1f))}
+    }
+
+'''
+          t=between(t,start,end,new,'full host nav')
+          t=re.sub(r'    private fun showError\(raw:String\)\{.*?\n', '    private fun showError(raw:String){val msg=when{raw.contains("INVALID_CREDENTIALS")->"Sai tài khoản hoặc mật khẩu.";raw.contains("LOGIN_TEMP_LOCKED")->"Tài khoản tạm khóa 15 phút do đăng nhập sai nhiều lần.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy MNV.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Kiểm tra lại.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack đã được dùng trong ngày.";raw.contains("UNAUTHORIZED")->"Phiên đăng nhập đã hết hạn.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}\n',t,count=1)
+          t=t.replace('    private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_SHORT).show()','    private fun toast(s:String)=TopNotice.show(this,s,TopNotice.Kind.SUCCESS)')
+          write(path,t)
+
+          # ---------- Operations tabs / CRUD / settings ----------
+          path='app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt';t=read(path)
+          t=t.replace('import android.app.AlertDialog\n','import android.app.AlertDialog\nimport android.content.Intent\n',1)
+          old='''    private val navy = Color.rgb(15,78,74)\n    private val blue = Color.rgb(13,148,136)\n    private val red = Color.rgb(218,45,53)\n    private val green = Color.rgb(36,153,85)\n    private val orange = Color.rgb(217,119,6)\n    private val teal = Color.rgb(15,118,110)\n    private val bg = Color.rgb(247,250,249)\n    private val surface = Color.WHITE\n    private val ink = Color.rgb(24,44,42)\n    private val muted = Color.rgb(100,116,139)\n    private val line = Color.rgb(214,229,226)\n'''
+          new='''    private val navy:Int get()=ThemeManager.primaryDark(this)\n    private val blue:Int get()=ThemeManager.primary(this)\n    private val red = Color.rgb(218,45,53)\n    private val green = Color.rgb(36,153,85)\n    private val orange = Color.rgb(217,119,6)\n    private val teal:Int get()=ThemeManager.primary(this)\n    private val bg:Int get()=ThemeManager.background(this)\n    private val surface = Color.WHITE\n    private val ink = Color.rgb(24,44,42)\n    private val muted = Color.rgb(100,116,139)\n    private val line:Int get()=ThemeManager.line(this)\n'''
+          t=repl(t,old,new,'ops theme')
+          t=repl(t,'    private var position = ""\n','    private var position = ""\n    private var email = ""\n','ops email')
+          t=repl(t,'        position = intent.getStringExtra("position") ?: ""\n','        position = intent.getStringExtra("position") ?: ""\n        email = intent.getStringExtra("email") ?: api.restoredAccount()?.optString("email").orEmpty()\n','ops email intent')
+          t=t.replace('syncText?.text = if(status.connected) "● LIVE  R${status.serverSeq}" else "● OFFLINE"','syncText?.text = if(status.connected) "✓ Online • R${status.serverSeq}" else "! Offline"')
+          t=repl(t,'            "STAFF"->staffScreen()\n            else->listsScreen()','            "STAFF"->staffScreen()\n            "HISTORY"->historyScreen()\n            "SYNC"->syncScreen()\n            else->listsScreen()','ops modules')
+          start='    private fun laborHome(){';end='    private fun showLaborContext('
+          new=r'''    private fun laborHome(){
+        screenState="LABOR_HOME"
+        if(!isAdmin()){simpleMessage("CÔNG NHẬT","Chức năng Công nhật dành cho ADMIN/SUPERADMIN theo phân quyền hiện tại.");return}
+        val root=baseRoot("CÔNG NHẬT");val body=body();body.addView(txt("◉ Quét / nhập MNV rồi Enter/OK để xử lý công nhật.",10.5f,muted,false));body.addView(gap(9))
+        val mnv=mnvInput("MNV").apply{setText(initialMnv)};body.addView(labelled("Mã nhân viên",mnv));body.addView(gap(5));body.addView(txt("Không cần nút kiểm tra.",9.5f,muted,false))
+        var busy=false
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập MNV.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;api.call("employee_context",JSONObject().put("mnv",v).put("include_labor",true).put("include_options",false)){r->runOnUiThread{busy=false;if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"Không kiểm tra được MNV");return@runOnUiThread};showLaborContext(r.json?:JSONObject(),MasterDataCache.snapshot(this@OperationsActivity)?:JSONObject())}}}
+        bindScannerEnter(mnv){submit()};if(initialMnv.isNotBlank())mnv.post{submit()};attach(root,body);mnv.requestFocus()
+    }
+
+'''
+          t=between(t,start,end,new,'labor no check')
+          start='    private fun resourceHome(){';end='    private fun showResourceEditor('
+          new=r'''    private fun resourceHome(){
+        screenState="RESOURCE_HOME"
+        val root=baseRoot("TÀI NGUYÊN");val body=body();body.addView(txt("↔ Nhập / quét MNV rồi Enter/OK để mở tài nguyên đang dùng.",10.5f,muted,false));body.addView(gap(8))
+        val mnv=mnvInput("MNV").apply{setText(initialMnv)};body.addView(labelled("Mã nhân viên",mnv));var busy=false
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập MNV.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;api.call("employee_context",JSONObject().put("mnv",v)){r->runOnUiThread{if(handleAuth(r)){busy=false;return@runOnUiThread};if(!r.ok){busy=false;showError(r.error?:"Không kiểm tra được MNV");return@runOnUiThread};if(r.json?.optString("state")!="ACTIVE"){busy=false;showError("MNV phải đang trong phiên ACTIVE.");return@runOnUiThread};api.call("master_options",JSONObject().put("mnv",v)){m->runOnUiThread{busy=false;if(handleAuth(m))return@runOnUiThread;showResourceEditor(r.json?:JSONObject(),m.json?:JSONObject())}}}}}
+        bindScannerEnter(mnv){submit()};if(initialMnv.isNotBlank())mnv.post{submit()};attach(root,body);mnv.requestFocus()
+    }
+
+'''
+          t=between(t,start,end,new,'resource no check')
+          start='    private fun staffScreen(){';end='    private fun listsScreen(){'
+          new=r'''    private fun staffScreen(){
+        screenState="STAFF";val root=baseRoot("NHÂN SỰ");val body=body();val q=input("Tìm MNV / họ tên",false).apply{setSingleLine(true);imeOptions=EditorInfo.IME_ACTION_SEARCH}
+        body.addView(q,matchWrap());body.addView(gap(7));if(isAdmin()){body.addView(primary("＋ THÊM NHÂN SỰ",teal){staffEditor(null)},matchWrap());body.addView(gap(7))}
+        val box=column(bg);body.addView(box,matchWrap())
+        fun render(query:String){box.removeAllViews();val a=MasterDataCache.searchStaff(this,query,2000);for(i in 0 until a.length()){val e=a.optJSONObject(i)?:continue;val card=column(surface).apply{setPadding(dp(11),dp(9),dp(11),dp(9));background=outlineBg(surface,8);addView(txt("◉  ${e.optString("mnv")} • ${e.optString("full_name")}",12.5f,ink,true));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))} • ${dash(e.optString("department"))}",9.7f,muted,false));if(isAdmin()){addView(gap(5));val actions=row(surface);val edit=smallButton("✎ SỬA",teal);val del=smallButton("× XÓA",red);actions.addView(edit,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginEnd=dp(3)});actions.addView(del,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginStart=dp(3)});edit.setOnClickListener{staffEditor(e)};del.setOnClickListener{confirmDeleteStaff(e)};addView(actions,matchWrap())}};box.addView(card,matchWrap());box.addView(gap(6))};if(a.length()==0)box.addView(info("ⓘ Không có nhân sự phù hợp."))}
+        q.addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(v:CharSequence?,s:Int,c:Int,a:Int)=Unit;override fun onTextChanged(v:CharSequence?,s:Int,b:Int,c:Int){render(v?.toString().orEmpty())};override fun afterTextChanged(v:Editable?)=Unit});q.setOnEditorActionListener{_,_,_->render(q.text.toString());true};render("");attach(root,body)
+    }
+
+    private fun staffEditor(existing:JSONObject?){
+        if(!isAdmin())return
+        val box=column(surface).apply{setPadding(dp(6),0,dp(6),0)}
+        val mnv=input("Mã nhân viên",false).apply{setText(existing?.optString("mnv").orEmpty());isEnabled=existing==null}
+        val full=input("Họ và tên",false).apply{setText(existing?.optString("full_name").orEmpty())};val phone=input("Số điện thoại",false).apply{setText(existing?.optString("phone").orEmpty())};val pos=input("Vị trí chính",false).apply{setText(existing?.optString("main_position").orEmpty())};val supplier=input("Nhà cung cấp",false).apply{setText(existing?.optString("supplier").orEmpty())};val department=input("Bộ phận",false).apply{setText(existing?.optString("department").orEmpty())};val site=input("Site",false).apply{setText(existing?.optString("site").orEmpty())};val warehouse=input("Kho",false).apply{setText(existing?.optString("warehouse").orEmpty())};val startDate=input("Ngày bắt đầu dd/MM/yyyy",false).apply{setText(existing?.optString("start_date").orEmpty())};val note=input("Ghi chú",false).apply{setText(existing?.optString("note").orEmpty())}
+        listOf(mnv,full,phone,pos,supplier,department,site,warehouse,startDate,note).forEach{box.addView(it,matchWrap());box.addView(gap(5))}
+        AlertDialog.Builder(this).setTitle(if(existing==null)"Thêm nhân sự" else "Sửa nhân sự").setView(ScrollView(this).apply{addView(box)}).setNegativeButton("Hủy",null).setPositiveButton("LƯU"){_,_->val id=mnv.text.toString().trim();val nm=full.text.toString().trim();if(id.isBlank()||nm.isBlank()){TopNotice.show(this,"MNV và họ tên là bắt buộc.",TopNotice.Kind.ERROR);return@setPositiveButton};val payload=JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",id).put("full_name",nm).put("phone",phone.text.toString()).put("main_position",pos.text.toString()).put("supplier",supplier.text.toString()).put("department",department.text.toString()).put("site",site.text.toString()).put("warehouse",warehouse.text.toString()).put("start_date",startDate.text.toString()).put("note",note.text.toString());api.call("staff_upsert",payload){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không lưu được nhân sự")else reloadMaster{TopNotice.show(this,"Đã lưu nhân sự.",TopNotice.Kind.SUCCESS);staffScreen()}}}}}.show()
+    }
+    private fun confirmDeleteStaff(e:JSONObject){AlertDialog.Builder(this).setTitle("Xóa nhân sự?").setMessage("Xóa ${e.optString("mnv")} • ${e.optString("full_name")}? Lịch sử nghiệp vụ đã phát sinh vẫn được giữ.").setNegativeButton("KHÔNG",null).setPositiveButton("CÓ"){_,_->api.call("staff_delete",JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",e.optString("mnv"))){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không xóa được nhân sự")else reloadMaster{TopNotice.show(this,"Đã xóa nhân sự.",TopNotice.Kind.SUCCESS);staffScreen()}}}}}.show()}
+    private fun reloadMaster(done:()->Unit){cacheApi.call("master_snapshot"){r->runOnUiThread{if(r.ok&&r.json!=null)MasterDataCache.save(this,r.json);done()}}}
+
+'''
+          t=between(t,start,end,new,'staff CRUD')
+          # simplify report visual region: no grid strokes / no nested heavy outlines
+          a=t.find('    private fun reportScreen(){');b=t.find('    private fun settingsScreen(){',a)
+          if a<0 or b<0: raise SystemExit('report range missing')
+          seg=t[a:b].replace(';setStroke(dp(1),line)','').replace('setStroke(dp(1),line)','')
+          seg=seg.replace('background=outlineBg(surface,9)','setBackgroundColor(surface)').replace('background=outlineBg(surface,8)','setBackgroundColor(surface)')
+          t=t[:a]+seg+t[b:]
+          start='    private fun settingsScreen(){';end='    private fun accountManager(){'
+          new=r'''    private fun historyScreen(){
+        screenState="HISTORY";val root=baseRoot("LỊCH SỬ");val body=body();body.addView(info("◷ Lịch sử thao tác trên thiết bị này. Trạng thái cho biết request đã được server ACK hay chưa."));body.addView(gap(8));val a=AppHistory.items(this);if(a.length()==0)body.addView(info("Chưa có thao tác được ghi nhận."));for(i in 0 until a.length()){val x=a.optJSONObject(i)?:continue;val ok=x.optBoolean("synced");val at=java.text.SimpleDateFormat("dd/MM HH:mm:ss",java.util.Locale.US).format(java.util.Date(x.optLong("at")));body.addView(listCard((if(ok)"✓ " else "! ")+AppHistory.label(x.optString("action")),"$at • ${if(ok)"ĐÃ ĐỒNG BỘ" else "CHƯA ĐỒNG BỘ"}${if(x.optString("detail").isBlank())"" else " • ${x.optString("detail")}"}"));body.addView(gap(6))};attach(root,body)
+    }
+
+    private fun syncScreen(){
+        screenState="SYNC";val root=baseRoot("ĐỒNG BỘ");val body=body();val state=info("↻ Đang đọc trạng thái kết nối...");body.addView(state,matchWrap());body.addView(gap(8));val detailsBox=column(bg);body.addView(detailsBox,matchWrap());api.call("sync_status"){r->runOnUiThread{detailsBox.removeAllViews();if(handleAuth(r))return@runOnUiThread;if(r.ok){val j=r.json?:JSONObject();state.text="✓ Kết nối API: Online";detailsBox.addView(details(listOf("Mạng / API" to "Online","Server revision" to j.optLong("server_seq").toString(),"Master revision" to j.optLong("master_revision").toString(),"Cache máy" to MasterDataCache.revision(this).toString(),"Log local chờ ACK" to LocalLogManager.pendingCount(this).toString(),"Chế độ" to j.optString("mode","APP_GSHEET"),"Kênh app" to "${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}","Service mở rộng" to "Chưa cấu hình")))}else{state.text="! Kết nối API: Offline";detailsBox.addView(info("App giữ dữ liệu local cần thiết và sẽ thử lại khi trở lại foreground."))}}};attach(root,body)
+    }
+
+    private fun settingsScreen(){
+        screenState="SETTINGS";val root=baseRoot("CÀI ĐẶT");val body=body();body.addView(section("Tài khoản"));body.addView(listCard("$name • ${roleText(role)}","Tài khoản: $login${if(position.isBlank())"" else " • Vị trí: $position"}\nMail reset: ${email.ifBlank{"Chưa cấu hình"}}"));body.addView(gap(7))
+        val accountButtons=row(bg);val passBtn=primary("ĐỔI MẬT KHẨU",navy){changePasswordDialog()}.apply{textSize=9.6f;setSingleLine(true)};val mailBtn=primary("ĐỔI MAIL",teal){changeEmailDialog()}.apply{textSize=9.6f;setSingleLine(true)};accountButtons.addView(passBtn,LinearLayout.LayoutParams(0,dp(46),1f).apply{marginEnd=dp(3)});accountButtons.addView(mailBtn,LinearLayout.LayoutParams(0,dp(46),1f).apply{marginStart=dp(3)});body.addView(accountButtons,matchWrap())
+        if(isAdmin()){body.addView(gap(7));body.addView(primary("◉ QUẢN LÝ TÀI KHOẢN",blue){accountManager()},matchWrap())}
+        body.addView(section("Giao diện"));body.addView(themePicker(),matchWrap())
+        body.addView(section("Đồng bộ / dữ liệu"));body.addView(info("↻ Chi tiết kết nối, revision và log chờ ACK nằm ở tab Đồng bộ."))
+        body.addView(section("Cập nhật"));body.addView(info("⬆ ${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}\nTự kiểm tra phiên bản mới khi mở/foreground: BẬT."))
+        body.addView(section("Nhật ký"));body.addView(primary("▤ GỬI BÁO LỖI / CHẨN ĐOÁN",teal){sendDiagnostic()},matchWrap())
+        body.addView(section("Thiết bị"));body.addView(info("▣ Android ${Build.VERSION.RELEASE} • ${Build.MANUFACTURER} ${Build.MODEL}"));body.addView(gap(14));body.addView(primary("ĐĂNG XUẤT",red){api.call("logout"){runOnUiThread{api.clearSession();finishAffinity()}}},matchWrap());attach(root,body)
+    }
+    private fun themePicker()=row(surface).apply{gravity=Gravity.CENTER;setPadding(dp(5),dp(7),dp(5),dp(7));val selected=ThemeManager.selectedIndex(this@OperationsActivity);ThemeManager.swatches().forEachIndexed{i,c->val sw=TextView(this@OperationsActivity).apply{text=if(i==selected)"✓" else "";textSize=16f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;gravity=Gravity.CENTER;background=round(c,8);setOnClickListener{ThemeManager.select(this@OperationsActivity,i);recreate()}};addView(sw,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginStart=dp(2);marginEnd=dp(2)})}}
+    private fun changePasswordDialog(){val box=column(surface).apply{setPadding(dp(8),0,dp(8),0)};val current=input("Mật khẩu hiện tại",true);val next=input("Mật khẩu mới (tối thiểu 8 ký tự)",true);val confirm=input("Nhập lại mật khẩu mới",true);box.addView(current);box.addView(gap(7));box.addView(next);box.addView(gap(7));box.addView(confirm);AlertDialog.Builder(this).setTitle("Đổi mật khẩu").setView(box).setNegativeButton("Hủy",null).setPositiveButton("CẬP NHẬT"){_,_->if(next.text.toString()!=confirm.text.toString()){showError("Mật khẩu xác nhận không khớp.");return@setPositiveButton};api.call("change_password",JSONObject().put("current_password",current.text.toString()).put("new_password",next.text.toString())){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Đổi mật khẩu thất bại")else TopNotice.show(this,"Đã đổi mật khẩu.",TopNotice.Kind.SUCCESS)}}}.show()}
+    private fun changeEmailDialog(){val value=input("Địa chỉ mail nhận reset mật khẩu",false).apply{setText(email)};AlertDialog.Builder(this).setTitle("Đổi mail").setView(value).setNegativeButton("Hủy",null).setPositiveButton("CẬP NHẬT"){_,_->val next=value.text.toString().trim();api.call("change_email",JSONObject().put("email",next)){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không đổi được mail")else{email=r.json?.optJSONObject("account")?.optString("email",next)?:next;TopNotice.show(this,"Đã cập nhật mail nhận reset.",TopNotice.Kind.SUCCESS);settingsScreen()}}}}.show()}
+    private fun sendDiagnostic(){AlertDialog.Builder(this).setTitle("Gửi log thủ công?").setMessage("Gửi gói chẩn đoán hiện tại lên hệ thống?").setNegativeButton("NO",null).setPositiveButton("YES"){_,_->LocalLogManager.sendManualReport(this,api,module,syncText?.text?.toString().orEmpty()){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không gửi được báo lỗi")else TopNotice.show(this,"Đã gửi log và nhận ACK; file local đã được xóa.",TopNotice.Kind.SUCCESS)}}}.show()}
+
+'''
+          t=between(t,start,end,new,'ops settings history sync')
+          # account list shows mail
+          t=t.replace('addView(txt("${x.optString("role")} • ${x.optString("status")}",10f,muted,false))','addView(txt("${x.optString("role")} • ${x.optString("status")} • ${x.optString("email")}",10f,muted,false))')
+          start='    private fun accountCreateDialog(){';end='    private fun refreshMasterCache()'
+          new=r'''    private fun accountCreateDialog(){
+        val box=column(surface).apply{setPadding(dp(8),0,dp(8),0)};val loginInput=input("Tài khoản",false);val display=input("Tên hiển thị",false);val mail=input("Mail nhận reset",false).apply{setText("tam95.supra@gmail.com")};val roles=if(isSuper())arrayOf("USER","ADMIN")else arrayOf("USER");val roleSp=spinner(roles);val pass=input("Mật khẩu ban đầu (>=8 ký tự)",true);box.addView(loginInput);box.addView(gap(6));box.addView(display);box.addView(gap(6));box.addView(mail);box.addView(gap(6));box.addView(roleSp);box.addView(gap(6));box.addView(pass);AlertDialog.Builder(this).setTitle("Tạo tài khoản").setView(box).setNegativeButton("Hủy",null).setPositiveButton("TẠO"){_,_->api.call("account_upsert",JSONObject().put("login_id",loginInput.text.toString().trim()).put("display_name",display.text.toString().trim()).put("email",mail.text.toString().trim()).put("role",roleSp.selectedItem.toString()).put("password",pass.text.toString())){r->runOnUiThread{if(!r.ok)showError(r.error?:"Không tạo được tài khoản")else accountManager()}}}.show()
+    }
+
+'''
+          t=between(t,start,end,new,'account create email')
+          # simple message / appbar / navigation helpers
+          start='    private fun simpleMessage(title:String,message:String)';end='    private fun handleAuth('
+          new=r'''    private fun simpleMessage(title:String,message:String){val root=baseRoot(title);val body=body();body.addView(info("ⓘ $message"));attach(root,body)}
+    private fun baseRoot(title:String)=column(bg).apply{addView(appBar(title))}
+    private fun body()=column(bg).apply{setPadding(dp(12),dp(11),dp(12),dp(88))}
+    private fun attach(root:LinearLayout,body:LinearLayout){root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setContentView(host(root))}
+    private fun appBar(title:String)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(6),dp(8),dp(6));addView(txt("‹",30f,Color.WHITE,false).apply{gravity=Gravity.CENTER;setOnClickListener{navigateBack()}},size(dp(40),dp(44)));addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("↻ Đang nối",8.8f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(4),dp(4),dp(4),dp(4))};addView(syncText,size(dp(102),dp(40)))}
+    private fun activeTab()=when(module){"STAFF"->"STAFF";"HISTORY"->"HISTORY";"SYNC"->"SYNC";"SETTINGS"->"SETTINGS";else->"BUSINESS"}
+    private fun bottomNav()=row(surface).apply{gravity=Gravity.CENTER;setPadding(dp(3),dp(3),dp(3),dp(3));background=GradientDrawable().apply{setColor(surface);setStroke(dp(1),line)};val active=activeTab();val items=listOf(arrayOf("▦","Nghiệp vụ","BUSINESS"),arrayOf("◉","Nhân sự","STAFF"),arrayOf("◷","Lịch sử","HISTORY"),arrayOf("↻","Đồng bộ","SYNC"),arrayOf("⚙","Cài đặt","SETTINGS"));items.forEach{it->addView(column(surface).apply{gravity=Gravity.CENTER;addView(txt(it[0],17f,if(it[2]==active)teal else muted,true).center());addView(txt(it[1],8.4f,if(it[2]==active)teal else muted,it[2]==active).apply{gravity=Gravity.CENTER;maxLines=1});setOnClickListener{navigateTab(it[2])}},LinearLayout.LayoutParams(0,-1,1f))}}
+    private fun navigateTab(target:String){if(target==activeTab())return;if(target=="BUSINESS"){finish();return};startActivity(Intent(this,OperationsActivity::class.java).apply{putExtra("module",target);putExtra("login",login);putExtra("name",name);putExtra("role",role);putExtra("position",position);putExtra("email",email)});finish()}
+
+'''
+          t=between(t,start,end,new,'ops navigation')
+          # replace host and general notices
+          t=re.sub(r'    private fun host\(content:View\):View\{.*?\n', '    private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(82)});root.addView(bottomNav(),FrameLayout.LayoutParams(-1,dp(60),Gravity.BOTTOM).apply{bottomMargin=dp(20)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i};root.requestApplyInsets();return root}\n',t,count=1)
+          t=re.sub(r'    private fun showError\(raw:String\)\{.*?\n', '    private fun showError(raw:String){val msg=when{raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"MNV đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"MNV không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("EMAIL_INVALID")->"Địa chỉ mail không hợp lệ.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy nhân sự.";raw.contains("STAFF_ACTIVE_SESSION")->"Nhân sự đang có phiên ACTIVE, chưa thể xóa.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}\n',t,count=1)
+          # icons on all section headers
+          t=t.replace('    private fun section(v:String)=txt(v,13.5f,navy,true).apply{setPadding(0,dp(12),0,dp(3))}','    private fun section(v:String)=txt("${sectionIcon(v)}  $v",13.5f,navy,true).apply{setPadding(0,dp(12),0,dp(3))}\n    private fun sectionIcon(v:String)=when{v.contains("Tài khoản",true)->"♙";v.contains("Giao diện",true)->"◈";v.contains("Đồng bộ",true)->"↻";v.contains("Cập nhật",true)->"⬆";v.contains("Nhật ký",true)->"▤";v.contains("Thiết bị",true)->"▣";else->"◆"}')
+          t=t.replace('    private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_SHORT).show()','    private fun toast(s:String)=TopNotice.show(this,s,TopNotice.Kind.SUCCESS)')
+          write(path,t)
+
+          # ---------- Apps Script: per-account reset mail + staff mutations ----------
+          path='google-apps-script/PICK_PACK_API.gs';t=read(path)
+          t=t.replace("    if (action === 'change_password') return ppJson_(ppChangePassword_(auth, body));","    if (action === 'change_password') return ppJson_(ppChangePassword_(auth, body));\n    if (action === 'change_email') return ppJson_(ppWithLock_(function(){ return ppChangeEmail_(auth, body); }));")
+          t=t.replace("    if (action === 'staff_search') return ppJson_(ppStaffSearch_(body));","    if (action === 'staff_search') return ppJson_(ppStaffSearch_(body));\n    if (action === 'staff_upsert') return ppJson_(ppWithLock_(function(){ return ppStaffUpsert_(auth, body); }));\n    if (action === 'staff_delete') return ppJson_(ppWithLock_(function(){ return ppStaffDelete_(auth, body); }));")
+          t=t.replace("generic={ok:true,delivery:'ADMIN_EMAIL',message:'RESET_REQUEST_ACCEPTED'}","generic={ok:true,delivery:'ACCOUNT_EMAIL',message:'RESET_REQUEST_ACCEPTED'}")
+          t=t.replace('MailApp.sendEmail({to:PP.RESET_ADMIN_EMAIL,','MailApp.sendEmail({to:(a.email||PP.RESET_ADMIN_EMAIL),',1)
+          old="out.push({row:i+1,login_id:String(vals[i][0]||'').trim(),verifier:String(vals[i][1]||'').trim(),role:String(vals[i][2]||'USER').trim().toUpperCase(),display_name:String(vals[i][3]||vals[i][0]||'').trim(),position:String(vals[i][4]||'').trim(),status:String(vals[i][8]||'ACTIVE').trim().toUpperCase()||'ACTIVE'});"
+          new="out.push({row:i+1,login_id:String(vals[i][0]||'').trim(),verifier:String(vals[i][1]||'').trim(),role:String(vals[i][2]||'USER').trim().toUpperCase(),display_name:String(vals[i][3]||vals[i][0]||'').trim(),position:String(vals[i][4]||'').trim(),email:String(vals[i][5]||PP.RESET_ADMIN_EMAIL).trim()||PP.RESET_ADMIN_EMAIL,status:String(vals[i][8]||'ACTIVE').trim().toUpperCase()||'ACTIVE'});"
+          t=repl(t,old,new,'gas admin email parse')
+          t=t.replace("account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||''}","account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||'',email:a.email||PP.RESET_ADMIN_EMAIL}")
+          t=t.replace("account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||''}:null","account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||'',email:fresh.email||PP.RESET_ADMIN_EMAIL}:null")
+          start='function ppAccountList_(auth) {';end='function ppAuthenticate_(body) {'
+          new=r'''function ppAccountList_(auth) {
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
+  const items=ppAdminRows_().filter(function(x){return ppIsSuper_(auth)||x.role==='USER';}).map(function(x){return {login_id:x.login_id,role:x.role,display_name:x.display_name,position:x.position||'',email:x.email||PP.RESET_ADMIN_EMAIL,status:x.status,failed_attempts:0,locked_until:null};});return {ok:true,items:items};
+}
+function ppAccountUpsert_(auth,body) {
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
+  const login=String(body.login_id||'').trim(),display=String(body.display_name||login).trim(),role=String(body.role||'USER').toUpperCase(),verifier=String(body.password_verifier||'').trim(),position=String(body.position||'').trim(),email=String(body.email||'').trim()||PP.RESET_ADMIN_EMAIL;
+  if(!login||['USER','ADMIN'].indexOf(role)<0||!ppEmailValid_(email))return {ok:false,error:'ACCOUNT_FIELDS_INVALID'};if(!ppIsSuper_(auth)&&role!=='USER')return {ok:false,error:'FORBIDDEN'};
+  const old=ppAccount_(login);if(old&&(old.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&old.role!=='USER')))return {ok:false,error:'FORBIDDEN'};if(!old&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};if(verifier&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};
+  ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);
+  if(old){sh.getRange(old.row,1).setValue(login);if(verifier)sh.getRange(old.row,2).setValue(verifier);sh.getRange(old.row,3).setValue(role.toLowerCase());sh.getRange(old.row,4).setValue(display);if(position)sh.getRange(old.row,5).setValue(position);sh.getRange(old.row,6).setValue(email);sh.getRange(old.row,9).setValue('ACTIVE');sh.getRange(old.row,10).setValue(auth.login_id);sh.getRange(old.row,11).setValue(ppNowVisible_());}
+  else{sh.appendRow([login,verifier,role.toLowerCase(),display,position,email,'','','ACTIVE',auth.login_id,ppNowVisible_()]);}
+  ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
+}
+function ppAccountStatus_(auth,body) {
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),target=ppAccount_(login);if(!target||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'};if(target.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&target.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'};ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);sh.getRange(target.row,9).setValue(status);sh.getRange(target.row,10).setValue(auth.login_id);sh.getRange(target.row,11).setValue(ppNowVisible_());if(status==='DISABLED')ppClearActiveSessionForLogin_(login);ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
+}
+function ppEmailValid_(email){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email||''))&&String(email||'').length<=180;}
+function ppChangeEmail_(auth,body){
+  const email=String(body.email||'').trim();if(!ppEmailValid_(email))return {ok:false,error:'EMAIL_INVALID'};ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);sh.getRange(auth.row,6).setValue(email);sh.getRange(auth.row,10).setValue(auth.login_id);sh.getRange(auth.row,11).setValue(ppNowVisible_());ppBumpRevision_();ppBumpMasterRevision_();const fresh=ppAccount_(auth.login_id),session=ppActiveSession_(auth.login_id);const token=(fresh&&session&&session.session_id===auth._session_id&&session.device_id===auth._device_id)?ppMakeToken_(fresh,session):'';return {ok:true,token:token,account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||'',email:fresh.email||PP.RESET_ADMIN_EMAIL}:null};
+}
+function ppMasterMutationSeen_(eventId){if(!eventId)return false;return !!PropertiesService.getScriptProperties().getProperty('PP_MASTER_EVT_'+ppSha256Hex_(eventId).slice(0,32));}
+function ppMarkMasterMutation_(eventId){PropertiesService.getScriptProperties().setProperty('PP_MASTER_EVT_'+ppSha256Hex_(eventId).slice(0,32),ppNowIso_());}
+function ppStaffUpsert_(auth,body){
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};const eventId=String(body.event_id||'').trim(),mnv=String(body.mnv||'').trim(),full=String(body.full_name||'').trim();if(!eventId||!mnv||!full)return {ok:false,error:'STAFF_FIELDS_INVALID'};if(ppMasterMutationSeen_(eventId))return {ok:true,idempotent:true};
+  const sh=ppSheet_(PP.STAFF),vals=sh.getDataRange().getDisplayValues();let row=0;for(let i=1;i<vals.length;i++){if(String(vals[i][0]||'').trim()===mnv){row=i+1;break;}}
+  const data=[mnv,full,String(body.phone||'').trim(),String(body.main_position||'').trim(),String(body.supplier||'').trim(),String(body.department||'').trim(),String(body.site||'').trim(),String(body.warehouse||'').trim(),String(body.start_date||'').trim(),String(body.note||'').trim(),auth.login_id,ppNowVisible_()];
+  if(row){sh.getRange(row,1,1,12).setValues([data]);}else{const target=sh.getLastRow()+1;if(target>2)sh.getRange(target-1,1,1,12).copyTo(sh.getRange(target,1,1,12),SpreadsheetApp.CopyPasteType.PASTE_FORMAT,false);sh.getRange(target,1,1,12).setValues([data]);}
+  ppMarkMasterMutation_(eventId);const rev=ppBumpRevision_();const master=ppBumpMasterRevision_();return {ok:true,result:{event_id:eventId,revision:rev,master_revision:master}};
+}
+function ppStaffDelete_(auth,body){
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};const eventId=String(body.event_id||'').trim(),mnv=String(body.mnv||'').trim();if(!eventId||!mnv)return {ok:false,error:'STAFF_FIELDS_INVALID'};if(ppMasterMutationSeen_(eventId))return {ok:true,idempotent:true};const active=ppSessionMap_(ppBusinessVisible_())[mnv];if(active&&active.state==='ACTIVE')return {ok:false,error:'STAFF_ACTIVE_SESSION'};const sh=ppSheet_(PP.STAFF),vals=sh.getDataRange().getDisplayValues();let row=0;for(let i=1;i<vals.length;i++){if(String(vals[i][0]||'').trim()===mnv){row=i+1;break;}}if(!row)return {ok:false,error:'EMPLOYEE_NOT_FOUND'};sh.deleteRow(row);ppMarkMasterMutation_(eventId);const rev=ppBumpRevision_();const master=ppBumpMasterRevision_();return {ok:true,result:{event_id:eventId,revision:rev,master_revision:master}};
+}
+
+'''
+          t=between(t,start,end,new,'gas account staff functions')
+          t=t.replace("function ppEnsureAdminHeaders_(){const sh=ppSheet_(PP.ADMIN);if(sh.getRange(1,9).getValue()!=='Trạng thái tài khoản')sh.getRange(1,9,1,3).setValues([['Trạng thái tài khoản','Người cập nhật','Thời gian cập nhật']]);}","function ppEnsureAdminHeaders_(){const sh=ppSheet_(PP.ADMIN);if(sh.getRange(1,6).getValue()!=='Mail')sh.getRange(1,6).setValue('Mail');if(sh.getRange(1,9).getValue()!=='Trạng thái tài khoản')sh.getRange(1,9,1,3).setValues([['Trạng thái tài khoản','Người cập nhật','Thời gian cập nhật']]);}")
+          write(path,t)
+
+          # ---------- version bump ----------
+          t=read('app/build.gradle.kts');t=t.replace('versionCode = 10','versionCode = 11',1).replace('versionName = "0.4.2-beta.4"','versionName = "0.4.2-beta.5"',1);write('app/build.gradle.kts',t)
+
+          # ---------- future-safe build pipeline: no stale beta3 metadata / no GitHub OTA release ----------
+          write('.github/workflows/beta-preview.yml', r'''name: Verify App-GSheet Beta and Stable APKs
+
+on:
+  push:
+    branches: [ main ]
+    paths: ['app/**','google-apps-script/**','ARCHITECTURE_GUARDRAILS.md','build.gradle.kts','settings.gradle.kts','gradle.properties','.github/workflows/beta-preview.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-channels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OWNER_ICON_SHA256: 371d0e5ad552e3cf63eef60a3da270896946458a506252a7fa132a67747c7a5d
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce architecture
+        run: |
+          set -euo pipefail
+          test -f ARCHITECTURE_GUARDRAILS.md; test -f google-apps-script/PICK_PACK_API.gs; test ! -d supabase
+          ! grep -RniE 'supabase[.]co|supabase/functions|io[.]supabase|supabase-js' app google-apps-script
+          grep -q "OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg'" google-apps-script/PICK_PACK_API.gs
+          grep -q "OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4'" google-apps-script/PICK_PACK_API.gs
+          echo "$OWNER_ICON_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.4.1'}
+      - name: Android SDK
+        run: |
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/tools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/cmd"; mv "$RUNNER_TEMP/cmd/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Compile and verify dynamic source metadata
+        run: |
+          set -euo pipefail
+          sed -i 's/return"/return "/g' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          gradle --no-daemon :app:assembleBetaRelease :app:assembleStableRelease
+          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk; STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          BETA_CODE=$(awk '/create\("beta"\)/,/^        }/' app/build.gradle.kts | sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' | head -1)
+          BETA_NAME=$(awk '/create\("beta"\)/,/^        }/' app/build.gradle.kts | sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' | head -1)
+          test -n "$BETA_CODE"; test -n "$BETA_NAME"; test -s "$BETA"; test -s "$STABLE"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA" > /tmp/beta.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta.txt
+          grep -q "versionCode='$BETA_CODE'" /tmp/beta.txt; grep -q "versionName='$BETA_NAME'" /tmp/beta.txt
+          echo "BETA_NAME=$BETA_NAME" >> "$GITHUB_ENV"
+      - name: Upload unsigned candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-${{ env.BETA_NAME }}-unsigned
+          path: app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          retention-days: 3
+      - name: Detect signing secrets
+        id: signing
+        run: |
+          READY=true; for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]] || READY=false; done; echo "ready=$READY" >> "$GITHUB_OUTPUT"
+      - name: Fixed-signer validation artifact
+        if: steps.signing.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"; printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          mkdir -p dist; "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "dist/pick-pack-1291-public-beta-${BETA_NAME}.apk" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --print-certs "dist/pick-pack-1291-public-beta-${BETA_NAME}.apk" | tee /tmp/cert.txt
+          grep -qi 'Signer #1 certificate SHA-256 digest: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e' /tmp/cert.txt
+          sha256sum "dist/pick-pack-1291-public-beta-${BETA_NAME}.apk" > dist/SHA256SUMS.txt
+      - name: Upload signed validation artifact
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-${{ env.BETA_NAME }}-signed-validation
+          path: dist/*
+          retention-days: 7
+''')
+
+          # key source assertions
+          checks={
+            'app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt':['ĐỔI MAIL','HISTORY','SYNC','THÊM NHÂN SỰ','themePicker','Gửi log thủ công?'],
+            'app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt':['bottomNav','Nhận Enter/OK','Báo cáo nhân sự'],
+            'google-apps-script/PICK_PACK_API.gs':['change_email','staff_upsert','staff_delete','ACCOUNT_EMAIL','a.email||PP.RESET_ADMIN_EMAIL'],
+            'app/src/main/java/vn/pickpack1291/app/beta/LocalLogManager.kt':['ack_event_id','pendingCount']}
+          for file,needles in checks.items():
+              raw=read(file)
+              for needle in needles:
+                  if needle not in raw: raise SystemExit(f'ASSERT FAIL {file}: {needle}')
+          PY
+
+      - name: Check Apps Script syntax
+        run: cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js && node --check /tmp/PICK_PACK_API.js
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Bootstrap Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/tools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/cmd"; mv "$RUNNER_TEMP/cmd/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Compile Beta and Stable before commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/return"/return "/g' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          gradle --no-daemon :app:assembleBetaDebug :app:assembleStableDebug
+
+      - name: Commit verified S04 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-s04-layout2.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app google-apps-script .github/workflows/beta-preview.yml .github/workflows/apply-s04-layout2.yml
+          git commit -m 'feat: apply S04 layout 2 navigation and account mail'
+          git push origin HEAD:main
