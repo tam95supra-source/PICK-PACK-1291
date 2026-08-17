@@ -1,0 +1,76 @@
+name: Verify Drive OTA Beta 0.4.2-beta.2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/verify-ota-beta-v042.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-ota:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      EXPECTED_SHA: 2c413b036ed9b3a938a668cde149bf10162f0a09977382c3e2ac7fbfb7653e68
+    steps:
+      - name: Verify beta.1 sees beta.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.1"}' > /tmp/ota.json
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/ota.json'))
+          assert j.get('ok') is True, j
+          assert j.get('source')=='GOOGLE_DRIVE', j
+          assert j.get('channel')=='BETA', j
+          assert j.get('available') is True, j
+          assert j.get('version_name')=='0.4.2-beta.2', j
+          assert j.get('apk_url'), j
+          assert j.get('sha256'), j
+          print('Beta update discovery: PASS')
+          PY
+          SHA=$(python3 -c 'import json; print(json.load(open("/tmp/ota.json"))["sha256"])')
+          URL=$(python3 -c 'import json; print(json.load(open("/tmp/ota.json"))["apk_url"])')
+          [[ "${SHA,,}" == "$EXPECTED_SHA" ]]
+          curl -fL --retry 3 --retry-delay 2 "$URL" -o /tmp/update.apk
+          ACTUAL=$(sha256sum /tmp/update.apk | awk '{print $1}')
+          [[ "$ACTUAL" == "$EXPECTED_SHA" ]]
+          echo 'Beta OTA download + SHA-256 verification: PASS'
+
+      - name: Verify beta.2 does not self-update
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.2"}' > /tmp/current.json
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/current.json'))
+          assert j.get('ok') is True, j
+          assert j.get('channel')=='BETA', j
+          assert j.get('available') is False, j
+          print('No false-positive self-update: PASS')
+          PY
+
+      - name: Verify stable channel is isolated
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/stable.json'))
+          assert j.get('ok') is True, j
+          assert j.get('source')=='GOOGLE_DRIVE', j
+          assert j.get('channel')=='STABLE', j
+          assert j.get('available') is False, j
+          print('Stable channel isolation: PASS')
+          PY
