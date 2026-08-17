@@ -1,0 +1,81 @@
+name: Build Beta Preview APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/beta-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-beta-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Assemble Beta Preview
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Prepare named APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk
+          sha256sum dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk | tee dist/SHA256SUMS.txt
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK=dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$APK" | head -20
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-beta-v0.1.0-beta.1-preview
+          path: dist/*
+          retention-days: 30
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v0.1.0-beta.1-preview
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" \
+              dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk \
+              dist/SHA256SUMS.txt \
+              --prerelease \
+              --title "Pick Pack 1291 Beta UI Preview 0.1.0-beta.1" \
+              --notes "First installable UI/UX preview using approved Interface Sample 3. This build is intentionally backend-disconnected and uses debug signing for visual/interaction review only. Do not treat it as the permanent OTA signing baseline."
+          fi

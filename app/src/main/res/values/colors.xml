@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="pp_background">#F5FAFA</color>
+    <color name="pp_surface">#FFFFFF</color>
+    <color name="pp_teal">#149AA5</color>
+    <color name="pp_teal_dark">#0B7880</color>
+    <color name="pp_text">#15232E</color>
+    <color name="pp_muted">#607781</color>
+</resources>
