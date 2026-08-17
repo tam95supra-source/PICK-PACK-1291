@@ -42,6 +42,15 @@ object LocalLogManager {
         return file
     }
 
+    /** Compatibility for the non-launcher preview screen. Production manual reports use sendManualReport(). */
+    fun createManualReport(context: Context, screen: String, syncState: String): File =
+        write(context, "MANUAL_REPORT", buildString {
+            appendLine("type=MANUAL"); appendCommon(context)
+            appendLine("screen=${safe(screen)}")
+            appendLine("sync_state=${safe(syncState)}")
+            appendLine("pending_upload=true")
+        })
+
     fun uploadAutomaticPending(context: Context, api: BetaApiClient) {
         val files = logDir(context).listFiles()?.filter { it.name.startsWith("CRASH_") || it.name.startsWith("ANDROID_DAILY_") }?.sortedBy { it.lastModified() }.orEmpty()
         uploadNext(api, files, 0)
