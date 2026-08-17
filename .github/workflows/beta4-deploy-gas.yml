@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/beta4-deploy-gas.yml'
+      - 'google-apps-script/AUTH_HELPERS.gs'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +31,7 @@ jobs:
           grep -q "forgot_password" google-apps-script/PICK_PACK_API.gs
           grep -q "RESET_ADMIN_EMAIL: 'tam95.supra@gmail.com'" google-apps-script/PICK_PACK_API.gs
           grep -q "script.send_mail" google-apps-script/appsscript.json
+          grep -q "function ppAuthorizeMail_" google-apps-script/AUTH_HELPERS.gs
           grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
           grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
           ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
@@ -124,7 +126,6 @@ jobs:
             sleep 4
           done
           [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
-          # Nonexistent login validates public forgot-password routing without sending mail or mutating a real account.
           curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' > /tmp/reset.json
           grep -q '"ok":true' /tmp/reset.json
           grep -q '"delivery":"ADMIN_EMAIL"' /tmp/reset.json
