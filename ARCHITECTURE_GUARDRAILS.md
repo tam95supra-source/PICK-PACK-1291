@@ -10,6 +10,13 @@ Mô hình dữ liệu/vận hành của dự án là:
 - Google Apps Script chỉ là lớp API/transaction bridge gắn với Google Sheets; không được biến thành một database riêng.
 - GitHub chỉ dùng cho source/CI/phát hành APK; không phải backend dữ liệu vận hành.
 
+## Phạm vi Google Drive được phép
+
+- Mọi file dữ liệu, log, bản phát hành, bàn giao hoặc gói deploy của Pick Pack 1291 chỉ được thao tác bên trong cây Drive `PICK PACK 1291 - CHÍNH THỨC`.
+- Không tự tạo, chuyển, sao chép hoặc dùng thư mục Pick Pack khác ngoài cây `PICK PACK 1291 - CHÍNH THỨC`.
+- Nếu một giới hạn kỹ thuật thực sự buộc phải phát sinh file/thư mục ngoài cây chính thức, phải dừng phần đó và xin xác nhận chủ dự án trước.
+- Không được tái sử dụng service, thư mục, Apps Script hay tài nguyên của dự án khác cho Pick Pack 1291 chỉ vì chúng đang tồn tại.
+
 ## Quy tắc bắt buộc
 
 1. **Không tự suy diễn kiến trúc.** Không được tự thêm, thay hoặc chuyển authority sang Supabase, Firebase, Neon, Cloudflare, database/server trung gian hay dịch vụ backend khác nếu chủ dự án chưa yêu cầu rõ ràng.
@@ -22,6 +29,8 @@ Mô hình dữ liệu/vận hành của dự án là:
 8. **Foreground sync:** mở/quay lại app sync ngay; khi app ở background/screen off không khởi tạo polling mới. Request đang chạy được phép drain rồi suspend.
 9. **Mutation phải idempotent** bằng `event_id`; tranh tài nguyên phải fail rõ ràng; đổi tài nguyên phải atomic trong phạm vi transaction/lock của Google Apps Script + Google Sheets.
 10. **Security:** không commit password plaintext, verifier, token, signing key hoặc credential vào repo public. Hidden Sheet không được coi là security boundary.
+11. **Master data phải cache:** danh sách nhân sự/PDA/User Pick/Bàn Pack/User Pack/Danh mục được cache trên thiết bị và có revision riêng. Chỉ refresh khi master revision thay đổi; trạng thái phiên/tài nguyên đang sử dụng vẫn phải kiểm tra động để chống cấp trùng.
+12. **Log phải route đúng loại:** MANUAL → `BÁO LỖI THỦ CÔNG`; CRASH → `BÁO LỖI TỰ ĐỘNG`; DAILY → `NHẬT KÝ ANDROID`, đều nằm dưới `PICK PACK 1291 - CHÍNH THỨC/NHẬT KÝ HỆ THỐNG`.
 
 ## Quy tắc kiểm tra trước khi phát hành
 
