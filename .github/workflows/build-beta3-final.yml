@@ -68,12 +68,14 @@ jobs:
           BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
           test -s "$BETA"; test -s "$STABLE"
-          BADGE=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA")
-          echo "$BADGE" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
-          echo "$BADGE" | grep -q "versionCode='9'"
-          echo "$BADGE" | grep -q "versionName='0.4.2-beta.3'"
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump resources "$BETA" | grep -q 'owner_launcher'
-          unzip -l "$BETA" | grep -q 'owner_launcher'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA" > /tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionCode='9'" /tmp/badge.txt
+          grep -q "versionName='0.4.2-beta.3'" /tmp/badge.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump resources "$BETA" > /tmp/resources.txt
+          grep -q 'owner_launcher' /tmp/resources.txt
+          unzip -l "$BETA" > /tmp/apk-files.txt
+          grep -q 'owner_launcher' /tmp/apk-files.txt
           echo 'Beta3 compile + manifest + owner launcher APK resource: PASS'
 
       - name: Upload Beta3 signing toolkit
