@@ -10,10 +10,11 @@ class BetaApiClient {
     data class Result(val ok: Boolean, val code: Int, val json: JSONObject?, val error: String?)
 
     private val executor = Executors.newSingleThreadExecutor()
-    @Volatile var token: String? = null
-        private set
 
-    fun clearToken() { token = null }
+    val token: String?
+        get() = sharedToken
+
+    fun clearToken() { sharedToken = null }
 
     fun login(loginId: String, password: String, callback: (Result) -> Unit) {
         request(JSONObject().apply {
@@ -21,7 +22,7 @@ class BetaApiClient {
             put("login_id", loginId)
             put("password", password)
         }, false) { result ->
-            if (result.ok) token = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+            if (result.ok) sharedToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }
             callback(result)
         }
     }
@@ -35,6 +36,14 @@ class BetaApiClient {
         request(JSONObject().put("action", "health"), false, callback)
     }
 
+    fun updateCheck(channel: String, currentVersion: String, callback: (Result) -> Unit) {
+        request(JSONObject().apply {
+            put("action", "update_check")
+            put("channel", channel)
+            put("current_version", currentVersion)
+        }, false, callback)
+    }
+
     private fun request(payload: JSONObject, authenticated: Boolean, callback: (Result) -> Unit) {
         executor.execute {
             var conn: HttpURLConnection? = null
@@ -42,14 +51,15 @@ class BetaApiClient {
                 conn = (URL(API_URL).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 12_000
-                    readTimeout = 18_000
+                    readTimeout = 22_000
                     doOutput = true
                     setRequestProperty("Content-Type", "application/json; charset=utf-8")
                     setRequestProperty("Accept", "application/json")
-                    setRequestProperty("X-App-Version", "0.2.0-beta.1")
+                    setRequestProperty("X-App-Version", BuildConfig.VERSION_NAME)
+                    setRequestProperty("X-App-Channel", BuildConfig.CHANNEL)
                     setRequestProperty("X-Device-Label", "${Build.MANUFACTURER} ${Build.MODEL}")
                     if (authenticated) {
-                        val t = token ?: throw IllegalStateException("UNAUTHORIZED")
+                        val t = sharedToken ?: throw IllegalStateException("UNAUTHORIZED")
                         setRequestProperty("Authorization", "Bearer $t")
                     }
                 }
@@ -69,6 +79,7 @@ class BetaApiClient {
     }
 
     companion object {
+        @Volatile private var sharedToken: String? = null
         private const val API_URL = "https://oedasgcdjppjwidhlqdr.supabase.co/functions/v1/pick-pack-beta-api"
     }
 }
