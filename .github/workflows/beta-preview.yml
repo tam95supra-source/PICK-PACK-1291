@@ -1,10 +1,12 @@
-name: Build Full Beta and Stable Channel APKs
+name: Build App-GSheet Beta and Stable APKs
 
 on:
   push:
     branches: [ main ]
     paths:
       - 'app/**'
+      - 'google-apps-script/**'
+      - 'ARCHITECTURE_GUARDRAILS.md'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
@@ -13,27 +15,52 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   build-channels:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      GSHEET_API_URL: ${{ vars.GSHEET_API_URL }}
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Probe Full Beta API
+      - name: Enforce approved architecture
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --retry 3 --retry-delay 2 \
-            -X POST 'https://oedasgcdjppjwidhlqdr.supabase.co/functions/v1/pick-pack-beta-api' \
+          test -f ARCHITECTURE_GUARDRAILS.md
+          test -f google-apps-script/PICK_PACK_API.gs
+          test ! -d supabase
+          if grep -RniE 'supabase\.co|supabase/functions|io\.supabase|supabase-js' app google-apps-script .github/workflows/beta-preview.yml; then
+            echo 'Supabase runtime/reference is forbidden by ARCHITECTURE_GUARDRAILS.md' >&2
+            exit 1
+          fi
+          grep -q 'Google Apps Script' README.md
+          grep -q 'Google Sheets' README.md
+
+      - name: Probe deployed Google Sheet API when configured
+        if: env.GSHEET_API_URL != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GSHEET_API_URL" == https://script.google.com/* ]]
+          curl -fsSL --retry 3 --retry-delay 2 \
             -H 'content-type: application/json' \
+            -X POST "$GSHEET_API_URL" \
             -d '{"action":"health"}' | tee /tmp/pick-pack-health.json
           grep -q '"ok":true' /tmp/pick-pack-health.json
+          grep -q '"mode":"APP_GSHEET"' /tmp/pick-pack-health.json
           grep -q '"sheet_read":true' /tmp/pick-pack-health.json
-          grep -q '"mode":"FULL_BETA"' /tmp/pick-pack-health.json
+
+      - name: Explain compile-only mode
+        if: env.GSHEET_API_URL == ''
+        run: echo 'GSHEET_API_URL is not configured yet; compile/verification runs, publication is blocked.'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -64,27 +91,6 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Fetch fixed Android signing key via GitHub OIDC
-        shell: bash
-        env:
-          SIGNING_BROKER_URL: https://oedasgcdjppjwidhlqdr.supabase.co/functions/v1/pick-pack-ci-signing
-        run: |
-          set -euo pipefail
-          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"
-          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          OIDC_JSON="$RUNNER_TEMP/oidc.json"
-          BUNDLE="$RUNNER_TEMP/signing-bundle.json"
-          curl -fsS --retry 3 --retry-all-errors --retry-delay 1 -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pick-pack-1291-signing" > "$OIDC_JSON"
-          OIDC_TOKEN="$(jq -er '.value' "$OIDC_JSON")"
-          curl -fsS --retry 3 --retry-all-errors --retry-delay 1 -X POST "$SIGNING_BROKER_URL" -H "Authorization: Bearer $OIDC_TOKEN" > "$BUNDLE"
-          jq -e '.ok == true and .repository == "tam95supra-source/pick-pack-1291" and .alias == "pickpack1291"' "$BUNDLE" >/dev/null
-          jq -er '.keystore_b64' "$BUNDLE" | base64 -d > "$RUNNER_TEMP/pick-pack-1291-release.jks"
-          jq -er '.store_password' "$BUNDLE" > "$RUNNER_TEMP/store.pass"
-          jq -er '.key_password' "$BUNDLE" > "$RUNNER_TEMP/key.pass"
-          jq -er '.alias' "$BUNDLE" > "$RUNNER_TEMP/key.alias"
-          chmod 600 "$RUNNER_TEMP/pick-pack-1291-release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass" "$RUNNER_TEMP/key.alias"
-          rm -f "$OIDC_JSON" "$BUNDLE"
-
       - name: Normalize Kotlin lexical whitespace
         shell: bash
         run: |
@@ -95,84 +101,100 @@ jobs:
       - name: Assemble Beta and Stable channels
         run: gradle --no-daemon :app:assembleBetaRelease :app:assembleStableRelease
 
-      - name: Sign fixed-identity Beta and Stable APKs
+      - name: Verify compiled package metadata
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist/beta dist/stable
+          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          test -s "$BETA"
+          test -s "$STABLE"
+          B=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA")
+          S=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$STABLE")
+          echo "$B" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
+          echo "$B" | grep -q "versionCode='5'"
+          echo "$B" | grep -q "versionName='0.4.0-beta.1'"
+          echo "$S" | grep -q "package: name='vn.pickpack1291.app.stable'"
+          echo "$S" | grep -q "versionName='0.1.0-stable'"
+
+      - name: Detect release readiness
+        id: ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          READY=true
+          for v in GSHEET_API_URL SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do
+            if [[ -z "${!v:-}" ]]; then READY=false; fi
+          done
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          if [[ "$READY" != true ]]; then
+            echo 'Release publication blocked until Apps Script URL + fixed signing secrets are configured.'
+          fi
+
+      - name: Sign fixed-identity Beta and Stable APKs
+        if: steps.ready.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
           KS="$RUNNER_TEMP/pick-pack-1291-release.jks"
-          STORE_PASS="$RUNNER_TEMP/store.pass"
-          KEY_PASS="$RUNNER_TEMP/key.pass"
-          ALIAS="$(cat "$RUNNER_TEMP/key.alias")"
-          BETA_UNSIGNED=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          STABLE_UNSIGNED=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
-          test -s "$BETA_UNSIGNED"
-          test -s "$STABLE_UNSIGNED"
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign --ks "$KS" --ks-key-alias "$ALIAS" --ks-pass "file:$STORE_PASS" --key-pass "file:$KEY_PASS" --out dist/beta/pick-pack-1291-public-beta-v0.3.0-beta.2.apk "$BETA_UNSIGNED"
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign --ks "$KS" --ks-key-alias "$ALIAS" --ks-pass "file:$STORE_PASS" --key-pass "file:$KEY_PASS" --out dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk "$STABLE_UNSIGNED"
-          (cd dist/beta && sha256sum pick-pack-1291-public-beta-v0.3.0-beta.2.apk > SHA256SUMS.txt)
+          printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
+          chmod 600 "$KS"
+          mkdir -p dist/beta dist/stable
+          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"
+          printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
+            --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" \
+            --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
+            --out dist/beta/pick-pack-1291-public-beta-v0.4.0-beta.1.apk \
+            app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
+            --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" \
+            --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
+            --out dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk \
+            app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          (cd dist/beta && sha256sum pick-pack-1291-public-beta-v0.4.0-beta.1.apk > SHA256SUMS.txt)
           (cd dist/stable && sha256sum pick-pack-1291-stable-channel-v0.1.0.apk > SHA256SUMS.txt)
 
-      - name: Verify Beta APK
+      - name: Verify fixed signing identity
+        if: steps.ready.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          APK=dist/beta/pick-pack-1291-public-beta-v0.3.0-beta.2.apk
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/beta-cert.txt
-          grep -qi 'Signer #1 certificate SHA-256 digest: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e' /tmp/beta-cert.txt
-          BADGING=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$APK")
-          echo "$BADGING" | head -20
-          echo "$BADGING" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
-          echo "$BADGING" | grep -q "versionCode='4'"
-          echo "$BADGING" | grep -q "versionName='0.3.0-beta.2'"
+          EXPECTED=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/beta/pick-pack-1291-public-beta-v0.4.0-beta.1.apk | tee /tmp/beta-cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/beta-cert.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk | tee /tmp/stable-cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/stable-cert.txt
 
-      - name: Verify Stable channel APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK=dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee /tmp/stable-cert.txt
-          grep -qi 'Signer #1 certificate SHA-256 digest: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e' /tmp/stable-cert.txt
-          BADGING=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$APK")
-          echo "$BADGING" | grep -q "package: name='vn.pickpack1291.app.stable'"
-          echo "$BADGING" | grep -q "versionCode='1'"
-          echo "$BADGING" | grep -q "versionName='0.1.0-stable'"
-
-      - name: Upload Beta workflow artifact
+      - name: Upload signed Beta artifact
+        if: steps.ready.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-public-beta-v0.3.0-beta.2
+          name: pick-pack-1291-public-beta-v0.4.0-beta.1
           path: dist/beta/*
           retention-days: 30
 
-      - name: Upload Stable channel verification artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pick-pack-1291-stable-channel-v0.1.0
-          path: dist/stable/*
-          retention-days: 14
-
-      - name: Publish Full Public Beta prerelease
+      - name: Publish corrected Full Public Beta
+        if: steps.ready.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.3.0-beta.2-publicbeta
+          TAG: v0.4.0-beta.1-publicbeta
         shell: bash
         run: |
           set -euo pipefail
-          NOTES='S02 full-function Public Beta. Adds adaptive foreground realtime sync using authoritative server_seq with ACTIVE/DRAINING/SUSPENDED lifecycle, keeps QUÉT QR NHÂN SỰ/VÀO/RA, CÔNG NHẬT, atomic TÀI NGUYÊN, DANH SÁCH, BÁO CÁO and role controls, and switches CI to a fixed Android release signing identity delivered only to the trusted main-branch release workflow through GitHub OIDC. OTA still verifies APK SHA-256 before opening Android package installer. Google Sheet projection writer is isolated and fail-closed until its dedicated Apps Script deployment is commissioned.'
+          NOTES='Full-function Public Beta corrected to the approved Android App ↔ Google Apps Script ↔ Google Sheets architecture. No Supabase runtime/database dependency. Login uses PBKDF2 challenge-proof without sending plaintext password. QUÉT QR NHÂN SỰ remains context-aware for NOT_ENTERED / ACTIVE / ENDED; VÀO/RA, CÔNG NHẬT, resource changes, lists, reports and role controls operate on Google Sheets. Foreground revision polling remains active while the app is open. OTA checks GitHub Releases directly, verifies SHA-256, and opens the Android installer.'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.3.0-beta.2.apk dist/beta/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.4.0-beta.1.apk dist/beta/SHA256SUMS.txt --clobber
           else
             gh release create "$TAG" \
-              dist/beta/pick-pack-1291-public-beta-v0.3.0-beta.2.apk \
+              dist/beta/pick-pack-1291-public-beta-v0.4.0-beta.1.apk \
               dist/beta/SHA256SUMS.txt \
               --prerelease \
-              --title "Pick Pack 1291 Full Public Beta 0.3.0-beta.2" \
+              --title "Pick Pack 1291 Full Public Beta 0.4.0-beta.1" \
               --notes "$NOTES"
           fi
 
       - name: Cleanup signing material
         if: always()
         shell: bash
-        run: |
-          rm -f "$RUNNER_TEMP/pick-pack-1291-release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass" "$RUNNER_TEMP/key.alias" "$RUNNER_TEMP/oidc.json" "$RUNNER_TEMP/signing-bundle.json"
+        run: rm -f "$RUNNER_TEMP/pick-pack-1291-release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
