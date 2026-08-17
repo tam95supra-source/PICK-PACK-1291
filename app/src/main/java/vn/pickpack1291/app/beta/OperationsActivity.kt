@@ -192,6 +192,8 @@ class OperationsActivity : Activity() {
     private fun section(v:String)=txt(v,13.5f,navy,true).apply{setPadding(0,dp(12),0,dp(3))}
     private fun status(v:String,fg:Int,c:Int)=txt(v,11.3f,fg,true).apply{gravity=Gravity.CENTER;setPadding(dp(10),dp(9),dp(10),dp(9));background=round(c,8)}
     private fun info(v:String)=txt(v,10.3f,muted,false).apply{setPadding(dp(11),dp(9),dp(11),dp(9));background=outlineBg(Color.rgb(244,247,251),8)}
+    private fun mnvInput(h:String)=input(h,false).apply{setSingleLine(true);inputType=InputType.TYPE_CLASS_NUMBER;keyListener=DigitsKeyListener.getInstance("0123456789");imeOptions=EditorInfo.IME_ACTION_DONE}
+    private fun bindScannerEnter(v:EditText,submit:()->Unit){v.setOnEditorActionListener{_,id,_->if(id==EditorInfo.IME_ACTION_DONE||id==EditorInfo.IME_ACTION_GO||id==EditorInfo.IME_ACTION_SEARCH){submit();true}else false};v.setOnKeyListener{_,key,event->if(key==KeyEvent.KEYCODE_ENTER&&event.action==KeyEvent.ACTION_UP){submit();true}else false}}
     private fun input(h:String,password:Boolean)=EditText(this).apply{hint=h;textSize=14f;setTextColor(ink);setHintTextColor(Color.rgb(153,163,176));inputType=if(password)InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT;setPadding(dp(12),dp(9),dp(12),dp(9));minHeight=dp(46);background=outline()}
     private fun labelled(l:String,v:View)=column(bg).apply{addView(txt(l,10.5f,ink,true));addView(gap(4));addView(v,matchWrap())}
     private fun spinner(items:Array<String>)=Spinner(this).apply{adapter=ArrayAdapter(this@OperationsActivity,android.R.layout.simple_spinner_dropdown_item,items);setPadding(dp(7),dp(3),dp(7),dp(3));minimumHeight=dp(46);background=outline()}

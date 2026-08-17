@@ -72,7 +72,7 @@ function ppJson_(obj) {
 
 function ppHealth_() {
   const rows = ppValues_(PP.STAFF);
-  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',sheet_read:rows.length>1,business_date:ppBusinessIso_(),revision:ppRevision_()};
+  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.1',sheet_read:rows.length>1,business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
 }
 
 function ppSs_() { return SpreadsheetApp.openById(PP.SHEET_ID); }
