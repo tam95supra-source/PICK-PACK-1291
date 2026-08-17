@@ -2,9 +2,10 @@ plugins {
     id("com.android.application")
 }
 
+val approvedGsheetApiUrl = "https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec"
 val gsheetApiUrl = providers.gradleProperty("GSHEET_API_URL")
     .orElse(providers.environmentVariable("GSHEET_API_URL"))
-    .orElse("")
+    .orElse(approvedGsheetApiUrl)
     .get()
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
@@ -60,5 +61,6 @@ android {
 }
 
 // Operational architecture: Android App <-> Google Apps Script <-> Google Sheets.
-// GSHEET_API_URL is injected at build time and must point at the approved Apps Script /exec deployment.
+// The approved Apps Script /exec endpoint is public configuration, not a credential.
+// GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
