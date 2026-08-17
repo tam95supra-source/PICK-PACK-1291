@@ -43,8 +43,11 @@ jobs:
           fi
           grep -q 'Google Apps Script' README.md
           grep -q 'Google Sheets' README.md
+          grep -q "OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg'" google-apps-script/PICK_PACK_API.gs
+          grep -q "OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4'" google-apps-script/PICK_PACK_API.gs
+          grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
 
-      - name: Probe deployed Google Sheet API
+      - name: Probe deployed Google Sheet API 0.4.2
         shell: bash
         run: |
           set -euo pipefail
@@ -56,6 +59,15 @@ jobs:
           grep -q '"ok":true' /tmp/pick-pack-health.json
           grep -q '"mode":"APP_GSHEET"' /tmp/pick-pack-health.json
           grep -q '"sheet_read":true' /tmp/pick-pack-health.json
+          grep -q '"api_version":"0.4.2"' /tmp/pick-pack-health.json
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta-ota.json
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable-ota.json
+          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta-ota.json
+          grep -q '"channel":"BETA"' /tmp/beta-ota.json
+          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable-ota.json
+          grep -q '"channel":"STABLE"' /tmp/stable-ota.json
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -107,15 +119,15 @@ jobs:
           B=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA")
           S=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$STABLE")
           echo "$B" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
-          echo "$B" | grep -q "versionCode='7'"
-          echo "$B" | grep -q "versionName='0.4.2-beta.1'"
+          echo "$B" | grep -q "versionCode='8'"
+          echo "$B" | grep -q "versionName='0.4.2-beta.2'"
           echo "$S" | grep -q "package: name='vn.pickpack1291.app.stable'"
           echo "$S" | grep -q "versionName='0.1.0-stable'"
 
       - name: Upload unsigned Beta signing toolkit
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-beta-v0.4.2-signing-toolkit
+          name: pick-pack-1291-beta-v0.4.2-beta.2-signing-toolkit
           path: |
             app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
             ${{ env.ANDROID_SDK_ROOT }}/build-tools/36.0.0/lib/apksigner.jar
@@ -133,7 +145,9 @@ jobs:
           done
           echo "ready=$READY" >> "$GITHUB_OUTPUT"
           if [[ "$READY" != true ]]; then
-            echo 'Automated CI publication awaits GitHub Actions signing secrets; build/toolkit remains available for controlled signing.'
+            echo 'Automated signing awaits GitHub Actions signing secrets.'
+          else
+            echo 'Automated signing secrets: PRESENT'
           fi
 
       - name: Sign fixed-identity Beta and Stable APKs
@@ -150,14 +164,14 @@ jobs:
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
             --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" \
             --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
-            --out dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk \
+            --out dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.2.apk \
             app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
             --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" \
             --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
             --out dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk \
             app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
-          (cd dist/beta && sha256sum pick-pack-1291-public-beta-v0.4.2-beta.1.apk > SHA256SUMS.txt)
+          (cd dist/beta && sha256sum pick-pack-1291-public-beta-v0.4.2-beta.2.apk > SHA256SUMS.txt)
           (cd dist/stable && sha256sum pick-pack-1291-stable-channel-v0.1.0.apk > SHA256SUMS.txt)
 
       - name: Verify fixed signing identity
@@ -166,7 +180,7 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk | tee /tmp/beta-cert.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.2.apk | tee /tmp/beta-cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/beta-cert.txt
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk | tee /tmp/stable-cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/stable-cert.txt
@@ -175,27 +189,35 @@ jobs:
         if: steps.ready.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-public-beta-v0.4.2-beta.1
+          name: pick-pack-1291-public-beta-v0.4.2-beta.2
           path: dist/beta/*
           retention-days: 30
 
-      - name: Publish corrected Full Public Beta
+      - name: Upload signed Stable validation artifact
+        if: steps.ready.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-stable-ota-validation-v0.1.0
+          path: dist/stable/*
+          retention-days: 7
+
+      - name: Publish OTA-enabled Full Public Beta
         if: steps.ready.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.4.2-beta.1-publicbeta
+          TAG: v0.4.2-beta.2-publicbeta
         shell: bash
         run: |
           set -euo pipefail
-          NOTES='Full-function beta on Android App ↔ Google Apps Script ↔ Google Sheets. v0.4.2 adds indexed local staff cache, instant staff search, owner artwork launcher icon, compact operational UI, shift/supplier manpower reports, tenure reports, labor support/deduction reporting and beta OTA preparation.'
+          NOTES='Full-function beta on Android App ↔ Google Apps Script ↔ Google Sheets. v0.4.2-beta.2 enables automatic channel-separated OTA discovery through Google Apps Script: Beta reads BẢN THỬ NGHIỆM and Stable reads BẢN ỔN ĐỊNH. APK downloads are SHA-256 verified before Android installer launch.'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk dist/beta/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.2.apk dist/beta/SHA256SUMS.txt --clobber
           else
             gh release create "$TAG" \
-              dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk \
+              dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.2.apk \
               dist/beta/SHA256SUMS.txt \
               --prerelease \
-              --title "Pick Pack 1291 Full Public Beta 0.4.2-beta.1" \
+              --title "Pick Pack 1291 Full Public Beta 0.4.2-beta.2" \
               --notes "$NOTES"
           fi
 
