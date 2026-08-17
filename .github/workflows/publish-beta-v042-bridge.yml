@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
+      GH_REPO: tam95supra-source/pick-pack-1291
       APK_URL: https://drive.usercontent.google.com/download?id=1S-dVGl5k1ePbQASIw8traRI9DJS7ZnnS&export=download&confirm=t
       EXPECTED_SHA: 2c413b036ed9b3a938a668cde149bf10162f0a09977382c3e2ac7fbfb7653e68
       APK_NAME: pick-pack-1291-public-beta-v0.4.2-beta.2.apk
