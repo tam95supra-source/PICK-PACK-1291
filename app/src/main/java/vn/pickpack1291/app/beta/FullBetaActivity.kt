@@ -38,6 +38,8 @@ class FullBetaActivity : Activity() {
     private val line = Color.rgb(218, 225, 234)
 
     private val api = BetaApiClient()
+    private val syncApi = BetaApiClient()
+    private val cacheApi = BetaApiClient()
     private var accountLogin = ""
     private var accountName = ""
     private var accountRole = ""
@@ -46,7 +48,7 @@ class FullBetaActivity : Activity() {
     private var currentScreen = "LOGIN"
     private var liveEmployeeMnv = ""
     private val foregroundSync by lazy {
-        ForegroundSyncCoordinator(this, api, object : ForegroundSyncCoordinator.Listener {
+        ForegroundSyncCoordinator(this, syncApi, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
                 if (status.connected) {
                     syncText?.text = "●  GOOGLE SHEET LIVE • Rev ${status.serverSeq}"
@@ -55,7 +57,7 @@ class FullBetaActivity : Activity() {
                     syncText?.text = "●  Mất kết nối Google Sheet"
                     syncText?.setTextColor(red)
                 }
-                if (status.masterChanged) refreshMasterCache()
+                if (status.masterChanged || status.masterRevision != MasterDataCache.revision(this@FullBetaActivity)) refreshMasterCache()
                 if (status.changed && liveEmployeeMnv.isNotBlank()) loadEmployee(liveEmployeeMnv)
             }
 
@@ -119,7 +121,7 @@ class FullBetaActivity : Activity() {
                 accountPosition = a.optString("position", "")
                 getPreferences(MODE_PRIVATE).edit().putString("last_login", accountLogin).apply()
                 pass.setText("")
-                refreshMasterCache()
+                if (MasterDataCache.revision(this@FullBetaActivity) == 0L) refreshMasterCache()
                 LocalLogManager.uploadAutomaticPending(this@FullBetaActivity, api)
                 dashboard()
                 foregroundSync.start()
@@ -251,14 +253,14 @@ class FullBetaActivity : Activity() {
         fun rebuild(){resourceBox.removeAllViews();pdaValues.clear();pickValues.clear();packValues.clear();when(choice.selectedItem.toString()){
             "PICK"->{val labels=mutableListOf<String>();for(i in 0 until pdas.length()){val p=pdas.optJSONObject(i)?:continue;val serial=p.optString("serial");if(serial.isNotBlank()){pdaValues.add(serial);labels.add("${p.optString("last5")} • $serial")}};pdaSpinner=spinner((if(labels.isEmpty())listOf("Không có PDA khả dụng")else labels).toTypedArray());resourceBox.addView(labelled("PDA (bắt buộc)",pdaSpinner!!));resourceBox.addView(gap(8));val pl=mutableListOf<String>();for(i in 0 until picks.length()){val v=picks.optString(i);if(v.isNotBlank()){pl.add(v);pickValues.add(v)}};pickSpinner=spinner((if(pl.isEmpty())listOf("Không có User Pick khả dụng")else pl).toTypedArray());resourceBox.addView(labelled("User Pick (bắt buộc)",pickSpinner!!))}
             "PACK"->{val labels=mutableListOf<String>();val selectedShift=shift.selectedItem.toString();for(i in 0 until packs.length()){val p=packs.optJSONObject(i)?:continue;if(p.optString("shift")!=selectedShift)continue;val table=p.optString("table");if(table.isNotBlank()){packValues.add(table);labels.add("$table • ${p.optString("user_pack")}")}};packSpinner=spinner((if(labels.isEmpty())listOf("Không có bàn Pack khả dụng")else labels).toTypedArray());resourceBox.addView(labelled("Bàn Pack + User Pack",packSpinner!!))}
-            else->resourceBox.addView(info("Không cấp tài nguyên cho lựa chọn KHÔNG."))}}
+            else->Unit}}
         choice.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){rebuild()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};shift.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){rebuild()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};rebuild();body.addView(gap(14))
         val enter=primary("VÀO CA",blue){}
         enter.setOnClickListener{val work=choice.selectedItem.toString();val payload=JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",mnv).put("shift",shift.selectedItem.toString()).put("work_choice",work);if(work=="PICK"){if(pdaValues.isEmpty()){showError("Không còn PDA khả dụng.");return@setOnClickListener};payload.put("pda_serial",pdaValues[pdaSpinner?.selectedItemPosition?:0]);if(pickValues.isEmpty()){showError("Không còn User Pick khả dụng.");return@setOnClickListener};payload.put("user_pick",pickValues[pickSpinner?.selectedItemPosition?:0])};if(work=="PACK"){if(packValues.isEmpty()){showError("Không còn bàn Pack khả dụng.");return@setOnClickListener};payload.put("pack_table",packValues[packSpinner?.selectedItemPosition?:0])};enter.isEnabled=false;enter.text="ĐANG VÀO CA...";api.call("enter",payload){r->runOnUiThread{enter.isEnabled=true;enter.text="VÀO CA";if(!r.ok)showError(r.error?:"VÀO CA thất bại")else{toast("VÀO CA thành công");loadEmployee(mnv)}}}}
         body.addView(enter,matchWrap())
     }
 
-    private fun refreshStatus() { api.call("sync_status") { r -> runOnUiThread { if(r.code==401){sessionExpired();return@runOnUiThread}; val j=r.json; if(r.ok&&j!=null){val p=j.optInt("projection_pending",0);syncText?.text="● LIVE  R${j.optLong("server_seq",0)}";syncText?.setTextColor(green)}else{syncText?.text="●  Mất kết nối";syncText?.setTextColor(red)} } } }
+    private fun refreshStatus() { syncApi.call("sync_status") { r -> runOnUiThread { if(r.code==401){sessionExpired();return@runOnUiThread}; val j=r.json; if(r.ok&&j!=null){val p=j.optInt("projection_pending",0);syncText?.text="● LIVE  R${j.optLong("server_seq",0)}";syncText?.setTextColor(green)}else{syncText?.text="●  Mất kết nối";syncText?.setTextColor(red)} } } }
 
     private fun employeeCard(e: JSONObject)=column(surface).apply{setPadding(dp(14),dp(12),dp(14),dp(12));background=outlineBg(surface,9);addView(txt("${e.optString("mnv")} • ${e.optString("full_name")}",15.5f,navy,true));addView(gap(3));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}",10.5f,ink,false));addView(txt("${dash(e.optString("department"))} • Site ${dash(e.optString("site"))} • Kho ${dash(e.optString("warehouse"))}",10f,muted,false))}
     private fun details(items:List<Pair<String,String>>)=column(surface).apply{setPadding(dp(13),dp(9),dp(13),dp(9));background=outlineBg(surface,9);items.forEach{(k,v)->addView(row(surface).apply{addView(txt(k,10.5f,muted,false),LinearLayout.LayoutParams(0,-2,.45f));addView(txt(if(v.isBlank())"—" else v,10.7f,ink,true).apply{gravity=Gravity.END},LinearLayout.LayoutParams(0,-2,.55f));setPadding(0,dp(4),0,dp(4))})}}
@@ -279,7 +281,7 @@ class FullBetaActivity : Activity() {
 
     private fun setScreen(content:View){setContentView(host(content))}
     private fun navigateBack(){when(currentScreen){"EMPLOYEE"->employeeScan();"SCAN"->dashboard();"DASHBOARD"->finish();else->dashboard()}}
-    private fun refreshMasterCache(){api.call("master_snapshot"){r->if(r.ok&&r.json!=null)MasterDataCache.save(applicationContext,r.json)}}
+    private fun refreshMasterCache(){cacheApi.call("master_snapshot"){r->if(r.ok&&r.json!=null)MasterDataCache.save(applicationContext,r.json)}}
     private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){if(currentScreen!="LOGIN"&&currentScreen!="DASHBOARD")navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(27)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(23),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION") val t=i.systemWindowInsetTop;@Suppress("DEPRECATION") val b=i.systemWindowInsetBottom;top=t;bottom=b};v.setPadding(0,top+dp(7),0,bottom+dp(3));i};root.requestApplyInsets();return root}
     private fun sessionExpired(){AlertDialog.Builder(this).setTitle("Phiên đã hết hạn").setMessage("Đăng nhập lại để tiếp tục.").setCancelable(false).setPositiveButton("ĐĂNG NHẬP"){_,_->login()}.show()}
     private fun showError(raw:String){val msg=when{raw.contains("INVALID_CREDENTIALS")->"Sai tài khoản hoặc mật khẩu.";raw.contains("LOGIN_TEMP_LOCKED")->"Tài khoản tạm khóa 15 phút do đăng nhập sai nhiều lần.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy MNV.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Kiểm tra lại.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack đã được dùng trong ngày.";raw.contains("UNAUTHORIZED")->"Phiên đăng nhập đã hết hạn.";else->raw};AlertDialog.Builder(this).setTitle("Không thực hiện được").setMessage(msg).setPositiveButton("OK",null).show()}
