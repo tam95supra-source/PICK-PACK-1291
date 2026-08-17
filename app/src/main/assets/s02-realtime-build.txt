@@ -1,1 +1,0 @@
-S02 foreground realtime build verification marker.

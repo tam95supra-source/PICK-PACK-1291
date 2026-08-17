@@ -6,7 +6,7 @@ import android.os.Looper
 import org.json.JSONObject
 
 /**
- * Foreground-only server sequence watcher.
+ * Foreground-only Google Sheet revision watcher.
  *
  * Contract:
  * - starts with an immediate sync when an Activity enters foreground;
@@ -16,7 +16,7 @@ import org.json.JSONObject
  *   request finish, persists the cursor, then becomes SUSPENDED;
  * - never starts a new request while DRAINING/SUSPENDED.
  *
- * server_seq is only a change detector. Callers still reload authoritative state
+ * server_seq is the Apps Script / Google Sheet revision change detector. Callers still reload authoritative state
  * through the existing business endpoints instead of trusting cached deltas.
  */
 class ForegroundSyncCoordinator(

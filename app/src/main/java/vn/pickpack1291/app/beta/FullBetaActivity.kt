@@ -45,10 +45,10 @@ class FullBetaActivity : Activity() {
         ForegroundSyncCoordinator(this, api, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
                 if (status.connected) {
-                    syncText?.text = "●  REALTIME • Seq ${status.serverSeq} • chờ Sheet ACK: ${status.projectionPending}"
-                    syncText?.setTextColor(if (status.projectionPending == 0) green else orange)
+                    syncText?.text = "●  GOOGLE SHEET LIVE • Rev ${status.serverSeq}"
+                    syncText?.setTextColor(green)
                 } else {
-                    syncText?.text = "●  Mất kết nối realtime"
+                    syncText?.text = "●  Mất kết nối Google Sheet"
                     syncText?.setTextColor(red)
                 }
                 if (status.changed && liveEmployeeMnv.isNotBlank()) loadEmployee(liveEmployeeMnv)
@@ -163,7 +163,7 @@ class FullBetaActivity : Activity() {
         val check = primary("KIỂM TRA", navy) {}
         fun submit() { val v=mnv.text.toString().trim(); if(v.isBlank()){toast("Quét QR hoặc nhập MNV.");return}; check.isEnabled=false;check.text="ĐANG KIỂM TRA..."; loadEmployee(v, check) }
         check.setOnClickListener { submit() }; mnv.setOnEditorActionListener { _, id, _ -> if(id==EditorInfo.IME_ACTION_DONE){submit();true}else false }
-        body.addView(check, matchWrap()); body.addView(gap(12)); body.addView(info("Server tự xác định CHƯA VÀO / ĐANG TRONG PHIÊN / ĐÃ HẾT PHIÊN. Không còn nút VÀO/RA tách rời."))
+        body.addView(check, matchWrap()); body.addView(gap(12)); body.addView(info("Google Sheet xác định CHƯA VÀO / ĐANG TRONG PHIÊN / ĐÃ HẾT PHIÊN. Không còn nút VÀO/RA tách rời."))
         root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1,0,1f)); setScreen(root); mnv.requestFocus()
     }
 
