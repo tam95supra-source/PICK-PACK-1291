@@ -1,0 +1,25 @@
+name: Validate GSheet API Source
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/validate-gsheet-api.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse Apps Script JavaScript syntax
+        run: node --check < google-apps-script/PICK_PACK_API.gs
+      - name: Parse Apps Script manifest
+        run: node -e "JSON.parse(require('fs').readFileSync('google-apps-script/appsscript.json','utf8')); console.log('manifest ok')"
+      - name: Verify architecture strings
+        run: |
+          grep -q "SHEET_ID: '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'" google-apps-script/PICK_PACK_API.gs
+          grep -q "mode:'APP_GSHEET'" google-apps-script/PICK_PACK_API.gs
