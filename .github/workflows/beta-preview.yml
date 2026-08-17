@@ -37,8 +37,8 @@ jobs:
           test -f ARCHITECTURE_GUARDRAILS.md
           test -f google-apps-script/PICK_PACK_API.gs
           test ! -d supabase
-          if grep -RniE 'supabase\.co|supabase/functions|io\.supabase|supabase-js' app google-apps-script .github/workflows/beta-preview.yml; then
-            echo 'Supabase runtime/reference is forbidden by ARCHITECTURE_GUARDRAILS.md' >&2
+          if grep -RniE 'supabase[.]co|supabase/functions|io[.]supabase|supabase-js' app google-apps-script; then
+            echo 'Forbidden external backend runtime reference found.' >&2
             exit 1
           fi
           grep -q 'Google Apps Script' README.md
@@ -182,7 +182,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NOTES='Full-function Public Beta corrected to the approved Android App ↔ Google Apps Script ↔ Google Sheets architecture. No Supabase runtime/database dependency. Login uses PBKDF2 challenge-proof without sending plaintext password. QUÉT QR NHÂN SỰ remains context-aware for NOT_ENTERED / ACTIVE / ENDED; VÀO/RA, CÔNG NHẬT, resource changes, lists, reports and role controls operate on Google Sheets. Foreground revision polling remains active while the app is open. OTA checks GitHub Releases directly, verifies SHA-256, and opens the Android installer.'
+          NOTES='Full-function Public Beta corrected to the approved Android App ↔ Google Apps Script ↔ Google Sheets architecture. No external operational database/runtime backend. Login uses PBKDF2 challenge-proof without sending plaintext password. QUÉT QR NHÂN SỰ remains context-aware for NOT_ENTERED / ACTIVE / ENDED; VÀO/RA, CÔNG NHẬT, resource changes, lists, reports and role controls operate on Google Sheets. Foreground revision polling remains active while the app is open. OTA checks GitHub Releases directly, verifies SHA-256, and opens the Android installer.'
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.4.0-beta.1.apk dist/beta/SHA256SUMS.txt --clobber
           else
