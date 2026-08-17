@@ -10,14 +10,14 @@ android {
         applicationId = "vn.pickpack1291.app.beta"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-beta.1"
+        versionCode = 2
+        versionName = "0.2.0-beta.1"
     }
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".preview"
-            versionNameSuffix = "-preview"
+            applicationIdSuffix = ".publicbeta"
+            versionNameSuffix = "-publicbeta"
         }
         release {
             isMinifyEnabled = false
@@ -30,4 +30,4 @@ android {
     }
 }
 
-// Beta preview build is intentionally backend-disconnected until the authoritative API is deployed.
+// Public Beta uses the server-side authoritative Beta API; no Google credential is embedded in Android.
