@@ -32,6 +32,8 @@ class ForegroundSyncCoordinator(
         val serverSeq: Long,
         val projectionPending: Int,
         val changed: Boolean,
+        val masterRevision: Long,
+        val masterChanged: Boolean,
         val error: String? = null,
     )
 
@@ -43,10 +45,12 @@ class ForegroundSyncCoordinator(
     private val main = Handler(Looper.getMainLooper())
     private val prefs = context.applicationContext.getSharedPreferences("foreground_sync", Context.MODE_PRIVATE)
     private val cursorKey = "server_seq_${BuildConfig.CHANNEL}"
+    private val masterCursorKey = "master_revision_${BuildConfig.CHANNEL}"
     private var state = State.SUSPENDED
     private var inFlight = false
     private var idlePolls = 0
     private var lastSeq = prefs.getLong(cursorKey, 0L)
+    private var lastMasterRevision = prefs.getLong(masterCursorKey, 0L)
     private var generation = 0L
 
     private val tick = Runnable { poll() }
@@ -88,11 +92,18 @@ class ForegroundSyncCoordinator(
                 if (result.ok && body != null) {
                     val seq = body.optLong("server_seq", lastSeq)
                     val changed = seq != lastSeq
+                    val masterRevision = body.optLong("master_revision", lastMasterRevision)
+                    val masterChanged = masterRevision != lastMasterRevision
                     if (changed) {
                         lastSeq = seq
                         prefs.edit().putLong(cursorKey, seq).apply()
                         idlePolls = 0
-                    } else {
+                    }
+                    if (masterChanged) {
+                        lastMasterRevision = masterRevision
+                        prefs.edit().putLong(masterCursorKey, masterRevision).apply()
+                        idlePolls = 0
+                    } else if (!changed) {
                         idlePolls = (idlePolls + 1).coerceAtMost(1000)
                     }
 
@@ -106,6 +117,8 @@ class ForegroundSyncCoordinator(
                                 serverSeq = seq,
                                 projectionPending = body.optInt("projection_pending", 0),
                                 changed = changed,
+                                masterRevision = masterRevision,
+                                masterChanged = masterChanged,
                             )
                         )
                     }
@@ -117,6 +130,8 @@ class ForegroundSyncCoordinator(
                             serverSeq = lastSeq,
                             projectionPending = -1,
                             changed = false,
+                            masterRevision = lastMasterRevision,
+                            masterChanged = false,
                             error = result.error ?: "SYNC_FAILED",
                         )
                     )

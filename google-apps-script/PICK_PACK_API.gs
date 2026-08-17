@@ -15,7 +15,10 @@ const PP = Object.freeze({
   PACK: 'DANH SÁCH USER PACK',
   CATALOG: 'Danh mục',
   ADMIN: 'Danh sách Admin',
-  RELEASES: 'https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30'
+  RELEASES: 'https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30',
+  LOG_MANUAL_FOLDER_ID: '1jSPHbj3csKiRNyHtTp87Ed10m2VyFxXU',
+  LOG_CRASH_FOLDER_ID: '1tfEaiyhOScH0ucJGSfSDXF1Qq4tkCl0n',
+  LOG_ANDROID_FOLDER_ID: '1AN_cEcbbdVO0dory_01hkJhQ1dhlO7Vb'
 });
 
 function doGet() {
@@ -39,6 +42,7 @@ function doPost(e) {
     if (action === 'change_password') return ppJson_(ppChangePassword_(auth, body));
     if (action === 'employee_context') return ppJson_(ppEmployeeContext_(body));
     if (action === 'master_options') return ppJson_(ppMasterOptions_(body));
+    if (action === 'master_snapshot') return ppJson_(ppMasterSnapshot_());
     if (action === 'enter') return ppJson_(ppWithLock_(function(){ return ppEnter_(auth, body); }));
     if (action === 'exit') return ppJson_(ppWithLock_(function(){ return ppExit_(auth, body); }));
     if (action === 'resource_change') return ppJson_(ppWithLock_(function(){ return ppResourceChange_(auth, body); }));
@@ -116,35 +120,61 @@ function ppBumpRevision_() {
   return n;
 }
 
-function ppLookupStaff_(mnv) {
-  const rows = ppObjects_(PP.STAFF);
-  const r = rows.find(function(x){ return String(x['Mã nhân viên']) === String(mnv); });
-  if (!r) return null;
-  return {
-    mnv:String(mnv), full_name:r['Họ và tên']||'', phone:r['Số điện thoại']||'',
-    main_position:r['Vị trí chính']||'', supplier:r['Nhà cung cấp']||'', department:r['Bộ phận']||'',
-    site:r['Site']||'', warehouse:r['Kho']||'', start_date:r['Ngày bắt đầu làm việc']||''
-  };
+function ppMasterRevision_() {
+  return Number(PropertiesService.getScriptProperties().getProperty('PP_MASTER_REVISION') || '1');
 }
-
-function ppMasterData_() {
-  const pdas = ppObjects_(PP.PDA).filter(function(r){return ppAvailable_(r['Tình trạng']);}).map(function(r){return {serial:r['Seri PDA'],last5:r['5 số cuối Seri']||''};}).filter(function(x){return !!x.serial;});
-  const userPicks = ppObjects_(PP.PICK).filter(function(r){return ppAvailable_(r['Tình trạng']);}).map(function(r){return r['User Pick'];}).filter(Boolean);
-  const activeTables = new Set(ppObjects_(PP.TABLE).filter(function(r){return ppAvailable_(r['Tình trạng']);}).map(function(r){return r['Tên bàn pack'];}));
-  const packs = ppObjects_(PP.PACK).filter(function(r){return activeTables.has(r['Tên bàn pack']) && ppAvailable_(r['Tình trạng']);}).map(function(r){
-    return {table:r['Tên bàn pack'], label:r['User pack']||'', user_pack:r['User Pack']||''};
-  }).filter(function(x){return !!x.table && !!x.user_pack;});
-  return {pdas:pdas,userPicks:userPicks,packs:packs};
+function ppBumpMasterRevision_() {
+  const p=PropertiesService.getScriptProperties();
+  const n=Number(p.getProperty('PP_MASTER_REVISION') || '1')+1;
+  p.setProperty('PP_MASTER_REVISION',String(n));
+  return n;
 }
-function ppCatalog_() {
-  const rows = ppObjects_(PP.CATALOG), labor=[], markers=[];
-  rows.forEach(function(r){
-    const a=r['CÔNG NHẬT_Thông tin công nhật'], b=r['CÔNG NHẬT_Mốc thời gian'];
-    if(a && labor.indexOf(a)<0) labor.push(a);
-    if(b && markers.indexOf(b)<0) markers.push(b);
+function onEdit(e) {
+  try {
+    if(!e || !e.range) return;
+    const name=e.range.getSheet().getName();
+    const masters=[PP.CATALOG,PP.STAFF,PP.PDA,PP.PICK,PP.TABLE,PP.PACK,PP.ADMIN];
+    if(masters.indexOf(name)>=0){ ppBumpMasterRevision_(); ppBumpRevision_(); }
+    else if(name===PP.RA || name===PP.LABOR){ ppBumpRevision_(); }
+  } catch(err) { console.error('onEdit '+String(err)); }
+}
+function ppPackShift_(label,table) {
+  const f=ppFold_(label);
+  if(f.indexOf('CA 1-')===0) return 'Ca 1';
+  if(f.indexOf('CA 2-')===0) return 'Ca 2';
+  if(f.indexOf('HP-')===0 || ppFold_(table)==='HP') return 'Ca HC';
+  return '';
+}
+function ppMasterSnapshotData_() {
+  const rev=ppMasterRevision_(), cache=CacheService.getScriptCache(), key='PP_MASTER_V4_'+rev;
+  const cached=cache.get(key);
+  if(cached){ try { return JSON.parse(cached); } catch(_) {} }
+  const staff=ppObjects_(PP.STAFF).map(function(r){return {
+    mnv:r['Mã nhân viên']||'',full_name:r['Họ và tên']||'',phone:r['Số điện thoại']||'',main_position:r['Vị trí chính']||'',
+    supplier:r['Nhà cung cấp']||'',department:r['Bộ phận']||'',site:r['Site']||'',warehouse:r['Kho']||'',start_date:r['Ngày bắt đầu làm việc']||'',note:r['Ghi chú']||''
+  };}).filter(function(x){return !!x.mnv;});
+  const pdas=ppObjects_(PP.PDA).filter(function(r){return ppAvailable_(r['Tình trạng']);}).map(function(r){return {serial:r['Seri PDA'],last5:r['5 số cuối Seri']||'',status:r['Tình trạng']||''};}).filter(function(x){return !!x.serial;});
+  const userPicks=ppObjects_(PP.PICK).filter(function(r){return ppAvailable_(r['Tình trạng']);}).map(function(r){return r['User Pick'];}).filter(Boolean);
+  const tables=ppObjects_(PP.TABLE).filter(function(r){return ppAvailable_(r['Tình trạng']);}).map(function(r){return r['Tên bàn pack'];}).filter(Boolean);
+  const tableSet=new Set(tables), warnings=[], packs=[], seen={};
+  ppObjects_(PP.PACK).filter(function(r){return ppAvailable_(r['Tình trạng']);}).forEach(function(r){
+    const table=String(r['Tên bàn pack']||'').trim(), label=String(r['User pack']||'').trim(), userPack=String(r['User Pack']||'').trim();
+    if(!table || !userPack) return;
+    if(!tableSet.has(table)){ warnings.push('PACK_TABLE_MISSING:'+table+':'+label); return; }
+    const shift=ppPackShift_(label,table); if(!shift){ warnings.push('PACK_SHIFT_UNKNOWN:'+table+':'+label); return; }
+    const k=shift+'|'+userPack; if(seen[k]){ warnings.push('USER_PACK_DUPLICATE:'+k+':'+seen[k]+':'+table); return; }
+    seen[k]=table; packs.push({table:table,label:label,user_pack:userPack,shift:shift});
   });
-  return {labor_types:labor,time_markers:markers};
+  const rows=ppObjects_(PP.CATALOG), labor=[], markers=[];
+  rows.forEach(function(r){ const a=r['CÔNG NHẬT_Thông tin công nhật'],b=r['CÔNG NHẬT_Mốc thời gian']; if(a&&labor.indexOf(a)<0)labor.push(a);if(b&&markers.indexOf(b)<0)markers.push(b); });
+  const out={master_revision:rev,staff:staff,pdas:pdas,user_picks:userPicks,pack_tables:tables,pack_bundles:packs,labor_types:labor,time_markers:markers,config_warnings:warnings};
+  const raw=JSON.stringify(out); if(raw.length<95000) cache.put(key,raw,600);
+  return out;
 }
+function ppMasterSnapshot_() { const s=ppMasterSnapshotData_(); return Object.assign({ok:true},s); }
+function ppLookupStaff_(mnv) { return ppMasterSnapshotData_().staff.find(function(x){return String(x.mnv)===String(mnv);})||null; }
+function ppMasterData_() { const s=ppMasterSnapshotData_(); return {pdas:s.pdas,userPicks:s.user_picks,packs:s.pack_bundles}; }
+function ppCatalog_() { const s=ppMasterSnapshotData_(); return {labor_types:s.labor_types,time_markers:s.time_markers}; }
 
 function ppRaRows_() { return ppObjects_(PP.RA); }
 function ppSessionMap_(dateVisible) {
@@ -200,26 +230,27 @@ function ppEmployeeContext_(body) {
 function ppMasterOptions_(body) {
   const mnv=String(body.mnv||'').trim(), masters=ppMasterData_(), busy=ppBusyResources_(mnv), used=ppConsumption_(ppBusinessVisible_(),mnv), sessions=ppSessionMap_(ppBusinessVisible_());
   const catalog=ppCatalog_();
-  return {ok:true,business_date:ppBusinessIso_(),
+  return {ok:true,business_date:ppBusinessIso_(),master_revision:ppMasterRevision_(),
     pdas:masters.pdas.filter(function(x){return !busy.has('PDA|'+x.serial);}),
     user_picks:masters.userPicks.filter(function(x){return !busy.has('USER_PICK|'+x) && !used.picks.has(x);}),
     pack_tables:masters.packs.filter(function(x){return !busy.has('PACK_TABLE|'+x.table) && !busy.has('USER_PACK|'+x.user_pack) && !used.packs.has(x.user_pack);}),
-    current:sessions[mnv]||null,labor_types:catalog.labor_types,time_markers:catalog.time_markers};
+    current:sessions[mnv]||null,labor_types:catalog.labor_types,time_markers:catalog.time_markers,config_warnings:ppMasterSnapshotData_().config_warnings};
 }
 
-function ppValidateResources_(mnv, choice, body) {
+function ppValidateResources_(mnv, choice, body, shift) {
   const masters=ppMasterData_(), busy=ppBusyResources_(mnv), used=ppConsumption_(ppBusinessVisible_(),mnv);
   let pda=null,userPick=null,packTable=null,userPack=null;
   if(choice==='PICK') {
     pda=String(body.pda_serial||'').trim()||null; userPick=String(body.user_pick||'').trim()||null;
     if(!pda || !masters.pdas.some(function(x){return x.serial===pda;})) throw new Error('PDA_INVALID');
+    if(!userPick) throw new Error('USER_PICK_REQUIRED');
     if(busy.has('PDA|'+pda)) throw new Error('PP_RESOURCE_CONFLICT:PDA');
-    if(userPick && masters.userPicks.indexOf(userPick)<0) throw new Error('USER_PICK_INVALID');
-    if(userPick && (busy.has('USER_PICK|'+userPick) || used.picks.has(userPick))) throw new Error('PP_USER_PICK_USED_TODAY');
+    if(masters.userPicks.indexOf(userPick)<0) throw new Error('USER_PICK_INVALID');
+    if(busy.has('USER_PICK|'+userPick) || used.picks.has(userPick)) throw new Error('PP_USER_PICK_USED_TODAY');
   } else if(choice==='PACK') {
     packTable=String(body.pack_table||'').trim()||null;
-    const bundle=masters.packs.find(function(x){return x.table===packTable;});
-    if(!bundle) throw new Error('PACK_TABLE_INVALID');
+    const bundle=masters.packs.find(function(x){return x.table===packTable && x.shift===shift;});
+    if(!bundle) throw new Error('PACK_BUNDLE_INVALID:'+String(shift||''));
     userPack=bundle.user_pack;
     if(busy.has('PACK_TABLE|'+packTable) || busy.has('USER_PACK|'+userPack)) throw new Error('PP_RESOURCE_CONFLICT:PACK');
     if(used.packs.has(userPack)) throw new Error('PP_USER_PACK_USED_TODAY');
@@ -233,11 +264,11 @@ function ppAppendRa_(staff, shift, choice, res, actionLabel, appAction, eventId,
 }
 function ppEnter_(auth,body) {
   const mnv=String(body.mnv||'').trim(), eventId=String(body.event_id||'').trim(), shift=String(body.shift||'').trim(), choice=String(body.work_choice||'').trim().toUpperCase();
-  if(!mnv||!eventId||['Ca 1','Ca 2','HC'].indexOf(shift)<0||['PICK','PACK','KHÔNG'].indexOf(choice)<0)return {ok:false,error:'ENTER_FIELDS_INVALID'};
+  if(!mnv||!eventId||['Ca 1','Ca 2','Ca HC'].indexOf(shift)<0||['PICK','PACK','KHÔNG'].indexOf(choice)<0)return {ok:false,error:'ENTER_FIELDS_INVALID'};
   if(ppEventExists_(eventId))return {ok:true,idempotent:true};
   const staff=ppLookupStaff_(mnv); if(!staff)return {ok:false,error:'EMPLOYEE_NOT_FOUND'};
   const old=ppSessionMap_(ppBusinessVisible_())[mnv]; if(old && old.state==='ACTIVE')return {ok:false,error:'PP_SESSION_ALREADY_ACTIVE'}; if(old && old.state==='ENDED')return {ok:false,error:'PP_SESSION_ALREADY_ENDED'};
-  const res=ppValidateResources_(mnv,choice,body); const rev=ppAppendRa_(staff,shift,choice,res,'VÀO','ENTER',eventId,auth.login_id,'PUBLIC BETA');
+  const res=ppValidateResources_(mnv,choice,body,shift); const rev=ppAppendRa_(staff,shift,choice,res,'VÀO','ENTER',eventId,auth.login_id,'PUBLIC BETA');
   return {ok:true,result:{event_id:eventId,revision:rev},projection:'DIRECT_GSHEET'};
 }
 function ppExit_(auth,body) {
@@ -249,7 +280,7 @@ function ppExit_(auth,body) {
 function ppResourceChange_(auth,body) {
   const mnv=String(body.mnv||'').trim(),eventId=String(body.event_id||'').trim(),choice=String(body.work_choice||'').trim().toUpperCase(); if(!mnv||!eventId||['PICK','PACK','KHÔNG'].indexOf(choice)<0)return {ok:false,error:'RESOURCE_FIELDS_INVALID'}; if(ppEventExists_(eventId))return {ok:true,idempotent:true};
   const s=ppSessionMap_(ppBusinessVisible_())[mnv]; if(!s||s.state!=='ACTIVE')return {ok:false,error:'PP_SESSION_NOT_ENTERED'};
-  const res=ppValidateResources_(mnv,choice,body); const staff=ppLookupStaff_(mnv)||s.employee_snapshot; const rev=ppAppendRa_(staff,s.shift,choice,res,'ĐỔI TÀI NGUYÊN','RESOURCE',eventId,auth.login_id,'ĐỔI TÀI NGUYÊN');
+  const res=ppValidateResources_(mnv,choice,body,s.shift); const staff=ppLookupStaff_(mnv)||s.employee_snapshot; const rev=ppAppendRa_(staff,s.shift,choice,res,'ĐỔI TÀI NGUYÊN','RESOURCE',eventId,auth.login_id,'ĐỔI TÀI NGUYÊN');
   return {ok:true,result:{event_id:eventId,revision:rev}};
 }
 
@@ -326,14 +357,14 @@ function ppLogin_(body) {
   const login=String(body.login_id||'').trim(), id=String(body.challenge_id||''), proof=String(body.proof||''), c=ppTakeChallenge_(id,'LOGIN',login), a=ppAccount_(login), p=a?ppVerifierParts_(a.verifier):null;
   if(!c||!a||a.status!=='ACTIVE'||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'INVALID_CREDENTIALS'};
   const exp=Date.now()+12*60*60*1000, token=ppMakeToken_(a,exp);
-  return {ok:true,token:token,expires_at:new Date(exp).toISOString(),account:{login_id:a.login_id,role:a.role,display_name:a.display_name}};
+  return {ok:true,token:token,expires_at:new Date(exp).toISOString(),account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||''}};
 }
 function ppPasswordChallenge_(auth) {
   const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:auth.login_id,purpose:'PASSWORD',challenge:challenge}),120); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
 }
 function ppChangePassword_(auth,body) {
   const id=String(body.challenge_id||''),proof=String(body.proof||''),newVerifier=String(body.new_verifier||''),c=ppTakeChallenge_(id,'PASSWORD',auth.login_id),p=ppVerifierParts_(auth.verifier),np=ppVerifierParts_(newVerifier); if(!c||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'CURRENT_PASSWORD_INVALID'}; if(!np)return {ok:false,error:'PASSWORD_POLICY'};
-  ppSheet_(PP.ADMIN).getRange(auth.row,2).setValue(newVerifier); ppEnsureAdminHeaders_(); ppSheet_(PP.ADMIN).getRange(auth.row,10).setValue(auth.login_id); ppSheet_(PP.ADMIN).getRange(auth.row,11).setValue(ppNowVisible_()); ppBumpRevision_(); return {ok:true};
+  ppSheet_(PP.ADMIN).getRange(auth.row,2).setValue(newVerifier); ppEnsureAdminHeaders_(); ppSheet_(PP.ADMIN).getRange(auth.row,10).setValue(auth.login_id); ppSheet_(PP.ADMIN).getRange(auth.row,11).setValue(ppNowVisible_()); ppBumpRevision_(); ppBumpMasterRevision_(); return {ok:true};
 }
 function ppAccountList_(auth) {
   if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
@@ -346,10 +377,10 @@ function ppAccountUpsert_(auth,body) {
   ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);
   if(old){sh.getRange(old.row,1).setValue(login);if(verifier)sh.getRange(old.row,2).setValue(verifier);sh.getRange(old.row,3).setValue(role.toLowerCase());sh.getRange(old.row,4).setValue(display);if(position)sh.getRange(old.row,5).setValue(position);sh.getRange(old.row,9).setValue('ACTIVE');sh.getRange(old.row,10).setValue(auth.login_id);sh.getRange(old.row,11).setValue(ppNowVisible_());}
   else {sh.appendRow([login,verifier,role.toLowerCase(),display,position,'','','','ACTIVE',auth.login_id,ppNowVisible_()]);}
-  ppBumpRevision_(); return {ok:true};
+  ppBumpRevision_(); ppBumpMasterRevision_(); return {ok:true};
 }
 function ppAccountStatus_(auth,body) {
-  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'}; const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),t=ppAccount_(login); if(!t||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'}; if(t.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&t.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'}; ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);sh.getRange(t.row,9).setValue(status);sh.getRange(t.row,10).setValue(auth.login_id);sh.getRange(t.row,11).setValue(ppNowVisible_());ppBumpRevision_();return {ok:true};
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'}; const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),t=ppAccount_(login); if(!t||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'}; if(t.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&t.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'}; ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);sh.getRange(t.row,9).setValue(status);sh.getRange(t.row,10).setValue(auth.login_id);sh.getRange(t.row,11).setValue(ppNowVisible_());ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
 }
 
 function ppAuthenticate_(body) {
@@ -375,9 +406,15 @@ function ppEnsureOperationalHeaders_() {
   const lb=ppSheet_(PP.LABOR); if(lb.getRange(1,20).getValue()!=='Event ID')lb.getRange(1,20,1,3).setValues([['Event ID','Finish Event ID','App revision']]);
 }
 function ppEnsureAdminHeaders_(){const sh=ppSheet_(PP.ADMIN);if(sh.getRange(1,9).getValue()!=='Trạng thái tài khoản')sh.getRange(1,9,1,3).setValues([['Trạng thái tài khoản','Người cập nhật','Thời gian cập nhật']]);}
-function ppSyncStatus_(){return {ok:true,business_date:ppBusinessIso_(),server_seq:ppRevision_(),last_event_at:ppNowIso_(),projection_pending:0,labor_active:ppLaborRows_().filter(function(r){return r['Ngày']===ppBusinessVisible_()&&ppLaborState_(r)==='ACTIVE';}).length,mode:'APP_GSHEET'};}
+function ppSyncStatus_(){return {ok:true,business_date:ppBusinessIso_(),server_seq:ppRevision_(),master_revision:ppMasterRevision_(),last_event_at:ppNowIso_(),projection_pending:0,mode:'APP_GSHEET'};}
 function ppDiagnosticLog_(auth,body) {
-  const eventId=String(body.event_id||'').trim(); if(!eventId)return {ok:false,error:'EVENT_ID_REQUIRED'}; const raw=JSON.stringify({event_id:eventId,at:ppNowIso_(),login_id:auth.login_id,role:auth.role,channel:body.channel||body._app_channel||'',app_version:body.app_version||body._app_version||'',payload:body.payload||{}}); if(raw.length>80000)return {ok:false,error:'LOG_TOO_LARGE'};
-  const folders=DriveApp.getFoldersByName('NHẬT KÝ ANDROID'); if(!folders.hasNext())return {ok:false,error:'DRIVE_LOG_FOLDER_NOT_FOUND'}; folders.next().createFile('pick-pack-'+Utilities.formatDate(new Date(),PP.TZ,'yyyyMMdd-HHmmss')+'-'+eventId+'.json',raw,MimeType.PLAIN_TEXT); return {ok:true,ack_event_id:eventId};
+  const eventId=String(body.event_id||'').trim(); if(!eventId)return {ok:false,error:'EVENT_ID_REQUIRED'};
+  const type=String(body.log_type||'').trim().toUpperCase();
+  const map={MANUAL:{id:PP.LOG_MANUAL_FOLDER_ID,prefix:'manual'},CRASH:{id:PP.LOG_CRASH_FOLDER_ID,prefix:'crash'},DAILY:{id:PP.LOG_ANDROID_FOLDER_ID,prefix:'android-daily'}};
+  const target=map[type]; if(!target)return {ok:false,error:'LOG_TYPE_INVALID'};
+  const raw=JSON.stringify({event_id:eventId,log_type:type,at:ppNowIso_(),login_id:auth.login_id,role:auth.role,channel:body.channel||body._app_channel||'',app_version:body.app_version||body._app_version||'',payload:body.payload||{}});
+  if(raw.length>80000)return {ok:false,error:'LOG_TOO_LARGE'};
+  DriveApp.getFolderById(target.id).createFile(target.prefix+'-'+Utilities.formatDate(new Date(),PP.TZ,'yyyyMMdd-HHmmss')+'-'+eventId+'.json',raw,MimeType.PLAIN_TEXT);
+  return {ok:true,ack_event_id:eventId,log_type:type};
 }
-function ppCleanError_(err){const m=String(err&&err.message||err||'UNKNOWN');const known=['PP_SESSION_ALREADY_ACTIVE','PP_SESSION_ALREADY_ENDED','PP_SESSION_NOT_ENTERED','PP_RESOURCE_CONFLICT','PP_USER_PICK_USED_TODAY','PP_USER_PACK_USED_TODAY','PP_LABOR_ALREADY_ACTIVE','PP_LABOR_NOT_ACTIVE','PDA_INVALID','PACK_TABLE_INVALID','USER_PICK_INVALID','BUSY_RETRY'];for(let i=0;i<known.length;i++)if(m.indexOf(known[i])>=0)return m.slice(m.indexOf(known[i]),m.indexOf(known[i])+220);return m.slice(0,220)||'SERVER_ERROR';}
+function ppCleanError_(err){const m=String(err&&err.message||err||'UNKNOWN');const known=['PP_SESSION_ALREADY_ACTIVE','PP_SESSION_ALREADY_ENDED','PP_SESSION_NOT_ENTERED','PP_RESOURCE_CONFLICT','PP_USER_PICK_USED_TODAY','PP_USER_PACK_USED_TODAY','PP_LABOR_ALREADY_ACTIVE','PP_LABOR_NOT_ACTIVE','PDA_INVALID','PACK_TABLE_INVALID','PACK_BUNDLE_INVALID','USER_PICK_INVALID','USER_PICK_REQUIRED','BUSY_RETRY'];for(let i=0;i<known.length;i++)if(m.indexOf(known[i])>=0)return m.slice(m.indexOf(known[i]),m.indexOf(known[i])+220);return m.slice(0,220)||'SERVER_ERROR';}
