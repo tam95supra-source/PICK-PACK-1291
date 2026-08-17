@@ -1,0 +1,218 @@
+name: Implement Drive OTA v0.4.2 run2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/implement-ota-drive-v042-run2.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  implement-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch OTA source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gas=Path('google-apps-script/PICK_PACK_API.gs')
+          s=gas.read_text()
+          if 'OTA_BETA_FOLDER_ID' not in s:
+              a="  ADMIN: 'Danh sách Admin',\n"
+              r=("  ADMIN: 'Danh sách Admin',\n"
+                 "  OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg',\n"
+                 "  OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4',\n")
+              if a not in s: raise SystemExit('constant anchor missing')
+              s=s.replace(a,r,1)
+          a="    if (action === 'health') return ppJson_(ppHealth_());\n"
+          if "action === 'update_check'" not in s:
+              if a not in s: raise SystemExit('route anchor missing')
+              s=s.replace(a,a+"    if (action === 'update_check') return ppJson_(ppUpdateCheck_(body));\n",1)
+          if 'function ppUpdateCheck_(body)' not in s:
+              a='function ppJson_(obj) {\n'
+              if a not in s: raise SystemExit('function anchor missing')
+              ota=r'''function ppOtaVersionFromName_(name) {
+            const m = String(name || '').match(/(\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)(?=\.apk$)/i);
+            return m ? m[1] : '';
+          }
+          function ppOtaVersionParts_(value) {
+            const m = String(value || '').match(/\d+/g) || [];
+            return m.slice(0, 6).map(function(x){ return Number(x) || 0; });
+          }
+          function ppOtaCompare_(a, b) {
+            const aa=ppOtaVersionParts_(a), bb=ppOtaVersionParts_(b), n=Math.max(aa.length,bb.length);
+            for(let i=0;i<n;i++){ const av=aa[i]||0,bv=bb[i]||0; if(av!==bv)return av>bv?1:-1; }
+            return 0;
+          }
+          function ppOtaSha256_(file) {
+            const cache=CacheService.getScriptCache();
+            const key='PP_OTA_SHA_'+file.getId()+'_'+file.getLastUpdated().getTime()+'_'+file.getSize();
+            const cached=cache.get(key); if(cached)return cached;
+            const digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,file.getBlob().getBytes());
+            const sha=digest.map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');
+            cache.put(key,sha,21600); return sha;
+          }
+          function ppUpdateCheck_(body) {
+            const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
+            const current=String(body.current_version||body._app_version||'').trim();
+            const folderId=channel==='STABLE'?PP.OTA_STABLE_FOLDER_ID:PP.OTA_BETA_FOLDER_ID;
+            const files=DriveApp.getFolderById(folderId).getFiles(); let best=null;
+            while(files.hasNext()){
+              const file=files.next(),name=file.getName(); if(!/\.apk$/i.test(name))continue;
+              const version=ppOtaVersionFromName_(name); if(!version)continue; const updated=file.getLastUpdated();
+              if(!best||ppOtaCompare_(version,best.version)>0||(ppOtaCompare_(version,best.version)===0&&updated.getTime()>best.updated.getTime())) best={file:file,name:name,version:version,updated:updated};
+            }
+            if(!best)return {ok:true,source:'GOOGLE_DRIVE',channel:channel,available:false,reason:'NO_APK'};
+            const available=ppOtaCompare_(best.version,current)>0;
+            const out={ok:true,source:'GOOGLE_DRIVE',channel:channel,available:available,version_name:best.version,size:best.file.getSize(),published_at:best.updated.toISOString(),notes:String(best.file.getDescription()||(channel==='STABLE'?'Phát hành từ BẢN ỔN ĐỊNH':'Phát hành từ BẢN THỬ NGHIỆM')),mandatory:/mandatory/i.test(best.name)};
+            if(!available)return out;
+            try{
+              const access=best.file.getSharingAccess();
+              if(access!==DriveApp.Access.ANYONE&&access!==DriveApp.Access.ANYONE_WITH_LINK)best.file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
+            }catch(err){console.error('OTA sharing: '+String(err));return {ok:false,error:'OTA_SHARE_FAILED',source:'GOOGLE_DRIVE',channel:channel};}
+            out.sha256=ppOtaSha256_(best.file);
+            out.apk_url='https://drive.usercontent.google.com/download?id='+encodeURIComponent(best.file.getId())+'&export=download&confirm=t';
+            return out;
+          }
+
+          '''
+              s=s.replace(a,ota+a,1)
+          gas.write_text(s)
+
+          api=Path('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt')
+          s=api.read_text()
+          old='''    /** OTA metadata comes straight from GitHub Releases, never from an app-data backend. */
+              fun updateCheck(channel: String, currentVersion: String, callback: (Result) -> Unit) {
+                  executor.execute {
+                      try { callback(githubUpdate(channel, currentVersion)) }
+                      catch (t: Throwable) { callback(failure(t)) }
+                  }
+              }
+          '''
+          new='''    /** OTA metadata comes from Apps Script, which reads the channel-specific Google Drive release folder. */
+              fun updateCheck(channel: String, currentVersion: String, callback: (Result) -> Unit) {
+                  executor.execute {
+                      try {
+                          callback(post(JSONObject().apply {
+                              put("action", "update_check")
+                              put("channel", channel)
+                              put("current_version", currentVersion)
+                          }, authenticated = false))
+                      } catch (t: Throwable) { callback(failure(t)) }
+                  }
+              }
+          '''
+          if 'callback(githubUpdate(channel, currentVersion))' in s:
+              if old not in s: raise SystemExit('android OTA block mismatch')
+              s=s.replace(old,new,1)
+          api.write_text(s)
+
+          upd=Path('app/src/main/java/vn/pickpack1291/app/beta/UpdateManager.kt')
+          upd.write_text(upd.read_text().replace('private const val CHECK_INTERVAL_MS = 10 * 60_000L','private const val CHECK_INTERVAL_MS = 2 * 60_000L'))
+
+          full=Path('app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt')
+          s=full.read_text()
+          if 'UpdateManager.check(this@FullBetaActivity)' not in s:
+              s=s.replace('override fun onStatus(status: ForegroundSyncCoordinator.Status) {\n                if (status.connected) {','override fun onStatus(status: ForegroundSyncCoordinator.Status) {\n                UpdateManager.check(this@FullBetaActivity)\n                if (status.connected) {',1)
+          s=s.replace('        UpdateManager.check(this)\n        if (api.token != null) foregroundSync.start()','        UpdateManager.check(this, force = true)\n        if (api.token != null) foregroundSync.start()',1)
+          full.write_text(s)
+
+          ops=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt')
+          s=ops.read_text()
+          if 'UpdateManager.check(this@OperationsActivity)' not in s:
+              s=s.replace('override fun onStatus(status: ForegroundSyncCoordinator.Status) {\n                syncText?.text =','override fun onStatus(status: ForegroundSyncCoordinator.Status) {\n                UpdateManager.check(this@OperationsActivity)\n                syncText?.text =',1)
+          s=s.replace('        UpdateManager.check(this)\n        if (api.token != null) foregroundSync.start()','        UpdateManager.check(this, force = true)\n        if (api.token != null) foregroundSync.start()',1)
+          ops.write_text(s)
+
+          assert "action === 'update_check'" in gas.read_text()
+          assert 'put("action", "update_check")' in api.read_text()
+          assert 'UpdateManager.check(this, force = true)' in full.read_text()
+          print('OTA patch PASS')
+          PY
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'tam95supra-source'
+          git config user.email 'tam95.supra@gmail.com'
+          git add google-apps-script/PICK_PACK_API.gs \
+                  app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt \
+                  app/src/main/java/vn/pickpack1291/app/beta/UpdateManager.kt \
+                  app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt \
+                  app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          if git diff --cached --quiet; then echo 'Source already applied.'; else git commit -m 'feat: use Drive channel folders for OTA from v0.4.2'; git push origin HEAD:main; fi
+
+      - name: Normalize identifiers and exchange OAuth
+        id: oauth
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t '); DEPLOYMENT_ID="$RAW"
+          if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"; echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"; echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy GAS source
+        shell: bash
+        env:
+          SCRIPT_ID: ${{ steps.oauth.outputs.script_id }}
+          DEPLOYMENT_ID: ${{ steps.oauth.outputs.deployment_id }}
+          ACCESS_TOKEN: ${{ steps.oauth.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content"); [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 API 0.4.2 Drive OTA"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions"); [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
+          python3 - "$SCRIPT_ID" "$V" <<'PY'
+          import json,sys
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API 0.4.2 Drive OTA'}}))
+          PY
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID"); [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
+          echo "Deployment version $V PASS"
+
+      - name: Verify live OTA
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 12); do curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/h.json || true; if grep -q '"api_version":"0.4.2"' /tmp/h.json; then OK=true; break; fi; sleep 5; done
+          [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.0.0"}' > /tmp/o.json
+          grep -q '"ok":true' /tmp/o.json; grep -q '"source":"GOOGLE_DRIVE"' /tmp/o.json; grep -q '"channel":"BETA"' /tmp/o.json
+          echo 'Live GAS Drive OTA PASS'
+
+      - name: Trigger Android build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run beta-preview.yml --ref main
