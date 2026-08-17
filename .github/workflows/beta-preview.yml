@@ -107,15 +107,15 @@ jobs:
           B=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA")
           S=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$STABLE")
           echo "$B" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
-          echo "$B" | grep -q "versionCode='6'"
-          echo "$B" | grep -q "versionName='0.4.1-beta.1'"
+          echo "$B" | grep -q "versionCode='7'"
+          echo "$B" | grep -q "versionName='0.4.2-beta.1'"
           echo "$S" | grep -q "package: name='vn.pickpack1291.app.stable'"
           echo "$S" | grep -q "versionName='0.1.0-stable'"
 
       - name: Upload unsigned Beta signing toolkit
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-beta-v0.4.1-signing-toolkit
+          name: pick-pack-1291-beta-v0.4.2-signing-toolkit
           path: |
             app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
             ${{ env.ANDROID_SDK_ROOT }}/build-tools/36.0.0/lib/apksigner.jar
@@ -150,14 +150,14 @@ jobs:
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
             --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" \
             --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
-            --out dist/beta/pick-pack-1291-public-beta-v0.4.1-beta.1.apk \
+            --out dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk \
             app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
             --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" \
             --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
             --out dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk \
             app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
-          (cd dist/beta && sha256sum pick-pack-1291-public-beta-v0.4.1-beta.1.apk > SHA256SUMS.txt)
+          (cd dist/beta && sha256sum pick-pack-1291-public-beta-v0.4.2-beta.1.apk > SHA256SUMS.txt)
           (cd dist/stable && sha256sum pick-pack-1291-stable-channel-v0.1.0.apk > SHA256SUMS.txt)
 
       - name: Verify fixed signing identity
@@ -166,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/beta/pick-pack-1291-public-beta-v0.4.1-beta.1.apk | tee /tmp/beta-cert.txt
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk | tee /tmp/beta-cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/beta-cert.txt
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/stable/pick-pack-1291-stable-channel-v0.1.0.apk | tee /tmp/stable-cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED" /tmp/stable-cert.txt
@@ -175,7 +175,7 @@ jobs:
         if: steps.ready.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-public-beta-v0.4.1-beta.1
+          name: pick-pack-1291-public-beta-v0.4.2-beta.1
           path: dist/beta/*
           retention-days: 30
 
@@ -183,19 +183,19 @@ jobs:
         if: steps.ready.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.4.1-beta.1-publicbeta
+          TAG: v0.4.2-beta.1-publicbeta
         shell: bash
         run: |
           set -euo pipefail
-          NOTES='Full-function beta on Android App ↔ Google Apps Script ↔ Google Sheets. v0.4.1 adds local/static master caching, revision-based master refresh, shift-aware Pack mapping, corrected log routing, hardware-scanner Enter support, edge swipe-back navigation, launcher adaptive icon and operational layout/status redesign.'
+          NOTES='Full-function beta on Android App ↔ Google Apps Script ↔ Google Sheets. v0.4.2 adds indexed local staff cache, instant staff search, owner artwork launcher icon, compact operational UI, shift/supplier manpower reports, tenure reports, labor support/deduction reporting and beta OTA preparation.'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.4.1-beta.1.apk dist/beta/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk dist/beta/SHA256SUMS.txt --clobber
           else
             gh release create "$TAG" \
-              dist/beta/pick-pack-1291-public-beta-v0.4.1-beta.1.apk \
+              dist/beta/pick-pack-1291-public-beta-v0.4.2-beta.1.apk \
               dist/beta/SHA256SUMS.txt \
               --prerelease \
-              --title "Pick Pack 1291 Full Public Beta 0.4.1-beta.1" \
+              --title "Pick Pack 1291 Full Public Beta 0.4.2-beta.1" \
               --notes "$NOTES"
           fi
 
