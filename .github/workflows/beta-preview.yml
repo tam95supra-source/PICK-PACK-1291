@@ -1,4 +1,4 @@
-name: Build Beta Preview APK
+name: Build Public Beta APK
 
 on:
   push:
@@ -15,12 +15,23 @@ permissions:
   contents: write
 
 jobs:
-  build-beta-preview:
+  build-public-beta:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Probe Public Beta API
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 --retry-delay 2 \
+            -X POST 'https://oedasgcdjppjwidhlqdr.supabase.co/functions/v1/pick-pack-beta-api' \
+            -H 'content-type: application/json' \
+            -d '{"action":"health"}' | tee /tmp/pick-pack-health.json
+          grep -q '"ok":true' /tmp/pick-pack-health.json
+          grep -q '"sheet_read":true' /tmp/pick-pack-health.json
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -51,43 +62,51 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Assemble Beta Preview
+      - name: Assemble Public Beta
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Prepare named APK
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk
-          sha256sum dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk | tee dist/SHA256SUMS.txt
+          cp app/build/outputs/apk/debug/app-debug.apk dist/pick-pack-1291-public-beta-v0.2.0-beta.1.apk
+          sha256sum dist/pick-pack-1291-public-beta-v0.2.0-beta.1.apk | tee dist/SHA256SUMS.txt
 
       - name: Verify APK
         shell: bash
         run: |
-          APK=dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk
+          set -euo pipefail
+          APK=dist/pick-pack-1291-public-beta-v0.2.0-beta.1.apk
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$APK" | head -20
+          BADGING=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$APK")
+          echo "$BADGING" | head -20
+          echo "$BADGING" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
+          echo "$BADGING" | grep -q "versionCode='2'"
+          echo "$BADGING" | grep -q "versionName='0.2.0-beta.1-publicbeta'"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-beta-v0.1.0-beta.1-preview
+          name: pick-pack-1291-public-beta-v0.2.0-beta.1
           path: dist/*
           retention-days: 30
 
       - name: Publish prerelease
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v0.1.0-beta.1-preview
+          TAG: v0.2.0-beta.1-publicbeta
         shell: bash
         run: |
+          set -euo pipefail
+          NOTES='Connected Public Beta for field testing. UI switches to approved Interface Sample 1, applies system-bar insets and a smaller bottom-pinned copyright. VÀO/RA are merged into QUÉT QR NHÂN SỰ. Login, personnel lookup, live master-resource lookup, ENTER and EXIT use the real authoritative Beta API with idempotent transactional state. Google Sheet projection is durably queued and reports pending ACK until the dedicated Sheet writer is activated. This separate public-beta package is debug-signed for pilot testing and is not the permanent OTA signing baseline.'
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk dist/SHA256SUMS.txt --clobber
+            gh release upload "$TAG" dist/pick-pack-1291-public-beta-v0.2.0-beta.1.apk dist/SHA256SUMS.txt --clobber
           else
             gh release create "$TAG" \
-              dist/pick-pack-1291-beta-v0.1.0-beta.1-preview.apk \
+              dist/pick-pack-1291-public-beta-v0.2.0-beta.1.apk \
               dist/SHA256SUMS.txt \
               --prerelease \
-              --title "Pick Pack 1291 Beta UI Preview 0.1.0-beta.1" \
-              --notes "First installable UI/UX preview using approved Interface Sample 3. This build is intentionally backend-disconnected and uses debug signing for visual/interaction review only. Do not treat it as the permanent OTA signing baseline."
+              --title "Pick Pack 1291 Public Beta 0.2.0-beta.1" \
+              --notes "$NOTES"
           fi
