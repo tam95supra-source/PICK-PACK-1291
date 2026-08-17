@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      GSHEET_API_URL: ${{ vars.GSHEET_API_URL }}
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
       SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
       SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
       SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
@@ -44,8 +44,7 @@ jobs:
           grep -q 'Google Apps Script' README.md
           grep -q 'Google Sheets' README.md
 
-      - name: Probe deployed Google Sheet API when configured
-        if: env.GSHEET_API_URL != ''
+      - name: Probe deployed Google Sheet API
         shell: bash
         run: |
           set -euo pipefail
@@ -57,10 +56,6 @@ jobs:
           grep -q '"ok":true' /tmp/pick-pack-health.json
           grep -q '"mode":"APP_GSHEET"' /tmp/pick-pack-health.json
           grep -q '"sheet_read":true' /tmp/pick-pack-health.json
-
-      - name: Explain compile-only mode
-        if: env.GSHEET_API_URL == ''
-        run: echo 'GSHEET_API_URL is not configured yet; compile/verification runs, publication is blocked.'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -117,18 +112,28 @@ jobs:
           echo "$S" | grep -q "package: name='vn.pickpack1291.app.stable'"
           echo "$S" | grep -q "versionName='0.1.0-stable'"
 
-      - name: Detect release readiness
+      - name: Upload unsigned Beta signing toolkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-beta-v0.4.0-signing-toolkit
+          path: |
+            app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools/36.0.0/lib/apksigner.jar
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools/36.0.0/zipalign
+          retention-days: 2
+
+      - name: Detect automated release readiness
         id: ready
         shell: bash
         run: |
           set -euo pipefail
           READY=true
-          for v in GSHEET_API_URL SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do
+          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do
             if [[ -z "${!v:-}" ]]; then READY=false; fi
           done
           echo "ready=$READY" >> "$GITHUB_OUTPUT"
           if [[ "$READY" != true ]]; then
-            echo 'Release publication blocked until Apps Script URL + fixed signing secrets are configured.'
+            echo 'Automated CI publication awaits GitHub Actions signing secrets; build/toolkit remains available for controlled signing.'
           fi
 
       - name: Sign fixed-identity Beta and Stable APKs
