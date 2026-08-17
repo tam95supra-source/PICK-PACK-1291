@@ -1,0 +1,87 @@
+name: Export Existing Signing Backup
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/export-signing-backup.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch current fixed signing bundle
+        shell: bash
+        env:
+          SIGNING_BROKER_URL: https://oedasgcdjppjwidhlqdr.supabase.co/functions/v1/pick-pack-ci-signing
+        run: |
+          set -euo pipefail
+          OIDC_JSON="$RUNNER_TEMP/oidc.json"
+          BUNDLE="$RUNNER_TEMP/signing-bundle.json"
+          curl -fsS --retry 3 --retry-all-errors --retry-delay 1 \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pick-pack-1291-signing" > "$OIDC_JSON"
+          OIDC_TOKEN="$(jq -er '.value' "$OIDC_JSON")"
+          curl -fsS --retry 3 --retry-all-errors --retry-delay 1 \
+            -X POST "$SIGNING_BROKER_URL" -H "Authorization: Bearer $OIDC_TOKEN" > "$BUNDLE"
+          jq -e '.ok == true and .repository == "tam95supra-source/pick-pack-1291" and .alias == "pickpack1291"' "$BUNDLE" >/dev/null
+          jq -er '.keystore_b64' "$BUNDLE" | base64 -d > "$RUNNER_TEMP/pick-pack-1291-release.jks"
+          jq -er '.store_password' "$BUNDLE" > "$RUNNER_TEMP/store.pass"
+          jq -er '.key_password' "$BUNDLE" > "$RUNNER_TEMP/key.pass"
+          jq -er '.alias' "$BUNDLE" > "$RUNNER_TEMP/key.alias"
+          rm -f "$OIDC_JSON" "$BUNDLE"
+
+      - name: Encrypt bundle to Drive recovery key
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/recovery-public.pem" <<'PEM'
+          -----BEGIN PUBLIC KEY-----
+          MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAsRhtk4xqpZsAzih/RyvS
+          yQxYN6dYIkGUMrCGeogRYebRjwPegQWqun3smzGFixud67wwLgYiFQrCucrH2q3C
+          2DCirsEJrRotlXxaqcxnwPSuSK7wq1VFmr0Vj27h1feCM7hywvKY34eovr92PyLZ
+          1E4994ZOf+SUIP8ook02zZnAmex7YKuBf6C4U6VdkaDpZ3PxAtRze/N1xystvDmU
+          dDYPX2E5Z0eqEEYzNZaKaR8MZRBRsPnVP9i3YSLHHVB+dnPcTh3zmw3hPTbjfLUy
+          15a0WU1c/4yHelMvn4thl7TE+Ge7NgHic0hJkYLKAMF8IeCdFeeM4wim2uS0oY6o
+          cL9q/tqwu9cNCtrfsJ4dZ1N2URJMjzGS+a5C6dwxPoUzid+b1Z3KevVCa0B5py92
+          5wJs06zzDrMhC1pKK5CP7m37avTP9kTvNcVAKF9vkeacbKhdNS9RHXOzZytN5NUr
+          VPl+j2Q4+QFkdLTBKJWpZnhq+7wFBdN+pGmt2Vt1l/kTAgMBAAE=
+          -----END PUBLIC KEY-----
+          PEM
+          mkdir -p "$RUNNER_TEMP/signing-plain" "$RUNNER_TEMP/signing-backup"
+          cp "$RUNNER_TEMP/pick-pack-1291-release.jks" "$RUNNER_TEMP/signing-plain/release.jks"
+          cp "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/signing-plain/store.pass"
+          cp "$RUNNER_TEMP/key.pass" "$RUNNER_TEMP/signing-plain/key.pass"
+          cp "$RUNNER_TEMP/key.alias" "$RUNNER_TEMP/signing-plain/key.alias"
+          printf '%s\n' 'certificate_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e' > "$RUNNER_TEMP/signing-plain/metadata.txt"
+          tar -C "$RUNNER_TEMP/signing-plain" -czf "$RUNNER_TEMP/signing.tar.gz" .
+          openssl rand 32 > "$RUNNER_TEMP/aes.key"
+          openssl rand 16 > "$RUNNER_TEMP/aes.iv"
+          KEY_HEX="$(xxd -p -c 256 "$RUNNER_TEMP/aes.key")"
+          IV_HEX="$(xxd -p -c 256 "$RUNNER_TEMP/aes.iv")"
+          openssl enc -aes-256-cbc -K "$KEY_HEX" -iv "$IV_HEX" -in "$RUNNER_TEMP/signing.tar.gz" -out "$RUNNER_TEMP/signing-backup/signing-bundle.enc"
+          openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/recovery-public.pem" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -in "$RUNNER_TEMP/aes.key" -out "$RUNNER_TEMP/signing-backup/aes-key.enc"
+          base64 -w0 "$RUNNER_TEMP/aes.iv" > "$RUNNER_TEMP/signing-backup/iv.b64"
+          cp "$RUNNER_TEMP/recovery-public.pem" "$RUNNER_TEMP/signing-backup/recovery-public.pem"
+          printf '%s\n' 'Encrypted backup of Pick Pack 1291 fixed Android signing bundle.' 'Decrypt AES key with the private recovery key stored only in owner Google Drive.' > "$RUNNER_TEMP/signing-backup/README.txt"
+          sha256sum "$RUNNER_TEMP/signing-backup"/* > "$RUNNER_TEMP/signing-backup/SHA256SUMS.txt"
+
+      - name: Upload encrypted recovery artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-signing-backup-encrypted
+          path: ${{ runner.temp }}/signing-backup/*
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Destroy plaintext signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/signing-plain" "$RUNNER_TEMP/pick-pack-1291-release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass" "$RUNNER_TEMP/key.alias" "$RUNNER_TEMP/signing.tar.gz" "$RUNNER_TEMP/aes.key" "$RUNNER_TEMP/aes.iv" "$RUNNER_TEMP/oidc.json" "$RUNNER_TEMP/signing-bundle.json"
