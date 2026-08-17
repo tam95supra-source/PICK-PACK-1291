@@ -1,0 +1,31 @@
+name: Reset Superadmin Once Beta4
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/reset-superadmin-once-beta4.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request reset without exposing credential
+        shell: bash
+        env:
+          WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+        run: |
+          set -euo pipefail
+          HTTP=$(curl -sS -L -o /tmp/reset.json -w '%{http_code}' -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"admin","_device_id":"owner-reset-beta4"}')
+          [[ "$HTTP" == 200 ]]
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/reset.json'))
+          assert j.get('ok') is True, j.get('error','RESET_FAILED')
+          assert j.get('delivery') == 'ADMIN_EMAIL', 'unexpected reset delivery'
+          print('Superadmin reset request accepted; credential intentionally not logged.')
+          PY
