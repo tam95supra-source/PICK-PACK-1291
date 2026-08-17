@@ -40,6 +40,22 @@ class OperationsActivity : Activity() {
     private lateinit var name: String
     private lateinit var role: String
     private var initialMnv = ""
+    private val foregroundSync by lazy {
+        ForegroundSyncCoordinator(this, api, object : ForegroundSyncCoordinator.Listener {
+            override fun onStatus(status: ForegroundSyncCoordinator.Status) {
+                if (!status.connected || !status.changed) return
+                // List/report screens are read-only and safe to refresh automatically.
+                // Labor/resource editors intentionally keep the operator's in-progress input;
+                // their writes are still revalidated atomically by the backend.
+                when (module) {
+                    "LISTS" -> listsScreen()
+                    "REPORT" -> reportScreen()
+                }
+            }
+
+            override fun onAuthExpired() { finish() }
+        })
+    }
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -56,7 +72,16 @@ class OperationsActivity : Activity() {
         when(module){"LABOR"->laborHome();"RESOURCES"->resourceHome();"REPORT"->reportScreen();"SETTINGS"->settingsScreen();else->listsScreen()}
     }
 
-    override fun onStart() { super.onStart(); UpdateManager.check(this) }
+    override fun onStart() {
+        super.onStart()
+        UpdateManager.check(this)
+        if (api.token != null) foregroundSync.start()
+    }
+
+    override fun onStop() {
+        foregroundSync.stop()
+        super.onStop()
+    }
 
     private fun isAdmin() = role == "ADMIN" || role == "SUPERADMIN"
     private fun isSuper() = role == "SUPERADMIN"

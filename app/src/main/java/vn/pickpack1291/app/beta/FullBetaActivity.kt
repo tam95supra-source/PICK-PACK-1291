@@ -40,6 +40,23 @@ class FullBetaActivity : Activity() {
     private var accountName = ""
     private var accountRole = ""
     private var syncText: TextView? = null
+    private var liveEmployeeMnv = ""
+    private val foregroundSync by lazy {
+        ForegroundSyncCoordinator(this, api, object : ForegroundSyncCoordinator.Listener {
+            override fun onStatus(status: ForegroundSyncCoordinator.Status) {
+                if (status.connected) {
+                    syncText?.text = "●  REALTIME • Seq ${status.serverSeq} • chờ Sheet ACK: ${status.projectionPending}"
+                    syncText?.setTextColor(if (status.projectionPending == 0) green else orange)
+                } else {
+                    syncText?.text = "●  Mất kết nối realtime"
+                    syncText?.setTextColor(red)
+                }
+                if (status.changed && liveEmployeeMnv.isNotBlank()) loadEmployee(liveEmployeeMnv)
+            }
+
+            override fun onAuthExpired() { sessionExpired() }
+        })
+    }
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -55,10 +72,18 @@ class FullBetaActivity : Activity() {
     override fun onStart() {
         super.onStart()
         UpdateManager.check(this)
+        if (api.token != null) foregroundSync.start()
+    }
+
+    override fun onStop() {
+        foregroundSync.stop()
+        super.onStop()
     }
 
     private fun login() {
+        foregroundSync.stop()
         api.clearToken()
+        liveEmployeeMnv = ""
         accountLogin = ""; accountName = ""; accountRole = ""
         val body = column(bg).apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(22), dp(24), dp(22), dp(58)) }
         body.addView(gap(6))
@@ -87,6 +112,7 @@ class FullBetaActivity : Activity() {
                 getPreferences(MODE_PRIVATE).edit().putString("last_login", accountLogin).apply()
                 pass.setText("")
                 dashboard()
+                foregroundSync.start()
             } }
         }
         button.setOnClickListener { submit() }
@@ -98,6 +124,7 @@ class FullBetaActivity : Activity() {
     }
 
     private fun dashboard() {
+        liveEmployeeMnv = ""
         val root = column(bg)
         root.addView(appBar("Trang chủ", false))
         val body = column(bg).apply { setPadding(dp(14), dp(15), dp(14), dp(54)) }
@@ -128,6 +155,7 @@ class FullBetaActivity : Activity() {
     }
 
     private fun employeeScan() {
+        liveEmployeeMnv = ""
         val root = column(bg); root.addView(appBar("QUÉT QR NHÂN SỰ", true))
         val body = column(bg).apply { setPadding(dp(16), dp(16), dp(16), dp(58)) }
         val mnv = input("Quét QR hoặc nhập MNV", false).apply { setSingleLine(true); imeOptions = EditorInfo.IME_ACTION_DONE }
@@ -153,6 +181,7 @@ class FullBetaActivity : Activity() {
 
     private fun renderEmployee(ctx: JSONObject, masters: JSONObject?) {
         val e=ctx.optJSONObject("employee") ?: JSONObject(); val state=ctx.optString("state"); val mnv=e.optString("mnv")
+        liveEmployeeMnv = mnv
         val root=column(bg); root.addView(appBar("QUÉT QR NHÂN SỰ", true)); val body=column(bg).apply{setPadding(dp(16),dp(14),dp(16),dp(58))}
         body.addView(primary("QUÉT / NHẬP MNV KHÁC", navy) { employeeScan() }, matchWrap());body.addView(gap(10));body.addView(employeeCard(e));body.addView(gap(11))
         when(state){
