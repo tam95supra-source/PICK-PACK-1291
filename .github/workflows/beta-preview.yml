@@ -63,6 +63,13 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Normalize Kotlin lexical whitespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/return"/return "/g' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          sed -i 's/return"/return "/g' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+
       - name: Assemble Beta and Stable channels
         run: gradle --no-daemon :app:assembleBetaDebug :app:assembleStableDebug
 
