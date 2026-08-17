@@ -130,7 +130,7 @@ class MainActivity : Activity() {
         root.addView(appBar("Trang chủ", false))
 
         val body = column(bg).apply { setPadding(dp(14), dp(15), dp(14), dp(54)) }
-        body.addView(fullCard("▣", "QUÉT QR NHÂN SỰ", blue) { employeeScan() }, dp(92))
+        body.addView(fullCard("▣", "QUÉT QR NHÂN SỰ", blue, { employeeScan() }, dp(92)))
         body.addView(gap(9))
         body.addView(cardRow(
             tile("◉", "CÔNG NHẬT", green) { comingSoon("CÔNG NHẬT") },
@@ -141,7 +141,7 @@ class MainActivity : Activity() {
             tile("▥", "BÁO CÁO", teal) { comingSoon("BÁO CÁO") }
         ))
         body.addView(gap(1))
-        body.addView(fullCard("⚙", "CÀI ĐẶT", navy) { settings() }, dp(66))
+        body.addView(fullCard("⚙", "CÀI ĐẶT", navy, { settings() }, dp(66)))
         body.addView(gap(15))
 
         syncText = txt("●  Đang kiểm tra kết nối...", 10.5f, muted, false).apply {
@@ -219,7 +219,6 @@ class MainActivity : Activity() {
     private fun renderEmployeeContext(ctx: JSONObject, masters: JSONObject?, loadingMasters: Boolean) {
         screen = "EMPLOYEE_CONTEXT"
         val employee = ctx.optJSONObject("employee") ?: JSONObject()
-        val mnv = employee.optString("mnv")
         val state = ctx.optString("state")
         val root = column(bg)
         root.addView(appBar("QUÉT QR NHÂN SỰ", true))
