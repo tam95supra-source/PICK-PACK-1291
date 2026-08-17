@@ -64,23 +64,10 @@ jobs:
             "https://script.googleapis.com/v1/projects/$GAS_SCRIPT_ID")
           if [[ "$HTTP" != "200" ]]; then
             echo "Apps Script project lookup failed with HTTP $HTTP" >&2
-            python3 - <<'PY'
-import json
-try:
-  j=json.load(open('/tmp/project.json'))
-  print(j.get('error',{}).get('status','UNKNOWN'))
-  print(j.get('error',{}).get('message',''))
-except Exception:
-  pass
-PY
+            python3 -c "import json; j=json.load(open('/tmp/project.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true
             exit 1
           fi
-          python3 - <<'PY'
-import json
-j=json.load(open('/tmp/project.json'))
-print('Apps Script project access: PASS')
-print('Project title:', j.get('title','(unknown)'))
-PY
+          python3 -c "import json; j=json.load(open('/tmp/project.json')); print('Apps Script project access: PASS'); print('Project title:', j.get('title','(unknown)'))"
 
       - name: Verify deployment access
         shell: bash
@@ -93,25 +80,10 @@ PY
             "https://script.googleapis.com/v1/projects/$GAS_SCRIPT_ID/deployments/$GAS_DEPLOYMENT_ID")
           if [[ "$HTTP" != "200" ]]; then
             echo "Apps Script deployment lookup failed with HTTP $HTTP" >&2
-            python3 - <<'PY'
-import json
-try:
-  j=json.load(open('/tmp/deployment.json'))
-  print(j.get('error',{}).get('status','UNKNOWN'))
-  print(j.get('error',{}).get('message',''))
-except Exception:
-  pass
-PY
+            python3 -c "import json; j=json.load(open('/tmp/deployment.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true
             exit 1
           fi
-          python3 - <<'PY'
-import json
-j=json.load(open('/tmp/deployment.json'))
-cfg=j.get('deploymentConfig',{})
-print('Deployment access: PASS')
-print('Deployment manifest:', cfg.get('manifestFileName','appsscript'))
-print('Deployment version:', cfg.get('versionNumber','(head/dev)'))
-PY
+          python3 -c "import json; j=json.load(open('/tmp/deployment.json')); cfg=j.get('deploymentConfig',{}); print('Deployment access: PASS'); print('Deployment manifest:', cfg.get('manifestFileName','appsscript')); print('Deployment version:', cfg.get('versionNumber','(head/dev)'))"
 
       - name: Verification summary
         run: |
