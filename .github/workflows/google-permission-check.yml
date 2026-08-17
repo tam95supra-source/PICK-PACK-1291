@@ -33,6 +33,27 @@ jobs:
           done
           echo "All five Google deployment secrets are present."
 
+      - name: Normalize Apps Script identifiers
+        id: ids
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW_DEPLOY=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW_DEPLOY"
+          if [[ "$RAW_DEPLOY" =~ /s/([^/]+)/ ]]; then
+            DEPLOYMENT_ID="${BASH_REMATCH[1]}"
+          fi
+          if [[ -z "$SCRIPT_ID" || -z "$DEPLOYMENT_ID" ]]; then
+            echo 'Script/deployment identifier normalization failed.' >&2
+            exit 1
+          fi
+          echo "::add-mask::$SCRIPT_ID"
+          echo "::add-mask::$DEPLOYMENT_ID"
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo 'Apps Script identifiers normalized.'
+
       - name: Exchange refresh token
         id: oauth
         shell: bash
@@ -57,11 +78,12 @@ jobs:
         shell: bash
         env:
           ACCESS_TOKEN: ${{ steps.oauth.outputs.token }}
+          SCRIPT_ID: ${{ steps.ids.outputs.script_id }}
         run: |
           set -euo pipefail
           HTTP=$(curl -sS -o /tmp/project.json -w '%{http_code}' \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://script.googleapis.com/v1/projects/$GAS_SCRIPT_ID")
+            "https://script.googleapis.com/v1/projects/$SCRIPT_ID")
           if [[ "$HTTP" != "200" ]]; then
             echo "Apps Script project lookup failed with HTTP $HTTP" >&2
             python3 -c "import json; j=json.load(open('/tmp/project.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true
@@ -73,11 +95,13 @@ jobs:
         shell: bash
         env:
           ACCESS_TOKEN: ${{ steps.oauth.outputs.token }}
+          SCRIPT_ID: ${{ steps.ids.outputs.script_id }}
+          DEPLOYMENT_ID: ${{ steps.ids.outputs.deployment_id }}
         run: |
           set -euo pipefail
           HTTP=$(curl -sS -o /tmp/deployment.json -w '%{http_code}' \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://script.googleapis.com/v1/projects/$GAS_SCRIPT_ID/deployments/$GAS_DEPLOYMENT_ID")
+            "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
           if [[ "$HTTP" != "200" ]]; then
             echo "Apps Script deployment lookup failed with HTTP $HTTP" >&2
             python3 -c "import json; j=json.load(open('/tmp/deployment.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true
