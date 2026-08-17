@@ -1,0 +1,342 @@
+name: Apply Owner Icon + Persistent Session Beta3
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/apply-icon-session-beta3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  apply-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      OWNER_ART_FILE_ID: 1Ml21naws1KVQkFJxm-O7hAE_F_uXh3TT
+      OWNER_ART_SHA256: 371d0e5ad552e3cf63eef60a3da270896946458a506252a7fa132a67747c7a5d
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Exchange Google OAuth and normalize IDs
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW"
+          if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch exact owner artwork through isolated temporary GAS deployment
+        shell: bash
+        env:
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          NONCE=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
+          echo "::add-mask::$NONCE"
+          export NONCE
+          FINALIZED=false
+          TEMP_DEPLOYMENT=''
+          restore_head() {
+            if [[ "$FINALIZED" != true && -f /tmp/original-content.json ]]; then
+              curl -sS -o /dev/null -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/original-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" || true
+            fi
+            if [[ -n "$TEMP_DEPLOYMENT" ]]; then
+              curl -sS -o /dev/null -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$TEMP_DEPLOYMENT" || true
+            fi
+          }
+          trap restore_head EXIT
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path('google-apps-script')
+          files=[]
+          for p in sorted(root.glob('*.gs')):
+              files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(root/'appsscript.json').read_text()})
+          Path('/tmp/original-content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          target=root/'PICK_PACK_API.gs'
+          src=target.read_text()
+          needle="    if (action === 'login') return ppJson_(ppLogin_(body));"
+          assert needle in src
+          nonce=os.environ['NONCE']; fid=os.environ['OWNER_ART_FILE_ID']
+          injection=f'''\n    if (action === '__ci_owner_art_share' && String(body._ci_nonce||'') === '{nonce}') {{\n      const f=DriveApp.getFileById('{fid}');\n      f.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);\n      return ppJson_({{ok:true,file_id:f.getId(),size:f.getSize()}});\n    }}\n    if (action === '__ci_owner_art_private' && String(body._ci_nonce||'') === '{nonce}') {{\n      const f=DriveApp.getFileById('{fid}');\n      f.setSharing(DriveApp.Access.PRIVATE,DriveApp.Permission.VIEW);\n      return ppJson_({{ok:true}});\n    }}'''
+          tmp=src.replace(needle,needle+injection,1)
+          files2=[]
+          for f in files:
+              if f['name']=='PICK_PACK_API': files2.append(dict(f,source=tmp))
+              else: files2.append(f)
+          Path('/tmp/temp-content.json').write_text(json.dumps({'files':files2},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/head.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/temp-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/head.out; exit 1; }
+          H=$(curl -sS -o /tmp/temp-version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"temporary isolated owner artwork fetch"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/temp-version.json; exit 1; }
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/temp-version.json"))["versionNumber"])')
+          python3 - "$SCRIPT_ID" "$V" <<'PY'
+          import json,sys
+          open('/tmp/temp-deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'temporary owner artwork fetch'}}))
+          PY
+          H=$(curl -sS -o /tmp/temp-deployment.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/temp-deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments")
+          [[ "$H" == 200 ]] || { cat /tmp/temp-deployment.json; exit 1; }
+          TEMP_DEPLOYMENT=$(python3 -c 'import json;print(json.load(open("/tmp/temp-deployment.json"))["deploymentId"])')
+          export TEMP_DEPLOYMENT
+          echo "::add-mask::$TEMP_DEPLOYMENT"
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$TEMP_DEPLOYMENT" > /tmp/temp-get.json
+          TEMP_URL=$(python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/temp-get.json'))
+          w=[e.get('webApp',{}) for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']
+          assert w and w[0].get('url')
+          print(w[0]['url'])
+          PY
+          )
+          OK=false
+          for i in $(seq 1 12); do
+            curl -fsSL -H 'content-type: application/json' "$TEMP_URL" -d "{\"action\":\"__ci_owner_art_share\",\"_ci_nonce\":\"$NONCE\"}" > /tmp/share.json || true
+            if grep -q '"ok":true' /tmp/share.json; then OK=true; break; fi
+            sleep 4
+          done
+          [[ "$OK" == true ]] || { cat /tmp/share.json; exit 1; }
+          curl -fL --retry 3 --retry-delay 2 "https://drive.usercontent.google.com/download?id=$OWNER_ART_FILE_ID&export=download&confirm=t" -o /tmp/owner-launcher.png
+          echo "$OWNER_ART_SHA256  /tmp/owner-launcher.png" | sha256sum -c -
+          file /tmp/owner-launcher.png | grep -q 'PNG image data'
+          curl -fsSL -H 'content-type: application/json' "$TEMP_URL" -d "{\"action\":\"__ci_owner_art_private\",\"_ci_nonce\":\"$NONCE\"}" | grep -q '"ok":true'
+          curl -fsS -o /dev/null -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$TEMP_DEPLOYMENT"
+          TEMP_DEPLOYMENT=''
+          FINALIZED=true
+          echo 'Exact owner artwork retrieved and returned to PRIVATE: PASS'
+
+      - name: Apply persistent single-active-device session and exact launcher artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/res/drawable-nodpi
+          cp /tmp/owner-launcher.png app/src/main/res/drawable-nodpi/owner_launcher.png
+          rm -f app/src/main/res/drawable-nodpi/app_icon_owner.png
+          rm -f app/src/main/res/drawable/app_icon.jpg app/src/main/res/drawable/app_icon_foreground.xml
+          rm -f app/src/main/res/mipmap-anydpi/ic_launcher.xml app/src/main/res/mipmap-anydpi/ic_launcher_round.xml
+          rm -f app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Android API client: persistent private session + pseudonymous physical-device fingerprint.
+          p=Path('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt'); s=p.read_text()
+          s=s.replace('import android.os.Build\n','import android.content.Context\nimport android.os.Build\nimport android.provider.Settings\n',1)
+          s=s.replace('import java.util.concurrent.Executors\n','import java.util.concurrent.Executors\nimport java.util.UUID\n',1)
+          s=s.replace('class BetaApiClient {','class BetaApiClient(context: Context) {',1)
+          pat=r'''    private val executor = Executors\.newSingleThreadExecutor\(\)\n\n    val token: String\?\n        get\(\) = sharedToken\n\n    fun clearToken\(\) \{ sharedToken = null \}\n'''
+          repl='''    private val appContext = context.applicationContext\n    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)\n    private val executor = Executors.newSingleThreadExecutor()\n    private val deviceId: String by lazy {\n        val androidId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID).orEmpty()\n        if (androidId.isNotBlank() && androidId != "9774d56d682e549c") {\n            "android-" + sha256Text("PickPack1291|$androidId")\n        } else {\n            val saved = prefs.getString(KEY_DEVICE_ID, null)\n            val id = saved ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }\n            "install-$id"\n        }\n    }\n\n    init {\n        synchronized(sessionLock) {\n            if (sharedToken == null) sharedToken = prefs.getString(KEY_TOKEN, null)\n        }\n    }\n\n    val token: String?\n        get() = sharedToken\n\n    fun clearToken() = clearSession()\n\n    fun clearSession() {\n        synchronized(sessionLock) { sharedToken = null }\n        prefs.edit().remove(KEY_TOKEN).remove(KEY_LOGIN).remove(KEY_NAME).remove(KEY_ROLE).remove(KEY_POSITION).apply()\n    }\n\n    fun restoredAccount(): JSONObject? {\n        if (token.isNullOrBlank()) return null\n        val login = prefs.getString(KEY_LOGIN, "").orEmpty()\n        if (login.isBlank()) return null\n        return JSONObject().apply {\n            put("login_id", login)\n            put("display_name", prefs.getString(KEY_NAME, login).orEmpty().ifBlank { login })\n            put("role", prefs.getString(KEY_ROLE, "USER").orEmpty().ifBlank { "USER" })\n            put("position", prefs.getString(KEY_POSITION, "").orEmpty())\n        }\n    }\n\n    private fun persistSession(newToken: String, account: JSONObject?) {\n        synchronized(sessionLock) { sharedToken = newToken }\n        val e = prefs.edit().putString(KEY_TOKEN, newToken)\n        if (account != null) {\n            val login = account.optString("login_id")\n            if (login.isNotBlank()) e.putString(KEY_LOGIN, login)\n            e.putString(KEY_NAME, account.optString("display_name", login))\n            e.putString(KEY_ROLE, account.optString("role", "USER"))\n            e.putString(KEY_POSITION, account.optString("position", ""))\n        }\n        e.apply()\n    }\n\n    private fun sha256Text(value: String): String = MessageDigest.getInstance("SHA-256")\n        .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }\n'''
+          s,n=re.subn(pat,repl,s,count=1); assert n==1, 'client session block'
+          old='if (result.ok) sharedToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }'
+          new='''if (result.ok) {\n                    val newToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }\n                    if (newToken != null) persistSession(newToken, result.json.optJSONObject("account"))\n                }'''
+          assert old in s; s=s.replace(old,new,1)
+          old='''                if (result.code == 401) sharedToken = null\n                callback(result)'''
+          new='''                if (result.ok) {\n                    val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }\n                    if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())\n                }\n                if (result.code == 401) clearSession()\n                callback(result)'''
+          assert old in s; s=s.replace(old,new,1)
+          old='''            put("_app_channel", BuildConfig.CHANNEL)\n            put("_device_label", "${Build.MANUFACTURER} ${Build.MODEL}")'''
+          new='''            put("_app_channel", BuildConfig.CHANNEL)\n            put("_device_id", deviceId)\n            put("_device_label", "${Build.MANUFACTURER} ${Build.MODEL}")'''
+          assert old in s; s=s.replace(old,new,1)
+          old='''    companion object {\n        @Volatile private var sharedToken: String? = null\n        private const val RELEASES_URL = "https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30"\n    }'''
+          new='''    companion object {\n        @Volatile private var sharedToken: String? = null\n        private val sessionLock = Any()\n        private const val PREFS_NAME = "pick_pack_auth_session_v2"\n        private const val KEY_TOKEN = "token"\n        private const val KEY_LOGIN = "login_id"\n        private const val KEY_NAME = "display_name"\n        private const val KEY_ROLE = "role"\n        private const val KEY_POSITION = "position"\n        private const val KEY_DEVICE_ID = "device_id"\n        private const val RELEASES_URL = "https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30"\n    }'''
+          assert old in s; s=s.replace(old,new,1); p.write_text(s)
+
+          # Context-aware clients across Activities.
+          for q in Path('app/src/main/java/vn/pickpack1291/app/beta').glob('*.kt'):
+              if q.name=='BetaApiClient.kt': continue
+              t=q.read_text()
+              t=re.sub(r'private val (\w+) = BetaApiClient\(\)',r'private val \1 by lazy { BetaApiClient(applicationContext) }',t)
+              t=t.replace('R.drawable.app_icon','R.drawable.owner_launcher')
+              q.write_text(t)
+
+          # Launcher activity restores local private session instead of clearing it on cold start.
+          p=Path('app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt'); s=p.read_text()
+          assert 'MasterDataCache.hydrate(this)\n        login()' in s
+          s=s.replace('MasterDataCache.hydrate(this)\n        login()','MasterDataCache.hydrate(this)\n        restoreOrLogin()',1)
+          s=s.replace('        api.clearToken()\n','',1)
+          needle='    private fun login() {'
+          restore='''    private fun restoreOrLogin() {\n        val saved = api.restoredAccount()\n        if (api.token.isNullOrBlank() || saved == null) { login(); return }\n        accountLogin = saved.optString("login_id")\n        accountName = saved.optString("display_name", accountLogin)\n        accountRole = saved.optString("role", "USER")\n        accountPosition = saved.optString("position", "")\n        dashboard()\n        foregroundSync.start()\n    }\n\n'''
+          assert needle in s; s=s.replace(needle,restore+needle,1)
+          pat=r'    private fun sessionExpired\(\)\{.*?\n    private fun showError'
+          repl='''    private fun sessionExpired(){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản này đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi. Đăng nhập lại để tiếp tục.").setCancelable(false).setPositiveButton("ĐĂNG NHẬP"){_,_->login()}.show()}\n    private fun showError'''
+          s,n=re.subn(pat,repl,s,count=1,flags=re.S); assert n==1, 'sessionExpired'; p.write_text(s)
+
+          # Operations screen clears local session only on explicit logout or server rejection.
+          p=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt'); s=p.read_text()
+          s=s.replace('override fun onAuthExpired() { finish() }','override fun onAuthExpired() { api.clearSession(); finishAffinity() }',1)
+          s=s.replace('api.call("logout"){runOnUiThread{finishAffinity()}}','api.call("logout"){runOnUiThread{api.clearSession();finishAffinity()}}',1)
+          old='''private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){AlertDialog.Builder(this).setTitle("Phiên đã hết hạn").setMessage("Quay lại màn hình đăng nhập.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}'''
+          new='''private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}'''
+          assert old in s; s=s.replace(old,new,1); p.write_text(s)
+
+          # Manifest references a brand-new direct bitmap resource; no adaptive/inset legacy layer remains.
+          p=Path('app/src/main/AndroidManifest.xml'); s=p.read_text()
+          s=s.replace('android:icon="@mipmap/ic_launcher"','android:icon="@drawable/owner_launcher"')
+          s=s.replace('android:roundIcon="@mipmap/ic_launcher_round"','android:roundIcon="@drawable/owner_launcher"')
+          p.write_text(s)
+
+          # GAS: one active server session per account/device fingerprint, no normal time expiry.
+          p=Path('google-apps-script/PICK_PACK_API.gs'); s=p.read_text()
+          s=s.replace("if (action === 'logout') return ppJson_({ok:true});","if (action === 'logout') return ppJson_(ppLogout_(auth));",1)
+          login='''function ppLogin_(body) {\n  const login=String(body.login_id||'').trim(), id=String(body.challenge_id||''), proof=String(body.proof||''), c=ppTakeChallenge_(id,'LOGIN',login), a=ppAccount_(login), p=a?ppVerifierParts_(a.verifier):null;\n  if(!c||!a||a.status!=='ACTIVE'||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'INVALID_CREDENTIALS'};\n  const session=ppBindSession_(a.login_id,ppDeviceId_(body)), token=ppMakeToken_(a,session);\n  return {ok:true,token:token,account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||''},session:{issued_at:session.issued_at,device_label:String(body._device_label||'').slice(0,120)}};\n}\nfunction ppPasswordChallenge_'''
+          s,n=re.subn(r'function ppLogin_\(body\) \{.*?\n\}\nfunction ppPasswordChallenge_',login,s,count=1,flags=re.S); assert n==1, 'ppLogin'
+          change='''function ppChangePassword_(auth,body) {\n  const id=String(body.challenge_id||''),proof=String(body.proof||''),newVerifier=String(body.new_verifier||''),c=ppTakeChallenge_(id,'PASSWORD',auth.login_id),p=ppVerifierParts_(auth.verifier),np=ppVerifierParts_(newVerifier); if(!c||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'CURRENT_PASSWORD_INVALID'}; if(!np)return {ok:false,error:'PASSWORD_POLICY'};\n  ppSheet_(PP.ADMIN).getRange(auth.row,2).setValue(newVerifier); ppEnsureAdminHeaders_(); ppSheet_(PP.ADMIN).getRange(auth.row,10).setValue(auth.login_id); ppSheet_(PP.ADMIN).getRange(auth.row,11).setValue(ppNowVisible_()); ppBumpRevision_(); ppBumpMasterRevision_();\n  const fresh=ppAccount_(auth.login_id), session=ppActiveSession_(auth.login_id);\n  const token=(fresh&&session&&session.session_id===auth._session_id&&session.device_id===auth._device_id)?ppMakeToken_(fresh,session):'';\n  return {ok:true,token:token,account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||''}:null};\n}\nfunction ppAccountList_'''
+          s,n=re.subn(r'function ppChangePassword_\(auth,body\) \{.*?\n\}\nfunction ppAccountList_',change,s,count=1,flags=re.S); assert n==1, 'ppChangePassword'
+          auth='''function ppAuthenticate_(body) {\n  const token=String(body._token||''), parts=token.split('.'); if(parts.length!==2)return null;\n  const secret=ppTokenSecret_(), expected=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(parts[0]).getBytes(),secret)); if(!ppSafeEq_(expected,parts[1]))return null;\n  let payload; try{payload=JSON.parse(Utilities.newBlob(ppB64uDecode_(parts[0])).getDataAsString());}catch(_){return null;}\n  const a=payload?ppAccount_(String(payload.l||'')):null; if(!a||a.status!=='ACTIVE'||a.role!==payload.r||ppSha256Hex_(a.verifier)!==payload.v)return null;\n  if(payload.s){const active=ppActiveSession_(a.login_id);if(!active||active.session_id!==payload.s||active.device_id!==payload.d)return null;}\n  else {if(Number(payload.e||0)<Date.now()||ppActiveSession_(a.login_id))return null;}\n  return Object.assign({},a,{_session_id:String(payload.s||''),_device_id:String(payload.d||'')});\n}\nfunction ppMakeToken_(a,session) {\n  const raw={l:a.login_id,r:a.role,v:ppSha256Hex_(a.verifier),s:session.session_id,d:session.device_id};\n  const payload=ppB64u_(Utilities.newBlob(JSON.stringify(raw)).getBytes()),sig=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(payload).getBytes(),ppTokenSecret_()));return payload+'.'+sig;\n}\nfunction ppSessionKey_(login){return 'PP_ACTIVE_SESSION_'+ppSha256Hex_(String(login||'')).slice(0,48);}\nfunction ppActiveSession_(login){const raw=PropertiesService.getScriptProperties().getProperty(ppSessionKey_(login));if(!raw)return null;try{return JSON.parse(raw);}catch(_){return null;}}\nfunction ppDeviceId_(body){const direct=String(body._device_id||'').trim().slice(0,180);if(direct)return direct;return 'legacy-'+ppSha256Hex_(String(body._device_label||'unknown')).slice(0,48);}\nfunction ppBindSession_(login,deviceId){const lock=LockService.getScriptLock();lock.waitLock(10000);try{const cur=ppActiveSession_(login);const session={session_id:(cur&&cur.device_id===deviceId&&cur.session_id)?cur.session_id:Utilities.getUuid(),device_id:deviceId,issued_at:ppNowIso_()};PropertiesService.getScriptProperties().setProperty(ppSessionKey_(login),JSON.stringify(session));return session;}finally{lock.releaseLock();}}\nfunction ppClearActiveSessionForLogin_(login){PropertiesService.getScriptProperties().deleteProperty(ppSessionKey_(login));}\nfunction ppLogout_(auth){const lock=LockService.getScriptLock();lock.waitLock(10000);try{const cur=ppActiveSession_(auth.login_id);if(cur&&cur.session_id===auth._session_id&&cur.device_id===auth._device_id)ppClearActiveSessionForLogin_(auth.login_id);return {ok:true};}finally{lock.releaseLock();}}\nfunction ppTokenSecret_'''
+          s,n=re.subn(r'function ppAuthenticate_\(body\) \{.*?\n\}\nfunction ppMakeToken_\(a,exp\) \{.*?\n\}\nfunction ppTokenSecret_',auth,s,count=1,flags=re.S); assert n==1, 'ppAuthenticate/token'
+          st=s.index('function ppAccountStatus_'); en=s.index('\n\nfunction ppAuthenticate_',st); block=s[st:en]
+          block=block.replace('sh.getRange(t.row,11).setValue(ppNowVisible_());ppBumpRevision_();','sh.getRange(t.row,11).setValue(ppNowVisible_());if(status===\'DISABLED\')ppClearActiveSessionForLogin_(login);ppBumpRevision_();',1)
+          s=s[:st]+block+s[en:]
+          s=s.replace("sheet_read:rows.length>1,business_date:","sheet_read:rows.length>1,auth_session_model:'SINGLE_ACTIVE_DEVICE_V1',business_date:",1)
+          p.write_text(s)
+
+          # Beta3 version. Stable package remains separate and unchanged in versioning.
+          p=Path('app/build.gradle.kts'); s=p.read_text(); s=s.replace('versionCode = 8','versionCode = 9',1).replace('versionName = "0.4.2-beta.2"','versionName = "0.4.2-beta.3"',1); p.write_text(s)
+          p=Path('.github/workflows/beta-preview.yml'); s=p.read_text().replace('0.4.2-beta.2','0.4.2-beta.3').replace("versionCode='8'","versionCode='9'"); p.write_text(s)
+          PY
+
+      - name: Static safety checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$OWNER_ART_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
+          grep -q 'android:icon="@drawable/owner_launcher"' app/src/main/AndroidManifest.xml
+          grep -q 'android:roundIcon="@drawable/owner_launcher"' app/src/main/AndroidManifest.xml
+          ! grep -R 'R.drawable.app_icon' app/src/main/java
+          test ! -e app/src/main/res/drawable/app_icon.jpg
+          test ! -e app/src/main/res/drawable/app_icon_foreground.xml
+          grep -q 'restoredAccount' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+          grep -q 'put("_device_id", deviceId)' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+          ! grep -q 'api.clearToken()' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          grep -q 'SINGLE_ACTIVE_DEVICE_V1' google-apps-script/PICK_PACK_API.gs
+          grep -q 'ppBindSession_' google-apps-script/PICK_PACK_API.gs
+          grep -q 'versionCode = 9' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.3"' app/build.gradle.kts
+          cp google-apps-script/PICK_PACK_API.gs /tmp/api.js
+          node --check /tmp/api.js
+          echo 'Static session/icon checks: PASS'
+
+      - name: Deploy final GAS session model and verify live health
+        shell: bash
+        env:
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')):files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/final-content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/final-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 0.4.2 persistent single-device session + Drive OTA"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
+          python3 - "$SCRIPT_ID" "$V" <<'PY'
+          import json,sys
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API 0.4.2 persistent session + Drive OTA'}}))
+          PY
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
+          OK=false
+          for i in $(seq 1 15); do
+            curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/health.json || true
+            if grep -q '"ok":true' /tmp/health.json && grep -q '"sheet_read":true' /tmp/health.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/health.json; then OK=true; break; fi
+            sleep 4
+          done
+          [[ "$OK" == true ]] || { cat /tmp/health.json; exit 1; }
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' | grep -q '"source":"GOOGLE_DRIVE"'
+          echo "Final GAS deployment version $V: PASS"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Bootstrap Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip" -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build and verify Beta3 + Stable compile
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i 's/return"/return "/g' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          gradle --no-daemon :app:assembleBetaRelease :app:assembleStableRelease
+          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          test -s "$BETA"; test -s "$STABLE"
+          B=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA")
+          echo "$B" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
+          echo "$B" | grep -q "versionCode='9'"
+          echo "$B" | grep -q "versionName='0.4.2-beta.3'"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump resources "$BETA" | grep -q 'owner_launcher'
+          unzip -l "$BETA" | grep -q 'owner_launcher'
+          echo 'Beta3 exact launcher resource + persistent session compile: PASS'
+
+      - name: Upload Beta3 signing toolkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-beta-v0.4.2-beta.3-signing-toolkit
+          path: |
+            app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools/36.0.0/lib/apksigner.jar
+            ${{ env.ANDROID_SDK_ROOT }}/build-tools/36.0.0/zipalign
+          retention-days: 2
+
+      - name: Commit verified source and exact artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-icon-session-beta3.yml .github/workflows/verify-owner-icon.yml
+          git config user.name 'tam95supra-source'
+          git config user.email 'tam95.supra@gmail.com'
+          git add -A
+          git diff --cached --quiet && { echo 'No changes to commit' >&2; exit 1; }
+          git commit -m 'fix: exact owner icon and persistent single-device login beta3'
+          git push origin main
+          echo 'Verified source committed: PASS'
