@@ -1,0 +1,131 @@
+name: Deploy Beta4 GAS
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/beta4-deploy-gas.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate beta4 GAS source
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "forgot_password" google-apps-script/PICK_PACK_API.gs
+          grep -q "RESET_ADMIN_EMAIL: 'tam95.supra@gmail.com'" google-apps-script/PICK_PACK_API.gs
+          grep -q "script.send_mail" google-apps-script/appsscript.json
+          grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
+          grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
+          ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
+          echo 'Beta4 GAS source gates: PASS'
+
+      - name: Exchange OAuth and normalize IDs
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW"
+          if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Update Apps Script source and deployment
+        id: deploy
+        shell: bash
+        env:
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')):
+              files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 Beta4 Minimal Teal + performance + password reset"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
+          python3 - "$SCRIPT_ID" "$V" <<'PY'
+          import json,sys
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API Beta4'}}))
+          PY
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Deployment version $V: PASS"
+
+      - name: Read live WEB_APP URL
+        id: webapp
+        shell: bash
+        env:
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID" > /tmp/deployment.json
+          python3 - <<'PY' > /tmp/weburl
+          import json
+          j=json.load(open('/tmp/deployment.json')); eps=j.get('entryPoints',[])
+          web=[e.get('webApp',{}) for e in eps if e.get('entryPointType')=='WEB_APP']
+          assert web and web[0].get('url'), 'WEB_APP entry point missing'
+          cfg=web[0].get('entryPointConfig',{})
+          assert cfg.get('access')=='ANYONE_ANONYMOUS', cfg
+          assert cfg.get('executeAs')=='USER_DEPLOYING', cfg
+          print(web[0]['url'])
+          PY
+          URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Verify live health and public reset route without changing account
+        shell: bash
+        env:
+          WEB_URL: ${{ steps.webapp.outputs.url }}
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 15); do
+            curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"health"}' > /tmp/h.json || true
+            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json; then OK=true; break; fi
+            sleep 4
+          done
+          [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
+          # Nonexistent login validates public forgot-password routing without sending mail or mutating a real account.
+          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' > /tmp/reset.json
+          grep -q '"ok":true' /tmp/reset.json
+          grep -q '"delivery":"ADMIN_EMAIL"' /tmp/reset.json
+          echo 'Live health + reset route (non-mutating probe): PASS'
