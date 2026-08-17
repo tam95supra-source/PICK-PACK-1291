@@ -176,7 +176,9 @@ function ppLookupStaff_(mnv) { return ppMasterSnapshotData_().staff.find(functio
 function ppMasterData_() { const s=ppMasterSnapshotData_(); return {pdas:s.pdas,userPicks:s.user_picks,packs:s.pack_bundles}; }
 function ppCatalog_() { const s=ppMasterSnapshotData_(); return {labor_types:s.labor_types,time_markers:s.time_markers}; }
 
-function ppRaRows_() { return ppObjects_(PP.RA); }
+let PP_REQUEST_RA_ROWS_ = null;
+let PP_REQUEST_LABOR_ROWS_ = null;
+function ppRaRows_() { if(PP_REQUEST_RA_ROWS_!==null)return PP_REQUEST_RA_ROWS_; PP_REQUEST_RA_ROWS_=ppObjects_(PP.RA); return PP_REQUEST_RA_ROWS_; }
 function ppSessionMap_(dateVisible) {
   const out = {};
   ppRaRows_().filter(function(r){return r['Ngày']===dateVisible && r['Mã nhân viên'];}).forEach(function(r){
@@ -225,7 +227,8 @@ function ppEmployeeContext_(body) {
   const staff=ppLookupStaff_(mnv); if(!staff)return {ok:false,error:'EMPLOYEE_NOT_FOUND'};
   const session=ppSessionMap_(ppBusinessVisible_())[mnv]||null;
   const state=!session?'NOT_ENTERED':session.state==='ACTIVE'?'ACTIVE':'ENDED';
-  return {ok:true,business_date:ppBusinessIso_(),employee:staff,state:state,session:session,active_labor:ppActiveLabor_(mnv)};
+  const options=state==='NOT_ENTERED'?ppMasterOptions_({mnv:mnv}):null;
+  return {ok:true,business_date:ppBusinessIso_(),employee:staff,state:state,session:session,active_labor:ppActiveLabor_(mnv),options:options};
 }
 function ppMasterOptions_(body) {
   const mnv=String(body.mnv||'').trim(), masters=ppMasterData_(), busy=ppBusyResources_(mnv), used=ppConsumption_(ppBusinessVisible_(),mnv), sessions=ppSessionMap_(ppBusinessVisible_());
@@ -284,7 +287,7 @@ function ppResourceChange_(auth,body) {
   return {ok:true,result:{event_id:eventId,revision:rev}};
 }
 
-function ppLaborRows_() { return ppObjects_(PP.LABOR); }
+function ppLaborRows_() { if(PP_REQUEST_LABOR_ROWS_!==null)return PP_REQUEST_LABOR_ROWS_; PP_REQUEST_LABOR_ROWS_=ppObjects_(PP.LABOR); return PP_REQUEST_LABOR_ROWS_; }
 function ppLaborState_(r) { return ppFold_(r['Trạng thái'])==='DANG LAM'?'ACTIVE':'COMPLETED'; }
 function ppLaborObj_(r) {
   return {mnv:r['Mã nhân viên']||'',business_date:ppBusinessIso_(),labor_type:r['Thông tin công nhật']||'',start_at:ppIsoFromVisible_(r['Thời gian bắt đầu']),end_at:ppIsoFromVisible_(r['Thời gian kết thúc']),time_marker:r['Mốc thời gian']||'',state:ppLaborState_(r),note:r['Ghi chú']||'',updated_at:ppIsoFromVisible_(r['Thời gian cập nhật'])};

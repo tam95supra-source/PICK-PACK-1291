@@ -185,9 +185,12 @@ class FullBetaActivity : Activity() {
             if(result.code==401){sessionExpired();return@runOnUiThread}
             if(!result.ok){showError(result.error ?: "Không kiểm tra được MNV");return@runOnUiThread}
             val ctx=result.json ?: JSONObject()
-            if(ctx.optString("state")=="NOT_ENTERED") api.call("master_options", JSONObject().put("mnv", mnv)) { masters -> runOnUiThread {
-                if(masters.code==401){sessionExpired();return@runOnUiThread}; renderEmployee(ctx, masters.json ?: JSONObject())
-            } } else renderEmployee(ctx, null)
+            if(ctx.optString("state")=="NOT_ENTERED") {
+                val inline = ctx.optJSONObject("options")
+                if(inline != null) renderEmployee(ctx, inline) else api.call("master_options", JSONObject().put("mnv", mnv)) { masters -> runOnUiThread {
+                    if(masters.code==401){sessionExpired();return@runOnUiThread}; renderEmployee(ctx, masters.json ?: JSONObject())
+                } }
+            } else renderEmployee(ctx, null)
         } }
     }
 
