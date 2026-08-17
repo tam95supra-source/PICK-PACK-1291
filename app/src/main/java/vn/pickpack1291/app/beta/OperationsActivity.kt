@@ -194,7 +194,7 @@ class OperationsActivity : Activity() {
             fun render(){
                 box.removeAllViews();val key=when(period.selectedItemPosition){0->"ca1_hc";1->"ca2";else->"all"};val p=rootJson.optJSONObject("reports")?.optJSONObject(key)?:JSONObject()
                 box.addView(reportGrid("NGUỒN LỰC",p.optJSONObject("manpower"),"Vị trí","position"));box.addView(gap(10));box.addView(reportGrid("THÂM NIÊN",p.optJSONObject("tenure"),"Thâm niên","label"))
-                if(isAdmin()){box.addView(gap(10));box.addView(supportGrid(rootJson.optJSONObject("support"))}
+                if(isAdmin()){box.addView(gap(10));box.addView(supportGrid(rootJson.optJSONObject("support")))}
             }
             period.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){render()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};render()
         }}

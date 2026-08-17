@@ -93,5 +93,5 @@ object MasterDataCache {
     }
 
     private fun fold(v: String): String = Normalizer.normalize(v, Normalizer.Form.NFD)
-        .replace(Regex("\p{Mn}+"), "").uppercase().trim()
+        .replace(Regex("\\p{Mn}+"), "").uppercase().trim()
 }
