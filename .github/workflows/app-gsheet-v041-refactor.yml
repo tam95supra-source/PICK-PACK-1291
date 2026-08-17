@@ -12,9 +12,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Apply scoped refactor
-        run: python3 tools/refactor_v041.py
-      - name: Commit source changes
+      - name: Apply compile compatibility fixes
+        run: python3 tools/fix_v041_compile.py
+      - name: Commit fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -22,5 +22,5 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add app google-apps-script
           git diff --cached --check
-          git commit -m 'feat: cache GSheet masters and rebuild operational UX'
+          git commit -m 'fix: complete scanner helpers and API capability marker'
           git push origin HEAD:main
