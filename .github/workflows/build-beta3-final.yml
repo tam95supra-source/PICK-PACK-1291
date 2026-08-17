@@ -28,6 +28,7 @@ jobs:
           test -s app/src/main/res/drawable-nodpi/owner_launcher.png
           echo "$OWNER_ART_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
           grep -q 'android:icon="@drawable/owner_launcher"' app/src/main/AndroidManifest.xml
+          grep -q 'android:roundIcon="@drawable/owner_launcher"' app/src/main/AndroidManifest.xml
           grep -q 'versionCode = 9' app/build.gradle.kts
           grep -q 'versionName = "0.4.2-beta.3"' app/build.gradle.kts
           ! grep -R 'BetaApiClient()' app/src/main/java/vn/pickpack1291/app/beta
@@ -69,14 +70,16 @@ jobs:
           STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
           test -s "$BETA"; test -s "$STABLE"
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$BETA" > /tmp/badge.txt
+          grep -E "^(package:|application:|launchable-activity:)" /tmp/badge.txt || true
           grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
           grep -q "versionCode='9'" /tmp/badge.txt
           grep -q "versionName='0.4.2-beta.3'" /tmp/badge.txt
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump resources "$BETA" > /tmp/resources.txt
+          grep -n 'owner_launcher' /tmp/resources.txt | head -20 || true
           grep -q 'owner_launcher' /tmp/resources.txt
-          unzip -l "$BETA" > /tmp/apk-files.txt
-          grep -q 'owner_launcher' /tmp/apk-files.txt
-          echo 'Beta3 compile + manifest + owner launcher APK resource: PASS'
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump xmltree "$BETA" AndroidManifest.xml > /tmp/manifest-tree.txt
+          grep -n 'android:icon\|android:roundIcon' /tmp/manifest-tree.txt | head -10 || true
+          echo 'Beta3 compile + package metadata + compiled owner launcher resource: PASS'
 
       - name: Upload Beta3 signing toolkit
         uses: actions/upload-artifact@v4
