@@ -72,7 +72,7 @@ function ppJson_(obj) {
 
 function ppHealth_() {
   const rows = ppValues_(PP.STAFF);
-  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.1',sheet_read:rows.length>1,business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
+  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.2',sheet_read:rows.length>1,business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
 }
 
 function ppSs_() { return SpreadsheetApp.openById(PP.SHEET_ID); }
@@ -290,7 +290,7 @@ function ppResourceChange_(auth,body) {
 function ppLaborRows_() { if(PP_REQUEST_LABOR_ROWS_!==null)return PP_REQUEST_LABOR_ROWS_; PP_REQUEST_LABOR_ROWS_=ppObjects_(PP.LABOR); return PP_REQUEST_LABOR_ROWS_; }
 function ppLaborState_(r) { return ppFold_(r['Trạng thái'])==='DANG LAM'?'ACTIVE':'COMPLETED'; }
 function ppLaborObj_(r) {
-  return {mnv:r['Mã nhân viên']||'',business_date:ppBusinessIso_(),labor_type:r['Thông tin công nhật']||'',start_at:ppIsoFromVisible_(r['Thời gian bắt đầu']),end_at:ppIsoFromVisible_(r['Thời gian kết thúc']),time_marker:r['Mốc thời gian']||'',state:ppLaborState_(r),note:r['Ghi chú']||'',updated_at:ppIsoFromVisible_(r['Thời gian cập nhật'])};
+  return {mnv:r['Mã nhân viên']||'',business_date:ppBusinessIso_(),labor_type:r['Thông tin công nhật']||'',start_at:ppIsoFromVisible_(r['Thời gian bắt đầu']),end_at:ppIsoFromVisible_(r['Thời gian kết thúc']),time_marker:r['Mốc thời gian']||'',state:ppLaborState_(r),note:r['Ghi chú']||'',deduct_staff:ppFold_(r['Khấu trừ nhân sự'])==='CO',updated_at:ppIsoFromVisible_(r['Thời gian cập nhật'])};
 }
 function ppActiveLabor_(mnv) {
   const rows=ppLaborRows_().filter(function(r){return r['Ngày']===ppBusinessVisible_() && r['Mã nhân viên']===mnv && ppLaborState_(r)==='ACTIVE';});
@@ -298,10 +298,10 @@ function ppActiveLabor_(mnv) {
 }
 function ppLaborStart_(auth,body) {
   if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
-  const mnv=String(body.mnv||'').trim(),eventId=String(body.event_id||'').trim(),type=String(body.labor_type||'').trim(),marker=String(body.time_marker||'Trong ngày').trim(),note=String(body.note||'').trim(); if(!mnv||!eventId||!type)return {ok:false,error:'LABOR_FIELDS_INVALID'}; if(ppEventExists_(eventId))return {ok:true,idempotent:true};
+  const mnv=String(body.mnv||'').trim(),eventId=String(body.event_id||'').trim(),type=String(body.labor_type||'').trim(),marker=String(body.time_marker||'Trong ngày').trim(),note=String(body.note||'').trim(); let deduct=body.deduct_staff===true||ppFold_(body.deduct_staff)==='CO'; if(!mnv||!eventId||!type)return {ok:false,error:'LABOR_FIELDS_INVALID'}; if(ppEventExists_(eventId))return {ok:true,idempotent:true};
   const s=ppSessionMap_(ppBusinessVisible_())[mnv]; if(!s||s.state!=='ACTIVE')return {ok:false,error:'PP_SESSION_NOT_ENTERED'}; if(ppActiveLabor_(mnv))return {ok:false,error:'PP_LABOR_ALREADY_ACTIVE'};
   const catalog=ppCatalog_(); if(catalog.labor_types.length && catalog.labor_types.indexOf(type)<0)return {ok:false,error:'LABOR_TYPE_INVALID'};
-  const e=ppLookupStaff_(mnv)||s.employee_snapshot; ppEnsureOperationalHeaders_(); ppSheet_(PP.LABOR).appendRow([ppBusinessVisible_(),s.shift,mnv,e.full_name,e.phone,e.supplier,e.department,e.site,e.warehouse,e.main_position,ppWorkLabel_(s.work_choice),type,ppNowVisible_(),'',marker,'Đang làm',note,auth.login_id,ppNowVisible_(),eventId,'',ppRevision_()+1]); const rev=ppBumpRevision_();
+  const e=ppLookupStaff_(mnv)||s.employee_snapshot; const fixed=ppFold_(e.main_position).indexOf('KEO HANG')>=0||ppFold_(e.main_position).indexOf('TO TRUONG')>=0; if(fixed)deduct=false; ppEnsureOperationalHeaders_(); ppSheet_(PP.LABOR).appendRow([ppBusinessVisible_(),s.shift,mnv,e.full_name,e.phone,e.supplier,e.department,e.site,e.warehouse,e.main_position,ppWorkLabel_(s.work_choice),type,ppNowVisible_(),'',marker,'Đang làm',note,auth.login_id,ppNowVisible_(),eventId,'',ppRevision_()+1,deduct?'Có':'Không']); const rev=ppBumpRevision_();
   return {ok:true,result:{event_id:eventId,revision:rev},projection:'DIRECT_GSHEET'};
 }
 function ppLaborFinish_(auth,body) {
@@ -328,10 +328,31 @@ function ppResourceList_() {
   Object.keys(map).forEach(function(k){const s=map[k]; if(s.state!=='ACTIVE')return; const add=function(t,key){if(key)items.push({resource_type:t,resource_key:key,mnv:s.mnv,session:s});}; add('PDA',s.pda_serial);add('USER_PICK',s.user_pick);add('PACK_TABLE',s.pack_table);add('USER_PACK',s.user_pack);});
   return {ok:true,items:items};
 }
+function ppSupplierCode_(v) {
+  const f=ppFold_(v);
+  if(f==='NGUON LUC VIET')return 'NLV'; if(f==='HOA ANH DAO')return 'HAD'; if(f==='VIET WORK')return 'VW'; if(f==='MAN POWER')return 'MP'; if(f==='MEGA LINK')return 'MGL'; if(f==='HA GIA PHAT')return 'HGP'; if(f==='INHOUSE')return 'IH'; return '';
+}
+function ppReportPosition_(e) {
+  const p=ppFold_(e.main_position),d=ppFold_(e.department);
+  if(p==='PICK')return 'Picker'; if(p==='PACK')return 'Packer'; if(p==='TRUONG NHOM')return 'Trưởng nhóm'; if(p==='CHUYEN VIEN')return 'Chuyên viên'; if(p==='TO TRUONG')return 'Tổ trưởng'; if(p==='KEO HANG')return 'Kéo hàng'; if(p==='5S')return '5S'; if(p==='PHUC LONG')return 'Phúc Long';
+  if(p.indexOf('DIEU PHOI')>=0){if(d.indexOf('PICK PACK')>=0)return 'Điều phối khu pack';if(d.indexOf('GIAO VAN')>=0||d.indexOf('OUTBOUND')>=0)return 'Điều phối khu chờ xuất';return 'Điều phối';}
+  return e.main_position||'Khác';
+}
+function ppTenureDays_(startDate) {
+  if(!startDate)return 99999;
+  try{const d=Utilities.parseDate(String(startDate),PP.TZ,'dd/MM/yyyy');const now=Utilities.parseDate(ppBusinessVisible_(),PP.TZ,'dd/MM/yyyy');return Math.floor((now.getTime()-d.getTime())/86400000);}catch(_){return 99999;}
+}
+function ppReportMatrix_(sessions) {
+  const supplierOrder=['IH','NLV','VW','MP','HGP','MGL','HAD'];const positionOrder=['Trưởng nhóm','Chuyên viên','Tổ trưởng','Điều phối khu pack','Điều phối khu chờ xuất','Điều phối','Kéo hàng','5S','Picker','Packer','Phúc Long'];const rows={},totals={};supplierOrder.forEach(function(c){totals[c]=0;});
+  sessions.forEach(function(x){const e=ppLookupStaff_(x.mnv)||x.employee_snapshot||{},c=ppSupplierCode_(e.supplier);if(!c)return;const pos=ppReportPosition_(e);if(!rows[pos]){rows[pos]={position:pos,counts:{},total:0};supplierOrder.forEach(function(k){rows[pos].counts[k]=0;});}rows[pos].counts[c]++;rows[pos].total++;totals[c]++;});
+  const active=supplierOrder.filter(function(c){return totals[c]>0;});const list=Object.keys(rows).map(function(k){return rows[k];}).filter(function(r){return r.total>0;});list.sort(function(a,b){const ia=positionOrder.indexOf(a.position),ib=positionOrder.indexOf(b.position);return (ia<0?999:ia)-(ib<0?999:ib)||a.position.localeCompare(b.position);});return {columns:active,rows:list,totals:totals,total:list.reduce(function(n,r){return n+r.total;},0)};
+}
+function ppTenureMatrix_(sessions) {
+  const supplierOrder=['IH','NLV','VW','MP','HGP','MGL','HAD'],totals={};supplierOrder.forEach(function(c){totals[c]=0;});const rows=[{label:'Nhân sự mới ≤ 30 ngày',counts:{},total:0},{label:'Nhân sự cũ > 30 ngày',counts:{},total:0}];rows.forEach(function(r){supplierOrder.forEach(function(c){r.counts[c]=0;});});sessions.forEach(function(x){const e=ppLookupStaff_(x.mnv)||x.employee_snapshot||{},c=ppSupplierCode_(e.supplier);if(!c)return;const ix=ppTenureDays_(e.start_date)<=30?0:1;rows[ix].counts[c]++;rows[ix].total++;totals[c]++;});const active=supplierOrder.filter(function(c){return totals[c]>0;});return {columns:active,rows:rows,totals:totals,total:rows[0].total+rows[1].total};
+}
+function ppReportPeriod_(sessions,mode) {let items=sessions;if(mode==='ca1_hc')items=sessions.filter(function(x){return x.shift==='Ca 1'||x.shift==='Ca HC';});else if(mode==='ca2')items=sessions.filter(function(x){return x.shift==='Ca 2';});return {manpower:ppReportMatrix_(items),tenure:ppTenureMatrix_(items)};}
 function ppReportDaily_() {
-  const sm=ppSessionMap_(ppBusinessVisible_()), s=Object.keys(sm).map(function(k){return sm[k];}), l=ppLaborRows_().filter(function(r){return r['Ngày']===ppBusinessVisible_();}).map(ppLaborObj_), resources=ppResourceList_().items, consumption=ppConsumption_(ppBusinessVisible_(),'__NONE__');
-  const shifts={}, works={}, laborTypes={}; s.forEach(function(x){shifts[x.shift]=(shifts[x.shift]||0)+1;const w=ppWorkLabel_(x.work_choice);works[w]=(works[w]||0)+1;}); l.forEach(function(x){laborTypes[x.labor_type]=(laborTypes[x.labor_type]||0)+1;});
-  return {ok:true,business_date:ppBusinessIso_(),sessions:{total:s.length,active:s.filter(function(x){return x.state==='ACTIVE';}).length,ended:s.filter(function(x){return x.state==='ENDED';}).length,by_shift:shifts,by_work:works},labor:{total:l.length,active:l.filter(function(x){return x.state==='ACTIVE';}).length,completed:l.filter(function(x){return x.state==='COMPLETED';}).length,by_type:laborTypes},resources:{currently_assigned:resources.length,user_pick_used_today:consumption.picks.size,user_pack_used_today:consumption.packs.size}};
+  const sm=ppSessionMap_(ppBusinessVisible_()),sessions=Object.keys(sm).map(function(k){return sm[k];});const laborRows=ppLaborRows_().filter(function(r){return r['Ngày']===ppBusinessVisible_();});const supportMap={};laborRows.forEach(function(r){const type=r['Thông tin công nhật']||'Khác';if(!supportMap[type])supportMap[type]={labor_type:type,quantity:0,deduction:0};supportMap[type].quantity++;if(ppFold_(r['Khấu trừ nhân sự'])==='CO')supportMap[type].deduction++;});const support=Object.keys(supportMap).map(function(k){return supportMap[k];}).sort(function(a,b){return b.quantity-a.quantity||a.labor_type.localeCompare(b.labor_type);});return {ok:true,business_date:ppBusinessIso_(),report_version:'0.4.2',reports:{ca1_hc:ppReportPeriod_(sessions,'ca1_hc'),ca2:ppReportPeriod_(sessions,'ca2'),all:ppReportPeriod_(sessions,'all')},support:{rows:support,total:support.reduce(function(n,x){return n+x.quantity;},0),deduction_total:support.reduce(function(n,x){return n+x.deduction;},0)}};
 }
 function ppStaffSearch_(body) {
   const q=ppFold_(body.query||''); if(q.length<2)return {ok:true,items:[]};
@@ -406,7 +427,7 @@ function ppSha256Hex_(s){return Utilities.computeDigest(Utilities.DigestAlgorith
 
 function ppEnsureOperationalHeaders_() {
   const ra=ppSheet_(PP.RA); if(ra.getRange(1,20).getValue()!=='Event ID')ra.getRange(1,20,1,3).setValues([['Event ID','App action','App revision']]);
-  const lb=ppSheet_(PP.LABOR); if(lb.getRange(1,20).getValue()!=='Event ID')lb.getRange(1,20,1,3).setValues([['Event ID','Finish Event ID','App revision']]);
+  const lb=ppSheet_(PP.LABOR); if(lb.getRange(1,20).getValue()!=='Event ID')lb.getRange(1,20,1,3).setValues([['Event ID','Finish Event ID','App revision']]); if(lb.getRange(1,23).getValue()!=='Khấu trừ nhân sự')lb.getRange(1,23).setValue('Khấu trừ nhân sự');
 }
 function ppEnsureAdminHeaders_(){const sh=ppSheet_(PP.ADMIN);if(sh.getRange(1,9).getValue()!=='Trạng thái tài khoản')sh.getRange(1,9,1,3).setValues([['Trạng thái tài khoản','Người cập nhật','Thời gian cập nhật']]);}
 function ppSyncStatus_(){return {ok:true,business_date:ppBusinessIso_(),server_seq:ppRevision_(),master_revision:ppMasterRevision_(),last_event_at:ppNowIso_(),projection_pending:0,mode:'APP_GSHEET'};}

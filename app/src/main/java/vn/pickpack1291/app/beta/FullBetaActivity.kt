@@ -71,6 +71,7 @@ class FullBetaActivity : Activity() {
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         LocalLogManager.installCrashHandler(this)
         LocalLogManager.createDailyIfNeeded(this)
+        MasterDataCache.hydrate(this)
         login()
     }
 
@@ -128,8 +129,7 @@ class FullBetaActivity : Activity() {
         pass.setOnEditorActionListener { _, actionId, _ -> if (actionId == EditorInfo.IME_ACTION_DONE) { submit(); true } else false }
         body.addView(button, matchWrap()); body.addView(gap(10))
         body.addView(txt("${BuildConfig.CHANNEL} • FULL FUNCTION TEST • ${BuildConfig.VERSION_NAME}", 10f, blue, true).center())
-        body.addView(txt("App tự kiểm tra phiên bản mới khi mở/foreground.", 9.5f, muted, false).center())
-        setScreen(ScrollView(this).apply { isFillViewport = true; addView(body) })
+                setScreen(ScrollView(this).apply { isFillViewport = true; addView(body) })
     }
 
     private fun dashboard() {
@@ -138,22 +138,22 @@ class FullBetaActivity : Activity() {
         val root = column(bg)
         root.addView(appBar("Trang chủ", false))
         val body = column(bg).apply { setPadding(dp(14), dp(15), dp(14), dp(54)) }
-        body.addView(fullCard("▣", "QUÉT QR NHÂN SỰ", blue, dp(94)) { employeeScan() })
-        body.addView(gap(8))
+        body.addView(cardRow(
+            tile("▣", "QUÉT QR NHÂN SỰ", blue) { employeeScan() },
+            tile("⌕", "DANH SÁCH NHÂN SỰ", Color.rgb(58, 91, 183)) { openModule("STAFF") }
+        ))
         if (accountRole == "ADMIN" || accountRole == "SUPERADMIN") {
             body.addView(cardRow(
                 tile("◉", "CÔNG NHẬT", green) { openModule("LABOR") },
-                tile("☷", "THEO DÕI CA", Color.rgb(58, 91, 183)) { openModule("LISTS") }
+                tile("☷", "THEO DÕI CA", Color.rgb(91, 73, 183)) { openModule("LISTS") }
             ))
         } else {
-            body.addView(fullCard("☷", "THEO DÕI CA / DANH SÁCH", Color.rgb(58, 91, 183), dp(72)) { openModule("LISTS") })
+            body.addView(fullCard("☷", "THEO DÕI CA", Color.rgb(91, 73, 183), dp(72)) { openModule("LISTS") })
         }
         body.addView(cardRow(
             tile("▥", "BÁO CÁO", teal) { openModule("REPORT") },
             tile("⚙", "CÀI ĐẶT", navy) { openModule("SETTINGS") }
         ))
-        body.addView(gap(10))
-        body.addView(info("Tài nguyên được cấp/đổi ngay trong phiên nhân sự. Master data được cache trên máy và chỉ làm mới khi Google Sheet thay đổi."))
         root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
         setScreen(root)
         refreshStatus()
@@ -175,11 +175,13 @@ class FullBetaActivity : Activity() {
         val check = primary("KIỂM TRA", navy) {}
         fun submit() { val v=mnv.text.toString().trim(); if(v.isBlank()){toast("Quét QR hoặc nhập MNV.");return}; check.isEnabled=false;check.text="ĐANG KIỂM TRA..."; loadEmployee(v, check) }
         check.setOnClickListener { submit() }; bindScannerEnter(mnv) { if (check.isEnabled) submit() }
-        body.addView(check, matchWrap()); body.addView(gap(12)); body.addView(info("Google Sheet xác định CHƯA VÀO / ĐANG TRONG PHIÊN / ĐÃ HẾT PHIÊN. Không còn nút VÀO/RA tách rời."))
+        body.addView(check, matchWrap())
         root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1,0,1f)); setScreen(root); mnv.requestFocus()
     }
 
     private fun loadEmployee(mnv: String, button: Button? = null) {
+        val cached = MasterDataCache.employee(this, mnv)
+        if (cached != null && currentScreen == "SCAN") renderCachedEmployee(cached)
         api.call("employee_context", JSONObject().put("mnv", mnv)) { result -> runOnUiThread {
             button?.isEnabled=true; button?.text="KIỂM TRA"
             if(result.code==401){sessionExpired();return@runOnUiThread}
@@ -192,6 +194,18 @@ class FullBetaActivity : Activity() {
                 } }
             } else renderEmployee(ctx, null)
         } }
+    }
+
+    private fun renderCachedEmployee(e: JSONObject) {
+        currentScreen = "EMPLOYEE_LOADING"
+        val root=column(bg)
+        root.addView(appBar("QUÉT QR NHÂN SỰ", true))
+        val body=column(bg).apply{setPadding(dp(16),dp(14),dp(16),dp(58))}
+        body.addView(employeeCard(e))
+        body.addView(gap(10))
+        body.addView(status("ĐANG KIỂM TRA PHIÊN...", blue, Color.rgb(237,244,255)))
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f))
+        setScreen(root)
     }
 
     private fun renderEmployee(ctx: JSONObject, masters: JSONObject?) {
@@ -223,7 +237,7 @@ class FullBetaActivity : Activity() {
     }
 
     private fun renderEnded(body: LinearLayout, ctx: JSONObject) {
-        val s=ctx.optJSONObject("session") ?: JSONObject();body.addView(status("ĐÃ HẾT PHIÊN VÀO / RA HÔM NAY", red, Color.rgb(255,238,239)));body.addView(gap(8));body.addView(details(listOf("Ca" to s.optString("shift"),"Vị trí trong ca" to s.optString("work_choice"),"Vào lúc" to formatIso(s.optString("enter_at")),"Ra lúc" to formatIso(s.optString("exit_at")))));body.addView(gap(10));body.addView(info("Phiên hợp lệ đã kết thúc. Không cho VÀO lại cùng ngày bằng luồng thường."))
+        val s=ctx.optJSONObject("session") ?: JSONObject();body.addView(status("ĐÃ HẾT PHIÊN VÀO / RA HÔM NAY", red, Color.rgb(255,238,239)));body.addView(gap(8));body.addView(details(listOf("Ca" to s.optString("shift"),"Vị trí trong ca" to s.optString("work_choice"),"Vào lúc" to formatIso(s.optString("enter_at")),"Ra lúc" to formatIso(s.optString("exit_at")))))
     }
 
     private fun renderEnter(body: LinearLayout, ctx: JSONObject, masters: JSONObject) {
