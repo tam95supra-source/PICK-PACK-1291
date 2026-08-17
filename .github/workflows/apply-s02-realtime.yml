@@ -1,0 +1,50 @@
+name: Apply S02 Foreground Realtime
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'scripts/apply_s02_realtime.py'
+      - '.github/workflows/apply-s02-realtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply deterministic source patch
+        run: python3 scripts/apply_s02_realtime.py
+
+      - name: Verify patch shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'State { ACTIVE, DRAINING, SUSPENDED }' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'foregroundSync.start()' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          grep -q 'foregroundSync.stop()' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          git diff --check
+
+      - name: Commit patched app sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No source changes needed.'
+            exit 0
+          fi
+          git config user.name 'pick-pack-1291-ci'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt \
+                  app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt \
+                  app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          git commit -m 'feat: add foreground adaptive realtime sync [s02-applied]'
+          git push origin HEAD:main
