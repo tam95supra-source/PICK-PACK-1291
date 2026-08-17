@@ -26,8 +26,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 7
-            versionName = "0.4.2-beta.1"
+            versionCode = 8
+            versionName = "0.4.2-beta.2"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -64,4 +64,4 @@ android {
 // The approved Apps Script /exec endpoint is public configuration, not a credential.
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
-// v0.4.2 compile-validation marker.
+// v0.4.2 OTA-enabled beta build marker.
