@@ -64,3 +64,4 @@ android {
 // The approved Apps Script /exec endpoint is public configuration, not a credential.
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
+// v0.4.2 compile-validation marker.
