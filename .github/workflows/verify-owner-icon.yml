@@ -1,0 +1,42 @@
+name: Verify Owner Launcher Artwork
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/src/main/res/drawable-nodpi/app_icon_owner.png'
+      - '.github/workflows/verify-owner-icon.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-icon:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect owner artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE=app/src/main/res/drawable-nodpi/app_icon_owner.png
+          test -s "$FILE"
+          file "$FILE"
+          sha256sum "$FILE"
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+          p=Path('app/src/main/res/drawable-nodpi/app_icon_owner.png')
+          b=p.read_bytes()
+          assert b[:8]==b'\x89PNG\r\n\x1a\n', 'not PNG'
+          w,h=struct.unpack('>II',b[16:24])
+          print(f'PNG_DIMENSIONS={w}x{h}')
+          assert w==h and w>=384, (w,h)
+          PY
+      - name: Upload inspected artwork
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-launcher-artwork-inspection
+          path: app/src/main/res/drawable-nodpi/app_icon_owner.png
+          retention-days: 1
