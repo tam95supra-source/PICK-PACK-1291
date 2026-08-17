@@ -48,6 +48,8 @@ Before a material implementation change, verify that it directly serves the late
 - GitHub prerelease `v0.4.2-beta.2-publicbeta` is only a one-time compatibility bridge so legacy Beta clients that still check GitHub can migrate to the Drive-OTA build.
 - OTA APK downloads must be SHA-256 verified before the Android installer is launched.
 - OTA checks remain foreground-oriented: check on app open/foreground opportunities; do not introduce background/screen-off polling.
+- Launcher icon artwork must use the exact owner-provided artwork without redesign, replacement, decorative inset, or alternate artwork.
+- Login session must survive app/process closure on the same installation. The active account session remains valid until explicit logout, account/security change, or a successful login for that same account from a different app installation/device replaces the active server session.
 
 ## 6. Architecture enforcement
 
