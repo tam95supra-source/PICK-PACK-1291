@@ -71,6 +71,16 @@ object MasterDataCache {
         return staffByMnv[mnv.trim()]?.let { JSONObject(it.toString()) }
     }
 
+    fun resourceOptions(context: Context): JSONObject {
+        val s = snapshot(context) ?: return JSONObject()
+        return JSONObject().apply {
+            put("pdas", JSONArray((s.optJSONArray("pdas") ?: JSONArray()).toString()))
+            put("user_picks", JSONArray((s.optJSONArray("user_picks") ?: JSONArray()).toString()))
+            put("pack_tables", JSONArray((s.optJSONArray("pack_bundles") ?: JSONArray()).toString()))
+            put("master_revision", s.optLong("master_revision", 0L))
+        }
+    }
+
     fun allStaff(context: Context, limit: Int = 200): JSONArray {
         snapshot(context)
         val out = JSONArray()

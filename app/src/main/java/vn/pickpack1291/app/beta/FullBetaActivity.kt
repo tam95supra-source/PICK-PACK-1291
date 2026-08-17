@@ -25,17 +25,17 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class FullBetaActivity : Activity() {
-    private val navy = Color.rgb(7, 38, 92)
-    private val blue = Color.rgb(13, 78, 170)
+    private val navy = Color.rgb(15, 78, 74)
+    private val blue = Color.rgb(13, 148, 136)
     private val red = Color.rgb(218, 45, 53)
     private val green = Color.rgb(36, 153, 85)
-    private val orange = Color.rgb(241, 143, 24)
-    private val teal = Color.rgb(35, 151, 166)
-    private val bg = Color.rgb(248, 250, 253)
+    private val orange = Color.rgb(217, 119, 6)
+    private val teal = Color.rgb(15, 118, 110)
+    private val bg = Color.rgb(247, 250, 249)
     private val surface = Color.WHITE
-    private val ink = Color.rgb(22, 33, 49)
-    private val muted = Color.rgb(96, 108, 124)
-    private val line = Color.rgb(218, 225, 234)
+    private val ink = Color.rgb(24, 44, 42)
+    private val muted = Color.rgb(100, 116, 139)
+    private val line = Color.rgb(214, 229, 226)
 
     private val api by lazy { BetaApiClient(applicationContext) }
     private val syncApi by lazy { BetaApiClient(applicationContext) }
@@ -105,23 +105,30 @@ class FullBetaActivity : Activity() {
         liveEmployeeMnv = ""
         currentScreen = "LOGIN"
         accountLogin = ""; accountName = ""; accountRole = ""; accountPosition = ""
-        val body = column(bg).apply { gravity = Gravity.CENTER_HORIZONTAL; setPadding(dp(22), dp(24), dp(22), dp(58)) }
-        body.addView(gap(6))
-        body.addView(ImageView(this).apply { setImageResource(R.drawable.owner_launcher); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(88), dp(88)))
-        body.addView(gap(7))
-        body.addView(txt("PICK PACK 1291", 21f, navy, true).center())
-        body.addView(txt("SUPRA DC HƯNG YÊN", 10.5f, navy, true).center())
-        body.addView(gap(16))
+
         val user = input("Nhập tài khoản", false)
         val saved = getPreferences(MODE_PRIVATE).getString("last_login", "").orEmpty()
         if (saved.isNotBlank()) user.setText(saved)
         val pass = input("Nhập mật khẩu", true).apply { imeOptions = EditorInfo.IME_ACTION_DONE }
-        body.addView(labelled("Tài khoản", user)); body.addView(gap(10)); body.addView(labelled("Mật khẩu", pass)); body.addView(gap(15))
-        val button = primary("ĐĂNG NHẬP", navy) {}
+
+        val card = column(surface).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(22), dp(22), dp(22), dp(22))
+            background = outlineBg(surface, 14)
+        }
+        card.addView(ImageView(this).apply { setImageResource(R.drawable.owner_launcher); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(98), dp(98)))
+        card.addView(gap(9))
+        card.addView(txt("PICK PACK 1291", 22f, navy, true).center())
+        card.addView(txt("SUPRA DC HƯNG YÊN", 10.5f, teal, true).center())
+        card.addView(gap(20))
+        card.addView(labelled("Tài khoản", user)); card.addView(gap(10))
+        card.addView(labelled("Mật khẩu", pass)); card.addView(gap(14))
+
+        val button = primary("ĐĂNG NHẬP", teal) {}
         fun submit() {
             val login = user.text.toString().trim(); val password = pass.text.toString()
             if (login.isBlank() || password.isBlank()) { toast("Nhập tài khoản và mật khẩu."); return }
-            button.isEnabled = false; button.text = "ĐANG ĐĂNG NHẬP..."
+            button.isEnabled = false; button.text = "ĐANG XÁC THỰC..."
             api.login(login, password) { result -> runOnUiThread {
                 button.isEnabled = true; button.text = "ĐĂNG NHẬP"
                 if (!result.ok) { showError(result.error ?: "Đăng nhập thất bại"); return@runOnUiThread }
@@ -140,9 +147,38 @@ class FullBetaActivity : Activity() {
         }
         button.setOnClickListener { submit() }
         pass.setOnEditorActionListener { _, actionId, _ -> if (actionId == EditorInfo.IME_ACTION_DONE) { submit(); true } else false }
-        body.addView(button, matchWrap()); body.addView(gap(10))
-        body.addView(txt("${BuildConfig.CHANNEL} • FULL FUNCTION TEST • ${BuildConfig.VERSION_NAME}", 10f, blue, true).center())
-                setScreen(ScrollView(this).apply { isFillViewport = true; addView(body) })
+        card.addView(button, matchWrap())
+        card.addView(gap(9))
+        card.addView(TextView(this).apply {
+            text = "QUÊN MẬT KHẨU?"
+            textSize = 11.5f
+            setTextColor(teal)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener {
+                val loginId = user.text.toString().trim()
+                if (loginId.isBlank()) { toast("Nhập đúng tài khoản trước khi chọn Quên mật khẩu."); return@setOnClickListener }
+                isEnabled = false
+                text = "ĐANG GỬI YÊU CẦU..."
+                api.forgotPassword(loginId) { r -> runOnUiThread {
+                    isEnabled = true; text = "QUÊN MẬT KHẨU?"
+                    if (!r.ok) { showError(r.error ?: "Không gửi được yêu cầu đặt lại mật khẩu"); return@runOnUiThread }
+                    AlertDialog.Builder(this@FullBetaActivity)
+                        .setTitle("Đã tiếp nhận")
+                        .setMessage("Nếu tài khoản hợp lệ, mật khẩu mới đã được gửi tới quản trị viên. Liên hệ quản trị viên để nhận mật khẩu mới.")
+                        .setPositiveButton("OK", null).show()
+                } }
+            }
+        }, matchWrap())
+
+        val holder = FrameLayout(this).apply {
+            setBackgroundColor(bg)
+            minimumHeight = (resources.displayMetrics.heightPixels - dp(70)).coerceAtLeast(dp(560))
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            addView(card, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
+        }
+        setScreen(ScrollView(this).apply { isFillViewport = true; addView(holder) })
     }
 
     private fun dashboard() {
@@ -150,18 +186,21 @@ class FullBetaActivity : Activity() {
         liveEmployeeMnv = ""
         val root = column(bg)
         root.addView(appBar("Trang chủ", false))
-        val body = column(bg).apply { setPadding(dp(14), dp(15), dp(14), dp(54)) }
-        body.addView(cardRow(
-            tile("▣", "QUÉT QR NHÂN SỰ", blue) { employeeScan() },
-            tile("⌕", "DANH SÁCH NHÂN SỰ", Color.rgb(58, 91, 183)) { openModule("STAFF") }
-        ))
+        val body = column(bg).apply { setPadding(dp(12), dp(12), dp(12), dp(46)) }
+        body.addView(txt("Xin chào, ${accountName.ifBlank { accountLogin }}", 16f, ink, true))
+        body.addView(txt(roleText(accountRole), 10.5f, muted, false))
+        body.addView(gap(10))
+        body.addView(fullCard("▣", "QUÉT QR NHÂN SỰ", teal, dp(88)) { employeeScan() })
+        body.addView(gap(8))
+        body.addView(section("CHỨC NĂNG"))
+        body.addView(fullCard("⌕", "DANH SÁCH NHÂN SỰ", Color.rgb(20, 128, 120), dp(64)) { openModule("STAFF") })
         if (accountRole == "ADMIN" || accountRole == "SUPERADMIN") {
             body.addView(cardRow(
                 tile("◉", "CÔNG NHẬT", green) { openModule("LABOR") },
-                tile("☷", "THEO DÕI CA", Color.rgb(91, 73, 183)) { openModule("LISTS") }
+                tile("☷", "THEO DÕI CA", Color.rgb(67, 122, 115)) { openModule("LISTS") }
             ))
         } else {
-            body.addView(fullCard("☷", "THEO DÕI CA", Color.rgb(91, 73, 183), dp(72)) { openModule("LISTS") })
+            body.addView(fullCard("☷", "THEO DÕI CA", Color.rgb(67, 122, 115), dp(64)) { openModule("LISTS") })
         }
         body.addView(cardRow(
             tile("▥", "BÁO CÁO", teal) { openModule("REPORT") },
@@ -195,16 +234,21 @@ class FullBetaActivity : Activity() {
     private fun loadEmployee(mnv: String, button: Button? = null) {
         val cached = MasterDataCache.employee(this, mnv)
         if (cached != null && currentScreen == "SCAN") renderCachedEmployee(cached)
-        api.call("employee_context", JSONObject().put("mnv", mnv)) { result -> runOnUiThread {
+        api.call("employee_context", JSONObject().put("mnv", mnv).put("include_options", false).put("include_labor", false)) { result -> runOnUiThread {
             button?.isEnabled=true; button?.text="KIỂM TRA"
             if(result.code==401){sessionExpired();return@runOnUiThread}
             if(!result.ok){showError(result.error ?: "Không kiểm tra được MNV");return@runOnUiThread}
             val ctx=result.json ?: JSONObject()
             if(ctx.optString("state")=="NOT_ENTERED") {
-                val inline = ctx.optJSONObject("options")
-                if(inline != null) renderEmployee(ctx, inline) else api.call("master_options", JSONObject().put("mnv", mnv)) { masters -> runOnUiThread {
-                    if(masters.code==401){sessionExpired();return@runOnUiThread}; renderEmployee(ctx, masters.json ?: JSONObject())
-                } }
+                val localOptions = MasterDataCache.resourceOptions(this@FullBetaActivity)
+                if (localOptions.optJSONArray("pdas") != null) {
+                    renderEmployee(ctx, localOptions)
+                } else {
+                    api.call("master_options", JSONObject().put("mnv", mnv)) { masters -> runOnUiThread {
+                        if(masters.code==401){sessionExpired();return@runOnUiThread}
+                        renderEmployee(ctx, masters.json ?: JSONObject())
+                    } }
+                }
             } else renderEmployee(ctx, null)
         } }
     }
@@ -244,7 +288,7 @@ class FullBetaActivity : Activity() {
         body.addView(primary("ĐỔI TÀI NGUYÊN / VỊ TRÍ", orange) { openModule("RESOURCES", mnv) }, matchWrap());body.addView(gap(8))
         val exit=primary("RA CA", red) {}
         exit.setOnClickListener { AlertDialog.Builder(this).setTitle("Xác nhận RA CA").setMessage("Kết thúc phiên của MNV $mnv và trả tài nguyên đang giữ?").setNegativeButton("Hủy",null).setPositiveButton("RA CA"){_,_->
-            exit.isEnabled=false;exit.text="ĐANG RA CA...";api.call("exit",JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",mnv)){r->runOnUiThread{exit.isEnabled=true;exit.text="RA CA";if(!r.ok)showError(r.error?:"RA CA thất bại")else{toast("RA CA thành công");loadEmployee(mnv)}}}
+            exit.isEnabled=false;exit.text="ĐANG RA CA...";api.call("exit",JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",mnv)){r->runOnUiThread{exit.isEnabled=true;exit.text="RA CA";if(!r.ok)showError(r.error?:"RA CA thất bại")else loadEmployee(mnv)}}
         }.show() }
         body.addView(exit, matchWrap())
     }
@@ -255,19 +299,19 @@ class FullBetaActivity : Activity() {
 
     private fun renderEnter(body: LinearLayout, ctx: JSONObject, masters: JSONObject) {
         val e=ctx.optJSONObject("employee") ?: JSONObject(); val mnv=e.optString("mnv")
-        body.addView(status("CHƯA VÀO CA", blue, Color.rgb(237,244,255)));body.addView(gap(10));body.addView(section("PHÂN CÔNG TRONG CA"));
+        body.addView(status("CHƯA VÀO CA", teal, Color.rgb(232, 248, 245)));body.addView(gap(8));body.addView(section("PHÂN CÔNG TRONG CA"))
         val shift=spinner(arrayOf("Ca 1","Ca 2","Ca HC"));val choice=spinner(arrayOf("KHÔNG","PICK","PACK"));when{e.optString("main_position").contains("Pick",true)->choice.setSelection(1);e.optString("main_position").contains("Pack",true)->choice.setSelection(2)}
-        body.addView(labelled("Ca làm việc",shift));body.addView(gap(9));body.addView(labelled("Vị trí trong ca",choice));body.addView(gap(9))
+        body.addView(labelled("Ca làm việc",shift));body.addView(gap(8));body.addView(labelled("Vị trí trong ca",choice));body.addView(gap(8))
         val resourceBox=column(bg);body.addView(resourceBox,matchWrap())
         val pdas=masters.optJSONArray("pdas")?:JSONArray();val picks=masters.optJSONArray("user_picks")?:JSONArray();val packs=masters.optJSONArray("pack_tables")?:JSONArray()
-        val pdaValues=mutableListOf<String>();val pickValues=mutableListOf<String>();val packValues=mutableListOf<String>();var pdaSpinner:Spinner?=null;var pickSpinner:Spinner?=null;var packSpinner:Spinner?=null
-        fun rebuild(){resourceBox.removeAllViews();pdaValues.clear();pickValues.clear();packValues.clear();when(choice.selectedItem.toString()){
-            "PICK"->{val labels=mutableListOf<String>();for(i in 0 until pdas.length()){val p=pdas.optJSONObject(i)?:continue;val serial=p.optString("serial");if(serial.isNotBlank()){pdaValues.add(serial);labels.add("${p.optString("last5")} • $serial")}};pdaSpinner=spinner((if(labels.isEmpty())listOf("Không có PDA khả dụng")else labels).toTypedArray());resourceBox.addView(labelled("PDA (bắt buộc)",pdaSpinner!!));resourceBox.addView(gap(8));val pl=mutableListOf<String>();for(i in 0 until picks.length()){val v=picks.optString(i);if(v.isNotBlank()){pl.add(v);pickValues.add(v)}};pickSpinner=spinner((if(pl.isEmpty())listOf("Không có User Pick khả dụng")else pl).toTypedArray());resourceBox.addView(labelled("User Pick (bắt buộc)",pickSpinner!!))}
+        val pickValues=mutableListOf<String>();val packValues=mutableListOf<String>();var pdaField:AutoCompleteTextView?=null;var pickSpinner:Spinner?=null;var packSpinner:Spinner?=null
+        fun rebuild(){resourceBox.removeAllViews();pickValues.clear();packValues.clear();pdaField=null;pickSpinner=null;packSpinner=null;when(choice.selectedItem.toString()){
+            "PICK"->{pdaField=pdaInput(pdas);resourceBox.addView(labelled("PDA (nhập 5 số cuối seri)",pdaField!!));resourceBox.addView(gap(8));val labels=mutableListOf("Không dùng User Pick");pickValues.add("");for(i in 0 until picks.length()){val v=picks.optString(i);if(v.isNotBlank()){labels.add(v);pickValues.add(v)}};pickSpinner=spinner(labels.toTypedArray());resourceBox.addView(labelled("User Pick (tùy chọn)",pickSpinner!!))}
             "PACK"->{val labels=mutableListOf<String>();val selectedShift=shift.selectedItem.toString();for(i in 0 until packs.length()){val p=packs.optJSONObject(i)?:continue;if(p.optString("shift")!=selectedShift)continue;val table=p.optString("table");if(table.isNotBlank()){packValues.add(table);labels.add("$table • ${p.optString("user_pack")}")}};packSpinner=spinner((if(labels.isEmpty())listOf("Không có bàn Pack khả dụng")else labels).toTypedArray());resourceBox.addView(labelled("Bàn Pack + User Pack",packSpinner!!))}
             else->Unit}}
-        choice.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){rebuild()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};shift.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){rebuild()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};rebuild();body.addView(gap(14))
-        val enter=primary("VÀO CA",blue){}
-        enter.setOnClickListener{val work=choice.selectedItem.toString();val payload=JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",mnv).put("shift",shift.selectedItem.toString()).put("work_choice",work);if(work=="PICK"){if(pdaValues.isEmpty()){showError("Không còn PDA khả dụng.");return@setOnClickListener};payload.put("pda_serial",pdaValues[pdaSpinner?.selectedItemPosition?:0]);if(pickValues.isEmpty()){showError("Không còn User Pick khả dụng.");return@setOnClickListener};payload.put("user_pick",pickValues[pickSpinner?.selectedItemPosition?:0])};if(work=="PACK"){if(packValues.isEmpty()){showError("Không còn bàn Pack khả dụng.");return@setOnClickListener};payload.put("pack_table",packValues[packSpinner?.selectedItemPosition?:0])};enter.isEnabled=false;enter.text="ĐANG VÀO CA...";api.call("enter",payload){r->runOnUiThread{enter.isEnabled=true;enter.text="VÀO CA";if(!r.ok)showError(r.error?:"VÀO CA thất bại")else{toast("VÀO CA thành công");loadEmployee(mnv)}}}}
+        choice.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){rebuild()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};shift.onItemSelectedListener=object:android.widget.AdapterView.OnItemSelectedListener{override fun onItemSelected(p:android.widget.AdapterView<*>?,v:View?,pos:Int,id:Long){rebuild()};override fun onNothingSelected(p:android.widget.AdapterView<*>?)=Unit};rebuild();body.addView(gap(12))
+        val enter=primary("VÀO CA",teal){}
+        enter.setOnClickListener{val work=choice.selectedItem.toString();val payload=JSONObject().put("event_id",UUID.randomUUID().toString()).put("mnv",mnv).put("shift",shift.selectedItem.toString()).put("work_choice",work);if(work=="PICK"){val serial=resolvePda(pdas,pdaField?.text?.toString().orEmpty());if(serial==null){showError("Nhập đúng 5 số cuối seri PDA và chọn PDA trong danh sách gợi ý.");return@setOnClickListener};payload.put("pda_serial",serial);val pick=pickValues.getOrNull(pickSpinner?.selectedItemPosition?:0).orEmpty();if(pick.isNotBlank())payload.put("user_pick",pick)};if(work=="PACK"){if(packValues.isEmpty()){showError("Không còn bàn Pack khả dụng.");return@setOnClickListener};payload.put("pack_table",packValues[packSpinner?.selectedItemPosition?:0])};enter.isEnabled=false;enter.text="ĐANG VÀO CA...";api.call("enter",payload){r->runOnUiThread{enter.isEnabled=true;enter.text="VÀO CA";if(!r.ok)showError(r.error?:"VÀO CA thất bại")else loadEmployee(mnv)}}}
         body.addView(enter,matchWrap())
     }
 
@@ -277,14 +321,20 @@ class FullBetaActivity : Activity() {
     private fun details(items:List<Pair<String,String>>)=column(surface).apply{setPadding(dp(13),dp(9),dp(13),dp(9));background=outlineBg(surface,9);items.forEach{(k,v)->addView(row(surface).apply{addView(txt(k,10.5f,muted,false),LinearLayout.LayoutParams(0,-2,.45f));addView(txt(if(v.isBlank())"—" else v,10.7f,ink,true).apply{gravity=Gravity.END},LinearLayout.LayoutParams(0,-2,.55f));setPadding(0,dp(4),0,dp(4))})}}
 
     private fun appBar(title:String,back:Boolean)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(9),dp(7),dp(10),dp(7));addView(txt(if(back)"‹" else "",if(back)31f else 22f,Color.WHITE,false).apply{gravity=Gravity.CENTER;if(back)setOnClickListener{navigateBack()}},size(dp(42),dp(45)));addView(txt(title,17f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("● SYNC",9.5f,Color.rgb(218,229,248),true).apply{gravity=Gravity.CENTER;setPadding(dp(8),dp(5),dp(8),dp(5))};addView(syncText,size(dp(86),dp(36)))}
-    private fun fullCard(symbol:String,title:String,color:Int,height:Int,click:()->Unit)=row(color).apply{gravity=Gravity.CENTER;background=round(color,7);addView(txt(symbol,25f,Color.WHITE,true).apply{gravity=Gravity.CENTER},size(dp(47),-1));addView(txt(title,14f,Color.WHITE,true).apply{gravity=Gravity.CENTER_VERTICAL});setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,height)}
-    private fun tile(symbol:String,title:String,color:Int,click:()->Unit)=column(color).apply{gravity=Gravity.CENTER;background=round(color,7);addView(txt(symbol,24f,Color.WHITE,true).center());addView(gap(3));addView(txt(title,11.5f,Color.WHITE,true).center());setOnClickListener{click()}}
-    private fun cardRow(a:View,b:View)=row(bg).apply{addView(a,LinearLayout.LayoutParams(0,dp(92),1f).apply{marginEnd=dp(5);topMargin=dp(5);bottomMargin=dp(5)});addView(b,LinearLayout.LayoutParams(0,dp(92),1f).apply{marginStart=dp(5);topMargin=dp(5);bottomMargin=dp(5)})}
+    private fun fullCard(symbol:String,title:String,color:Int,height:Int,click:()->Unit)=row(color).apply{gravity=Gravity.CENTER_VERTICAL;background=round(color,12);setPadding(dp(12),0,dp(12),0);addView(txt(symbol,25f,Color.WHITE,true).apply{gravity=Gravity.CENTER},size(dp(48),-1));addView(txt(title,14f,Color.WHITE,true).apply{gravity=Gravity.CENTER_VERTICAL},LinearLayout.LayoutParams(0,-2,1f));addView(txt("›",24f,Color.WHITE,false).apply{gravity=Gravity.CENTER},size(dp(30),-1));setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,height)}
+    private fun tile(symbol:String,title:String,color:Int,click:()->Unit)=column(surface).apply{gravity=Gravity.CENTER;background=outlineBg(surface,12);addView(txt(symbol,23f,color,true).center());addView(gap(3));addView(txt(title,11.5f,ink,true).center());setOnClickListener{click()}}
+    private fun cardRow(a:View,b:View)=row(bg).apply{addView(a,LinearLayout.LayoutParams(0,dp(86),1f).apply{marginEnd=dp(4);topMargin=dp(4);bottomMargin=dp(4)});addView(b,LinearLayout.LayoutParams(0,dp(86),1f).apply{marginStart=dp(4);topMargin=dp(4);bottomMargin=dp(4)})}
     private fun status(value:String,fg:Int,color:Int)=txt(value,11.5f,fg,true).apply{gravity=Gravity.CENTER;setPadding(dp(10),dp(10),dp(10),dp(10));background=round(color,9)}
     private fun info(value:String)=txt(value,10.5f,muted,false).apply{setPadding(dp(12),dp(10),dp(12),dp(10));background=outlineBg(Color.rgb(244,247,251),9)}
     private fun section(title:String)=txt(title,10.5f,navy,true).apply{setPadding(0,dp(5),0,dp(6))}
     private fun mnvInput(hintValue:String)=input(hintValue,false).apply{setSingleLine(true);inputType=InputType.TYPE_CLASS_NUMBER;keyListener=DigitsKeyListener.getInstance("0123456789");imeOptions=EditorInfo.IME_ACTION_DONE}
     private fun bindScannerEnter(v:EditText, submit:()->Unit){v.setOnEditorActionListener{_,id,_->if(id==EditorInfo.IME_ACTION_DONE||id==EditorInfo.IME_ACTION_GO||id==EditorInfo.IME_ACTION_SEARCH){submit();true}else false};v.setOnKeyListener{_,key,event->if(key==KeyEvent.KEYCODE_ENTER&&event.action==KeyEvent.ACTION_UP){submit();true}else false}}
+    private fun pdaInput(pdas:JSONArray,currentSerial:String=""):AutoCompleteTextView {
+        val labels=mutableListOf<String>();var currentLast5=""
+        for(i in 0 until pdas.length()){val p=pdas.optJSONObject(i)?:continue;val serial=p.optString("serial").trim();val last5=p.optString("last5").trim().ifBlank{serial.takeLast(5)};if(serial.isBlank()||last5.isBlank())continue;labels.add("$last5 • $serial");if(serial==currentSerial)currentLast5=last5}
+        return AutoCompleteTextView(this).apply{hint="Nhập 5 số cuối seri PDA";threshold=1;textSize=14f;setTextColor(ink);setHintTextColor(Color.rgb(153,163,176));inputType=InputType.TYPE_CLASS_NUMBER;keyListener=DigitsKeyListener.getInstance("0123456789");setPadding(dp(12),dp(9),dp(12),dp(9));minHeight=dp(46);background=outline();setAdapter(ArrayAdapter(this@FullBetaActivity,android.R.layout.simple_dropdown_item_1line,labels));setOnItemClickListener{parent,_,pos,_->setText(parent.getItemAtPosition(pos).toString().substringBefore(" • "),false)};if(currentLast5.isNotBlank())setText(currentLast5,false)}
+    }
+    private fun resolvePda(pdas:JSONArray,rawValue:String):String?{val raw=rawValue.trim().substringBefore(" • ");if(raw.length!=5||!raw.all{it.isDigit()})return null;val hits=mutableListOf<String>();for(i in 0 until pdas.length()){val p=pdas.optJSONObject(i)?:continue;val serial=p.optString("serial").trim();val last5=p.optString("last5").trim().ifBlank{serial.takeLast(5)};if(last5==raw&&serial.isNotBlank())hits.add(serial)};return hits.singleOrNull()}
     private fun input(hintValue:String,password:Boolean)=EditText(this).apply{hint=hintValue;textSize=14f;setTextColor(ink);setHintTextColor(Color.rgb(153,163,176));inputType=if(password)InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT;setPadding(dp(12),dp(9),dp(12),dp(9));minHeight=dp(46);background=outline()}
     private fun labelled(label:String,view:View)=column(bg).apply{addView(txt(label,10.5f,ink,true));addView(gap(4));addView(view,matchWrap())}
     private fun spinner(items:Array<String>)=Spinner(this).apply{adapter=ArrayAdapter(this@FullBetaActivity,android.R.layout.simple_spinner_dropdown_item,items);setPadding(dp(7),dp(3),dp(7),dp(3));minimumHeight=dp(46);background=outline()}

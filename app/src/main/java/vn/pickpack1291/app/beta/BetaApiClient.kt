@@ -96,18 +96,22 @@ class BetaApiClient(context: Context) {
                 if (!challenge.ok) { callback(challenge); return@execute }
 
                 val j = challenge.json ?: throw IllegalStateException("LOGIN_CHALLENGE_EMPTY")
+                val algorithm = j.optString("algorithm", "pbkdf2_sha256")
                 val proof = proofForPassword(
                     password = password,
                     saltB64 = j.getString("salt"),
-                    iterations = j.getInt("iterations"),
-                    challenge = j.getString("challenge")
+                    iterations = j.optInt("iterations", 120_000),
+                    challenge = j.getString("challenge"),
+                    algorithm = algorithm
                 )
-                val result = post(JSONObject().apply {
+                val request = JSONObject().apply {
                     put("action", "login")
                     put("login_id", login)
                     put("challenge_id", j.getString("challenge_id"))
                     put("proof", proof)
-                }, authenticated = false)
+                    if (algorithm == "reset_sha256") put("upgrade_verifier", makeVerifier(password))
+                }
+                val result = post(request, authenticated = false)
                 if (result.ok) {
                     val newToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }
                     if (newToken != null) persistSession(newToken, result.json.optJSONObject("account"))
@@ -143,6 +147,17 @@ class BetaApiClient(context: Context) {
         executor.execute {
             try { callback(post(JSONObject().put("action", "health"), authenticated = false)) }
             catch (t: Throwable) { callback(failure(t)) }
+        }
+    }
+
+    fun forgotPassword(loginId: String, callback: (Result) -> Unit) {
+        executor.execute {
+            try {
+                callback(post(JSONObject().apply {
+                    put("action", "forgot_password")
+                    put("login_id", loginId.trim())
+                }, authenticated = false))
+            } catch (t: Throwable) { callback(failure(t)) }
         }
     }
 
@@ -207,8 +222,8 @@ class BetaApiClient(context: Context) {
         return try {
             conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = 12_000
-                readTimeout = 25_000
+                connectTimeout = 8_000
+                readTimeout = 18_000
                 doOutput = true
                 instanceFollowRedirects = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -307,8 +322,12 @@ class BetaApiClient(context: Context) {
         return false
     }
 
-    private fun proofForPassword(password: String, saltB64: String, iterations: Int, challenge: String): String {
-        val key = derive(password, b64uDecode(saltB64), iterations)
+    private fun proofForPassword(password: String, saltB64: String, iterations: Int, challenge: String, algorithm: String = "pbkdf2_sha256"): String {
+        val key = if (algorithm == "reset_sha256") {
+            MessageDigest.getInstance("SHA-256").digest("PP_RESET_V1|$saltB64|$password".toByteArray(Charsets.UTF_8))
+        } else {
+            derive(password, b64uDecode(saltB64), iterations)
+        }
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(key, "HmacSHA256"))
         return b64u(mac.doFinal(challenge.toByteArray(Charsets.UTF_8)))

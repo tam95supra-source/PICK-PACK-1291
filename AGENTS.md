@@ -62,3 +62,9 @@ Read and obey `ARCHITECTURE_GUARDRAILS.md` and `README.md` before changing runti
 - Owner-facing setup and administration must preferentially use browser/UI workflows such as GitHub web UI, Google Workspace/Apps Script UI, Drive UI, or repository-hosted CI/automation.
 - If a required task normally needs a local CLI, redesign it so CI/automation performs the command-line portion and the owner only performs browser-based authorization, secret entry, or explicit approval.
 - If a browser-only path is genuinely impossible, state the blocker explicitly instead of giving unusable local terminal instructions.
+## UI / UX lock — Beta 0.4.2-beta.4+
+- Official visual system: **Minimal Teal Corporate (Mẫu 2)** — white/light surface, teal primary, restrained enterprise styling, compact PDA-friendly spacing.
+- Login card stays visually centered; do not show beta/version marketing text on the login screen.
+- Routine success toasts/notifications should be minimized; reserve intrusive notifications for errors, session replacement, security events, or OTA updates.
+- PICK requires PDA; User Pick is optional. PDA selection uses the last 5 serial digits with validated suggestions.
+- Reports keep operational matrices but suppress the redundant section-title rows; support table is hidden when deducted support count is zero; Phúc Long precedes Kéo hàng.
