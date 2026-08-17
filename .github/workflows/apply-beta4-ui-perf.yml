@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'tools/apply_beta4_minimal_teal.py'
+      - 'tools/run_beta4_patch.py'
       - '.github/workflows/apply-beta4-ui-perf.yml'
   workflow_dispatch:
 
@@ -17,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Apply patch
-        run: python3 tools/apply_beta4_minimal_teal.py
+        run: python3 tools/run_beta4_patch.py
       - name: Validate source intents
         shell: bash
         run: |
