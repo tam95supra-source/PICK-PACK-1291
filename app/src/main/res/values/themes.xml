@@ -3,10 +3,11 @@
     <style name="Theme.PickPack1291" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#F5FAFA</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#149AA5</item>
+        <item name="android:colorAccent">#07265C</item>
         <item name="android:windowNoTitle">true</item>
     </style>
 </resources>
