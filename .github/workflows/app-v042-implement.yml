@@ -1,0 +1,118 @@
+name: Implement Pick Pack 1291 v0.4.2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/app-v042-implement.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  implement-v042:
+    runs-on: ubuntu-24.04
+    env:
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
+      - name: Reconstruct implementation payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat tools/v042-payload/patch.* | base64 -d > /tmp/v042_patch.py
+          # Keep the exact owner-supplied artwork already stored as drawable/app_icon.jpg.
+          sed -i "s/s=s.replace('R.drawable.app_icon', 'R.drawable.app_icon_exact')/# keep exact supplied app_icon artwork/" /tmp/v042_patch.py
+          sed -i 's/@drawable\/app_icon_exact/@drawable\/app_icon/g' /tmp/v042_patch.py
+          python3 /tmp/v042_patch.py
+          grep -q '@drawable/app_icon' app/src/main/res/drawable/app_icon_foreground.xml
+
+      - name: Syntax-check Apps Script
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp google-apps-script/PICK_PACK_API.gs /tmp/pick_pack_api.js
+          node --check /tmp/pick_pack_api.js
+          grep -q "api_version:'0.4.2'" google-apps-script/PICK_PACK_API.gs
+          grep -q "Khấu trừ nhân sự" google-apps-script/PICK_PACK_API.gs
+          grep -q "CA1_HC" google-apps-script/PICK_PACK_API.gs
+          grep -q "DANH SÁCH NHÂN SỰ" app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          grep -q "Khấu trừ nhân sự" app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q "Nhân sự mới" google-apps-script/PICK_PACK_API.gs
+          grep -q "Ca 1 + Ca HC" google-apps-script/PICK_PACK_API.gs
+
+      - name: Bootstrap Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/android-sdk"
+          ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip" -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"
+          mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Build Beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:assembleBetaRelease
+          APK=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          test -s "$APK"
+          B=$("$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "$APK")
+          echo "$B" | grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'"
+          echo "$B" | grep -q "versionCode='7'"
+          echo "$B" | grep -q "versionName='0.4.2-beta.1'"
+
+      - name: Package Apps Script deploy bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/gas-v042
+          cp google-apps-script/PICK_PACK_API.gs google-apps-script/appsscript.json /tmp/gas-v042/
+          printf '%s\n' \
+            'PICK PACK 1291 GSheet API v0.4.2' \
+            'Replace PICK_PACK_API.gs in the bound Apps Script project.' \
+            'Keep the existing Web App deployment URL and create a New version.' \
+            'Health must return api_version 0.4.2.' > /tmp/gas-v042/DEPLOY_V0.4.2.txt
+          (cd /tmp/gas-v042 && zip -q -r "$GITHUB_WORKSPACE/pick-pack-1291-gsheet-api-v0.4.2-deploy.zip" .)
+
+      - name: Commit implementation and cleanup payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r tools/v042-payload .github/workflows/app-v042-implement.yml
+          git add app google-apps-script
+          git commit -m "feat: beta v0.4.2 cache reports labor deduction"
+          git push origin HEAD:main
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-beta-v0.4.2-unsigned
+          path: app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          retention-days: 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-gsheet-api-v0.4.2-deploy
+          path: pick-pack-1291-gsheet-api-v0.4.2-deploy.zip
+          retention-days: 7
