@@ -1,0 +1,36 @@
+name: app-v042-refactor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/apply_v042.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply v0.4.2 source patch
+        run: python tools/apply_v042.py
+      - name: Validate Apps Script syntax
+        run: |
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          node --check /tmp/PICK_PACK_API.js
+      - name: Commit refactor
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app google-apps-script
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: v0.4.2 fast cache reports and beta OTA prep'
+          git push origin main
