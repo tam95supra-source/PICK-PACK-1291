@@ -50,6 +50,7 @@ class FullBetaActivity : Activity() {
     private val foregroundSync by lazy {
         ForegroundSyncCoordinator(this, syncApi, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
+                UpdateManager.check(this@FullBetaActivity)
                 if (status.connected) {
                     syncText?.text = "●  GOOGLE SHEET LIVE • Rev ${status.serverSeq}"
                     syncText?.setTextColor(green)
@@ -79,7 +80,7 @@ class FullBetaActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        UpdateManager.check(this)
+        UpdateManager.check(this, force = true)
         if (api.token != null) foregroundSync.start()
     }
 

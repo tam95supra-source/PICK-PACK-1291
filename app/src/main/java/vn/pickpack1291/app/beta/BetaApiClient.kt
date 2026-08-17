@@ -85,11 +85,16 @@ class BetaApiClient {
         }
     }
 
-    /** OTA metadata comes straight from GitHub Releases, never from an app-data backend. */
+    /** OTA metadata comes from Apps Script, which reads the channel-specific Google Drive release folder. */
     fun updateCheck(channel: String, currentVersion: String, callback: (Result) -> Unit) {
         executor.execute {
-            try { callback(githubUpdate(channel, currentVersion)) }
-            catch (t: Throwable) { callback(failure(t)) }
+            try {
+                callback(post(JSONObject().apply {
+                    put("action", "update_check")
+                    put("channel", channel)
+                    put("current_version", currentVersion)
+                }, authenticated = false))
+            } catch (t: Throwable) { callback(failure(t)) }
         }
     }
 

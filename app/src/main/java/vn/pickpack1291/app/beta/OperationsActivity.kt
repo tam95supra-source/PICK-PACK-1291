@@ -52,6 +52,7 @@ class OperationsActivity : Activity() {
     private val foregroundSync by lazy {
         ForegroundSyncCoordinator(this, syncApi, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
+                UpdateManager.check(this@OperationsActivity)
                 syncText?.text = if(status.connected) "● LIVE  R${status.serverSeq}" else "● OFFLINE"
                 syncText?.setTextColor(if(status.connected) green else red)
                 if(status.masterChanged || status.masterRevision != MasterDataCache.revision(this@OperationsActivity)) refreshMasterCache()
@@ -94,7 +95,7 @@ class OperationsActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        UpdateManager.check(this)
+        UpdateManager.check(this, force = true)
         if (api.token != null) foregroundSync.start()
     }
 

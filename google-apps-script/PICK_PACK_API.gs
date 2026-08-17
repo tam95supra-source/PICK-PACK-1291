@@ -15,6 +15,8 @@ const PP = Object.freeze({
   PACK: 'DANH SÁCH USER PACK',
   CATALOG: 'Danh mục',
   ADMIN: 'Danh sách Admin',
+  OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg',
+  OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4',
   RELEASES: 'https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30',
   LOG_MANUAL_FOLDER_ID: '1jSPHbj3csKiRNyHtTp87Ed10m2VyFxXU',
   LOG_CRASH_FOLDER_ID: '1tfEaiyhOScH0ucJGSfSDXF1Qq4tkCl0n',
@@ -31,6 +33,7 @@ function doPost(e) {
     const action = String(body.action || '').trim();
 
     if (action === 'health') return ppJson_(ppHealth_());
+    if (action === 'update_check') return ppJson_(ppUpdateCheck_(body));
     if (action === 'login_challenge') return ppJson_(ppLoginChallenge_(body));
     if (action === 'login') return ppJson_(ppLogin_(body));
 
@@ -64,6 +67,50 @@ function doPost(e) {
     console.error(String(err && err.stack || err).slice(0, 3000));
     return ppJson_({ok:false,error:ppCleanError_(err)}, 500);
   }
+}
+
+function ppOtaVersionFromName_(name) {
+  const m = String(name || '').match(/(\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)(?=\.apk$)/i);
+  return m ? m[1] : '';
+}
+function ppOtaVersionParts_(value) {
+  const m = String(value || '').match(/\d+/g) || [];
+  return m.slice(0, 6).map(function(x){ return Number(x) || 0; });
+}
+function ppOtaCompare_(a, b) {
+  const aa=ppOtaVersionParts_(a), bb=ppOtaVersionParts_(b), n=Math.max(aa.length,bb.length);
+  for(let i=0;i<n;i++){ const av=aa[i]||0,bv=bb[i]||0; if(av!==bv)return av>bv?1:-1; }
+  return 0;
+}
+function ppOtaSha256_(file) {
+  const cache=CacheService.getScriptCache();
+  const key='PP_OTA_SHA_'+file.getId()+'_'+file.getLastUpdated().getTime()+'_'+file.getSize();
+  const cached=cache.get(key); if(cached)return cached;
+  const digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,file.getBlob().getBytes());
+  const sha=digest.map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');
+  cache.put(key,sha,21600); return sha;
+}
+function ppUpdateCheck_(body) {
+  const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
+  const current=String(body.current_version||body._app_version||'').trim();
+  const folderId=channel==='STABLE'?PP.OTA_STABLE_FOLDER_ID:PP.OTA_BETA_FOLDER_ID;
+  const files=DriveApp.getFolderById(folderId).getFiles(); let best=null;
+  while(files.hasNext()){
+    const file=files.next(),name=file.getName(); if(!/\.apk$/i.test(name))continue;
+    const version=ppOtaVersionFromName_(name); if(!version)continue; const updated=file.getLastUpdated();
+    if(!best||ppOtaCompare_(version,best.version)>0||(ppOtaCompare_(version,best.version)===0&&updated.getTime()>best.updated.getTime())) best={file:file,name:name,version:version,updated:updated};
+  }
+  if(!best)return {ok:true,source:'GOOGLE_DRIVE',channel:channel,available:false,reason:'NO_APK'};
+  const available=ppOtaCompare_(best.version,current)>0;
+  const out={ok:true,source:'GOOGLE_DRIVE',channel:channel,available:available,version_name:best.version,size:best.file.getSize(),published_at:best.updated.toISOString(),notes:String(best.file.getDescription()||(channel==='STABLE'?'Phát hành từ BẢN ỔN ĐỊNH':'Phát hành từ BẢN THỬ NGHIỆM')),mandatory:/mandatory/i.test(best.name)};
+  if(!available)return out;
+  try{
+    const access=best.file.getSharingAccess();
+    if(access!==DriveApp.Access.ANYONE&&access!==DriveApp.Access.ANYONE_WITH_LINK)best.file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
+  }catch(err){console.error('OTA sharing: '+String(err));return {ok:false,error:'OTA_SHARE_FAILED',source:'GOOGLE_DRIVE',channel:channel};}
+  out.sha256=ppOtaSha256_(best.file);
+  out.apk_url='https://drive.usercontent.google.com/download?id='+encodeURIComponent(best.file.getId())+'&export=download&confirm=t';
+  return out;
 }
 
 function ppJson_(obj) {

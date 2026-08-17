@@ -17,7 +17,7 @@ import java.security.MessageDigest
 object UpdateManager {
     private var lastCheckAt = 0L
     private var dialogVisible = false
-    private const val CHECK_INTERVAL_MS = 10 * 60_000L
+    private const val CHECK_INTERVAL_MS = 2 * 60_000L
 
     fun check(activity: Activity, force: Boolean = false) {
         val now = System.currentTimeMillis()
