@@ -1,0 +1,45 @@
+name: Apply Beta4 UI and Performance Patch
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'tools/apply_beta4_minimal_teal.py'
+      - '.github/workflows/apply-beta4-ui-perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply patch
+        run: python3 tools/apply_beta4_minimal_teal.py
+      - name: Validate source intents
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '0.4.2-beta.4' app/build.gradle.kts
+          grep -q 'QUÊN MẬT KHẨU?' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          grep -q 'forgot_password' google-apps-script/PICK_PACK_API.gs
+          grep -q 'script.send_mail' google-apps-script/appsscript.json
+          grep -q 'User Pick (tùy chọn)' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          grep -q 'PDA (nhập 5 số cuối seri)' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt
+          grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
+          echo 'Source intent gates: PASS'
+      - name: Commit patched product source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'tam95supra-source'
+          git config user.email 'tam95.supra@gmail.com'
+          git add app google-apps-script AGENTS.md
+          if git diff --cached --quiet; then
+            echo 'No product changes to commit.'
+            exit 0
+          fi
+          git commit -m 'feat: minimal teal UI reset flow and faster operations'
+          git push origin HEAD:main
