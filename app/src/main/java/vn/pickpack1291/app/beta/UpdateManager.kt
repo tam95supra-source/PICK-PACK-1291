@@ -23,7 +23,7 @@ object UpdateManager {
         val now = System.currentTimeMillis()
         if (!force && now - lastCheckAt < CHECK_INTERVAL_MS) return
         lastCheckAt = now
-        BetaApiClient().updateCheck(BuildConfig.CHANNEL, BuildConfig.VERSION_NAME) { result ->
+        BetaApiClient(activity.applicationContext).updateCheck(BuildConfig.CHANNEL, BuildConfig.VERSION_NAME) { result ->
             activity.runOnUiThread {
                 if (activity.isFinishing || activity.isDestroyed || !result.ok) return@runOnUiThread
                 val j = result.json ?: return@runOnUiThread
