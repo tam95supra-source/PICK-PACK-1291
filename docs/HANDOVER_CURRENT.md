@@ -1,26 +1,32 @@
 # HANDOVER CURRENT — Pick Pack 1291
 
 Status: ACTIVE / cumulative / authoritative handover  
-Last updated: 2026-08-17 19:37 +07:00 (Asia/Bangkok)  
-Current closed session: S02  
-Next session: S03
+Last updated: 2026-08-18 06:05 +07:00 (Asia/Bangkok)  
+Current closed session: S03  
+Next session: S04
 
-> **STOP RULE CHO S03:** Phiên mới chỉ đọc kỹ file này, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md` và snapshot `docs/handovers/HANDOVER_S02_2026-08-17.md`, xác nhận đã nắm trạng thái rồi **chờ lệnh chủ dự án**. Không tự build, deploy, sửa Sheet, push GitHub, tạo release, chạy/rerun workflow, unlock APK, thêm service hoặc thực hiện mutation nào trước khi có lệnh mới.
+> **STOP RULE CHO S04:** Đầu phiên mới chỉ đọc kỹ file này, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/HANDOVER_POLICY.md` và snapshot `docs/handovers/HANDOVER_S03_2026-08-18.md`, xác nhận đã nắm trạng thái rồi **chờ lệnh chủ dự án**. Không tự build, deploy, sửa Sheet, chạy/rerun workflow, tạo release, upload/unlock APK hoặc mutation nào trước khi có lệnh mới.
 
 ## 1. Kiến trúc CHỐT
 
-Mô hình vận hành chính thức:
-
-`Android App <-> Google Apps Script Web App <-> Google Sheets`
+`Android App ↔ Google Apps Script Web App ↔ Google Sheets`
 
 - Google Sheets là operational source of truth.
-- Apps Script là lớp API gắn trực tiếp workbook.
-- Không tự thêm Supabase/Firebase/Neon/Cloudflare/database/backend authority khác.
-- GitHub chỉ dùng source/CI/release/OTA.
-- Beta phải full-function để test.
-- Drive chỉ thao tác trong root chính thức của dự án; chi tiết nội bộ nằm trong bản handover Drive, không public trong repo.
+- Apps Script là API/transaction bridge gắn trực tiếp workbook.
+- GitHub dùng source/CI/release infrastructure; không phải datastore nghiệp vụ.
+- Không tự thêm Supabase/Firebase/Neon/Cloudflare/database/backend/service authority khác nếu owner chưa yêu cầu rõ.
+- Beta phải full-function để test thật.
+- Drive mutation chỉ trong cây `PICK PACK 1291 - CHÍNH THỨC`.
 
-## 2. Workbook / schema
+## 2. Ràng buộc workstation owner
+
+Máy công ty của owner không chạy CMD/PowerShell/Terminal/CLI cục bộ.
+
+- Không hướng dẫn owner chạy `git`, `gh`, `clasp`, `adb`, Gradle, Node/npm/npx, Java/keytool, OpenSSL…
+- Command-line phải đưa lên GitHub Actions/CI/automation.
+- Owner-facing setup dùng browser/UI: GitHub web, Apps Script UI, Google Drive/Workspace UI.
+
+## 3. Workbook / schema
 
 Workbook authoritative: `DỮ LIỆU THEO NGÀY`.
 
@@ -35,293 +41,248 @@ Tabs chính:
 - `CÔNG NHẬT`
 - `Danh sách Admin`
 
-Cột kỹ thuật đã có cho event/revision ở RA-VÀO và CÔNG NHẬT. Password không lưu plaintext; `Danh sách Admin` dùng PBKDF2 verifier.
+Password không lưu plaintext; `Danh sách Admin` dùng verifier. Event/revision fields phải giữ cho idempotency/sync.
 
-Master-data hiện biết:
-- Ca: `Ca 1`, `Ca 2`, `Ca HC`.
-- PICK cần PDA + User Pick.
-- PACK cần Pack table + User Pack map theo Ca.
-- Có anomaly master Pack đã biết; API phải cảnh báo/loại mapping invalid, không tự sửa Sheet.
-
-## 3. Business invariants
+## 4. Business invariants
 
 - `MNV` là business key.
 - Session theo `MNV + business_date`: `NOT_ENTERED -> ACTIVE -> ENDED`.
-- `ENDED` không VÀO lại cùng ngày qua flow thường.
-- Mutation dùng immutable/idempotent event ID.
-- PDA/User Pick/Bàn Pack/User Pack là exclusive resource.
-- Tranh tài nguyên phải conflict rõ; đổi resource atomic và fail phải giữ resource cũ.
-- Không silent overwrite accepted history.
-- State operational authoritative phải lấy từ Sheet API.
+- `ENDED` không vào lại cùng ngày qua flow thường.
+- Mutation dùng immutable/idempotent `event_id`.
+- Resource độc quyền phải chống race; đổi resource atomic; fail giữ resource cũ.
+- State session/resource authoritative phải lấy từ Sheet API.
+- Master/static data cache local theo revision; operational state vẫn kiểm động server.
 
-## 4. Role / security
+### PICK/PACK hiện tại
 
-Role: `SUPERADMIN`, `ADMIN`, `USER`; backend phải enforce quyền.
+- PICK bắt buộc PDA.
+- **User Pick là tùy chọn**, được bỏ trống. Quyết định này supersede yêu cầu cũ “PICK bắt buộc User Pick”.
+- PDA UI nhập 5 số cuối serial + autocomplete/gợi ý; chỉ nhận kết quả hợp lệ/duy nhất.
+- PACK giữ mapping bàn Pack + User Pack theo ca và exclusivity.
+
+## 5. Role / auth / session
+
+Role: `SUPERADMIN`, `ADMIN`, `USER`; backend enforce quyền. `CÔNG NHẬT` hiện dành cho ADMIN/SUPERADMIN theo phân quyền app.
 
 Auth:
-- salted PBKDF2-HMAC-SHA256 verifier;
-- APK tính PBKDF2 + challenge/HMAC proof;
-- plaintext password không gửi tới Apps Script;
-- không commit password, verifier thật, token, signing key, recovery secret hoặc log/dữ liệu nhạy cảm vào public repo.
+- credential bình thường dùng salted PBKDF2-HMAC-SHA256;
+- login challenge/HMAC proof;
+- plaintext password không gửi trực tiếp tới Apps Script;
+- không commit password/verifier thật/token/signing key/credential vào repo public.
 
-Fixed Android signing identity phải được bảo toàn giữa các bản update; private signing material nằm ngoài public repo.
+### Session `SINGLE_ACTIVE_DEVICE_V1`
 
-## 5. UI / branding CHỐT
+- Android lưu session bền trong private app storage.
+- Tắt app/process kill rồi mở lại vẫn giữ đăng nhập.
+- Không còn timeout bình thường 12 giờ.
+- Cùng account login thành công ở installation/device khác sẽ thay active server session cũ.
+- Thiết bị cũ nhận 401 ở request/sync kế tiếp và phải login lại.
+- Explicit logout, account/security change hoặc reset password có thể kết thúc phiên.
 
-Baseline: **Mẫu 1**.
-- nền sáng, appbar navy, card màu đặc, chữ/icon trắng;
-- không lấn statusbar/cutout;
-- footer nhỏ sát đáy: `Copyright 2026 - tamnv2 - Chuyên viên Pick Pack 1291 - Supra DCHY`;
-- icon phải dùng đúng artwork chủ dự án cung cấp, không redesign.
+### Quên mật khẩu — LIVE
 
-Trang chủ hiện định hướng:
-- `QUÉT QR NHÂN SỰ`
-- `DANH SÁCH NHÂN SỰ`
-- `CÔNG NHẬT` cho ADMIN/SUPERADMIN
-- `THEO DÕI CA`
-- `BÁO CÁO`
-- `CÀI ĐẶT`
+- Public action `forgot_password`.
+- App gửi username; response generic không lộ account tồn tại hay không.
+- Rate limit 5 phút theo login + device.
+- Account active nhận reset credential tạm, hết hạn sau 2 giờ.
+- Mail mật khẩu tạm chỉ gửi về email quản trị owner đã chốt.
+- Login đầu bằng mật khẩu tạm nâng lại về PBKDF2 verifier.
+- Reset làm session cũ không còn hợp lệ.
+- Apps Script MailApp đã được owner authorize bằng browser helper `ppAuthorizeMail()`.
 
-`QUÉT QR NHÂN SỰ` phải là card cùng kiểu các card khác. Bỏ text giải thích dài; chỉ giữ text thật cần như `Scan để bắt đầu hoặc kết thúc công nhật.`
+Superadmin hiện dùng login `admin`. Reset thật đã PASS và mail đã tới Gmail. Có 2 mail reset liên tiếp; **chỉ dùng mail mới nhất**. Không ghi mật khẩu vào handover/chat/repo. One-time reset workflow đã được xóa sau khi hoàn tất.
 
-## 6. Cache / search v0.4.2
+## 6. UI / branding CHỐT — supersede Mẫu 1
 
-Yêu cầu: tìm/scan MNV phải phản hồi gần như ngay, không round-trip Sheet cho master lookup.
+Từ `0.4.2-beta.4+`, visual system chính thức là **Mẫu 2 — Minimal Teal Corporate**.
 
-Source v0.4.2 đã refactor:
-- local master snapshot cache;
-- index nhân sự theo MNV;
-- local search MNV/họ tên/nhà thầu/vị trí;
-- màn `DANH SÁCH NHÂN SỰ`;
-- scan có thể render preview local trước khi server xác nhận session live.
+- White/light surface, teal primary, charcoal text, enterprise tối giản, compact PDA-friendly.
+- Footer nhỏ sát đáy: `Copyright 2026 - tamnv2 - Chuyên viên Pick Pack 1291 - Supra DCHY`.
+- Launcher icon dùng đúng artwork owner cung cấp, không redesign/inset/đổi ảnh.
+- Routine success toast/noti phải hạn chế; intrusive notification chỉ cho lỗi, session replacement, security, OTA/sự kiện quan trọng.
 
-Chỉ master/static data được cache. Session/resource operational state vẫn server/Sheet-authoritative.
+Login:
+- bỏ dòng Beta/version marketing;
+- logo + fields + actions cân giữa màn hình;
+- có `QUÊN MẬT KHẨU?`.
 
-## 7. Báo cáo v0.4.2
+QR/performance:
+- preview/search ưu tiên master cache local;
+- `employee_context` không kéo master options/active labor nếu màn không cần;
+- session state vẫn server-authoritative.
 
-Phạm vi:
-- `Ca 1 + Ca HC`
-- `Ca 2`
-- `Cả ngày`
+Báo cáo:
+- bỏ các dòng tiêu đề thừa `NGUỒN LỰC` / `THÂM NIÊN`;
+- khối hỗ trợ chỉ hiện khi tổng khấu trừ > 0;
+- `Phúc Long` đứng trước `Kéo hàng`;
+- giảm padding/margin để bảng sát màn hình hơn;
+- ô 0/cột toàn 0 tiếp tục tối ưu hiển thị theo logic hiện có.
 
-Nhà thầu viết tắt:
-- NLV = Nguồn Lực Việt
-- HAD = Hoa Anh Đào
-- VW = Việt Work
-- MP = Man Power
-- MGL = Mega Link
-- HGP = Hà Gia Phát
-- IH = Inhouse
+## 7. Google Apps Script — LIVE
 
-UI report:
-- ô = 0 để trống;
-- cột nhà thầu toàn 0 thì ẩn;
-- bảng tự co, không tràn form;
-- text có thể wrap.
-
-Thâm niên:
-- mới `<= 30 ngày`;
-- cũ `> 30 ngày`;
-- chia cột nhà thầu như bảng nguồn lực.
-
-Nhân sự đi hỗ trợ:
-- lấy từ `CÔNG NHẬT`;
-- có `Khấu trừ nhân sự`;
-- Có/tích thì tính khấu trừ;
-- Không thì không tính;
-- vị trí cố định như Kéo hàng/Tổ trưởng công nhật không tính trừ người.
-
-Android/GAS source 0.4.2 đã được chỉnh cho report/deduction. **Không coi production-active cho tới khi GAS 0.4.2 live và test Sheet thật.** Live Sheet cũng phải được kiểm tra schema `Khấu trừ nhân sự` sau deploy, không tự giả định đã có.
-
-## 8. Google Apps Script — điểm dừng
-
-Repo source hiện có API version `0.4.2`.
-
-Live Web App lần cuối được xác nhận qua CI khoảng 19:18 +07 ngày 2026-08-17 vẫn trả:
-- `api_version: 0.4.1`
+Repo source và live Web App đã xác nhận:
+- `api_version: 0.4.2`
+- `mode: APP_GSHEET`
 - `sheet_read: true`
-- revision 2
-- master revision 1
+- `auth_session_model: SINGLE_ACTIVE_DEVICE_V1`
+- `update_check` BETA/STABLE đọc Google Drive đúng channel;
+- `forgot_password` live;
+- MailApp permission đã authorize;
+- actual superadmin reset + mail delivery PASS.
 
-=> GAS 0.4.2 **chưa được xác nhận live**. Không release/unlock APK 0.4.2 trước khi deploy 0.4.2 và health gate PASS.
-
-Deploy bundle 0.4.2 đã được đóng gói; chi tiết file nội bộ nằm trong Drive handover.
-
-## 9. Android Beta 0.4.2
-
-Metadata:
-- package `vn.pickpack1291.app.beta.publicbeta`
-- versionCode `7`
-- versionName `0.4.2-beta.1`
-
-CI build `32029460958`:
-- architecture gate PASS;
-- API probe PASS;
-- Beta/Stable assemble PASS;
-- package metadata PASS;
-- unsigned signing toolkit upload PASS;
-- automated sign/release SKIPPED vì Actions signing secrets chưa có.
-
-Một APK 0.4.2 đã được staged trong Drive chờ deploy GAS, nhưng **chưa được unlock/release**.
-
-### P0 checksum mismatch phát hiện khi bàn giao
-
-Read-only verification ngay trước handover cho thấy:
-- checksum companion staged ghi `61367187168593269143ac6ba0840e361c1a6fd95a1a452186f3d997e8184f0f`;
-- hash thực tế của APK staged tải từ Drive là `056acdfd3ab9a9b8e03395e4ac3ee076f17bbdc9f4ccc1950fed1dd4d7cdf96c`.
-
-=> Không publish OTA/unlock 0.4.2 với checksum hiện tại. Khi owner ra lệnh phải re-verify APK signer/SHA, regenerate checksum, rồi mới đi tiếp sau GAS 0.4.2 health PASS.
-
-## 10. Beta 0.4.1
-
-- Beta package giữ `vn.pickpack1291.app.beta.publicbeta`.
-- `0.4.1-beta.1`, versionCode 6.
-- 0.4.1 đã được mở trên Drive sau khi GAS 0.4.1 live được xác nhận.
-- Có thể cài đè 0.4.0 nếu cùng fixed signer.
-
-Không tuyên bố protected business flows đã E2E PASS nếu chưa test thiết bị thật.
-
-## 11. OTA — trạng thái thật
-
-OTA client hiện:
-- đọc GitHub Releases;
-- Beta lấy prerelease, Stable lấy release;
-- tự check khi app mở/quay foreground;
-- interval guard khoảng 10 phút;
-- DownloadManager tải APK;
-- verify SHA-256;
-- mở Android package installer.
-
-GitHub Releases tại cuối S02 vẫn dừng ở Beta `0.3.0-beta.2-publicbeta`; chưa có GitHub Release 0.4.1/0.4.2. Vì vậy file APK chỉ nằm trên Drive **không làm app OTA nhìn thấy**.
-
-Android có thể vẫn yêu cầu user xác nhận unknown-source/install; OTA hiện không phải silent Device Owner install.
-
-### Push-triggered OTA
-
-Đã thảo luận phương án publish GitHub Release -> push signal -> foreground app hiện update / background notification -> app xác minh GitHub Release + SHA.
-
-FCM chỉ được đề xuất làm kênh push, không làm data authority. **Trạng thái: ĐỀ XUẤT, CHƯA ĐƯỢC OWNER PHÊ DUYỆT.** Do guardrail cấm tự thêm Firebase/service ngoài, S03 không được thêm FCM nếu chưa có lệnh rõ. Foreground release check nên giữ làm fallback nếu sau này push được duyệt.
-
-## 12. Tự deploy GAS / tự publish OTA — quyền còn thiếu
-
-Owner đã hỏi cách cấp quyền. Phương án được hướng dẫn: Apps Script API + `clasp` + GitHub Actions secrets.
-
-Các secret dự kiến:
-- `CLASPRC_JSON`
-- `CLASP_JSON`
+Deploy GAS đã chuyển khỏi yêu cầu local `clasp`. Browser-only Google OAuth + Apps Script REST API dùng 5 GitHub Secrets đã cấu hình và hoạt động:
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REFRESH_TOKEN`
+- `GAS_SCRIPT_ID`
 - `GAS_DEPLOYMENT_ID`
+
+Không ghi giá trị secrets vào repo/handover.
+
+## 8. OTA CHỐT từ 0.4.2+
+
+Steady-state authority:
+
+`Android -> GAS update_check -> Google Drive channel folder`
+
+- BETA chỉ đọc `BẢN THỬ NGHIỆM`.
+- STABLE chỉ đọc `BẢN ỔN ĐỊNH`.
+- Không restore GitHub Releases làm steady-state OTA authority nếu owner chưa đổi yêu cầu.
+- GitHub prerelease beta.2 chỉ là compatibility bridge cho legacy updater.
+- App check ở open/foreground; không thêm polling background/screen-off.
+- APK phải SHA-256 verify trước Android package installer.
+- Android bình thường vẫn có thể yêu cầu user xác nhận cài/unknown-source; không phải silent Device Owner install.
+
+Migration:
+- `0.4.1-beta.1` cần cài OTA-enabled build thủ công một lần.
+- `0.4.2-beta.2+` dùng GAS/Drive OTA.
+
+## 9. Current Beta — `0.4.2-beta.4`
+
+- Package: `vn.pickpack1291.app.beta.publicbeta`
+- VersionCode: `10`
+- VersionName: `0.4.2-beta.4`
+- APK name: `pick-pack-1291-public-beta-v0.4.2-beta.4.apk`
+- SHA-256: `e6bff0cc81f82cb6e8365f9fff3abd3e4c76dcfcfa65d85fe54789d131485084`
+- Fixed signer SHA-256 phải giữ nguyên: `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
+
+Gates PASS:
+- Beta + Stable compile;
+- package/version metadata;
+- owner launcher resource;
+- fixed signer;
+- Drive upload;
+- OTA E2E beta.3 -> beta.4;
+- download Drive thật + SHA match;
+- beta.4 không update lại chính nó;
+- Stable isolation khỏi Beta.
+
+## 10. GitHub state / CI risk
+
+Repo: `tam95supra-source/pick-pack-1291`, branch `main`.
+
+Implementation head trước các commit handover S03:
+`625037d8911b2051a1fd001e00ef8a7366b538b9` — remove one-time superadmin reset workflow.
+
+Commit quan trọng S03:
+- `38b13dcdf52daa4050eb209e8b27cf39e3eb3d10` — Minimal Teal + reset flow + performance/PDA/report changes.
+- `bbe7c64f29ea24731120dabeab852a23123b9158` — public Apps Script MailApp authorization helper.
+- `625037d8911b2051a1fd001e00ef8a7366b538b9` — delete one-time reset workflow.
+
+### P0 CI technical debt
+
+`.github/workflows/beta-preview.yml` **vẫn hardcode beta.3/versionCode 9** ở metadata/sign/release trong khi source hiện là beta.4/versionCode 10.
+
+=> Không coi workflow này là pipeline release chuẩn cho bản kế tiếp cho tới khi sửa/consolidate. Trước release mới phải làm version metadata dynamic hoặc đồng bộ target hiện tại, tránh phát nhầm beta.3.
+
+Beta4 được build bằng workflow riêng `build-beta4-final.yml`, deploy GAS bằng `beta4-deploy-gas.yml`, verify OTA bằng `verify-ota-beta4-final.yml`.
+
+Repo còn nhiều workflow migration/repair/verify one-shot. Chỉ cleanup sau khi owner ra lệnh và đã rà soát gate cần giữ.
+
+### Android signing automation
+
+4 Actions signing secrets chưa được xác nhận cấu hình đầy đủ:
 - `ANDROID_SIGNING_KEY_B64`
 - `ANDROID_SIGNING_STORE_PASSWORD`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 - `ANDROID_SIGNING_ALIAS`
 
-**Chưa có xác nhận owner đã cấu hình các secret này.** Không tự kiểm tra/đổi secrets hay dựng pipeline mới ở đầu S03.
+Beta4 đã được ký bằng recovery material chính thức và fixed signer đúng. Full-auto sign/release vẫn là backlog nếu owner muốn hands-off release. Không expose signing material.
 
-Mục tiêu pipeline khi owner cấp quyền và ra lệnh:
-`push source -> deploy GAS -> health gate -> build -> sign -> verify signer -> GitHub Release -> OTA visible`.
-
-## 13. Sync / scanner / logging
+## 11. Sync / scanner / logging
 
 Sync:
-- foreground sync ngay khi mở/quay lại;
-- adaptive polling khi foreground;
-- background/screen off không mở polling mới;
-- request đang chạy được phép hoàn tất trước khi suspend;
-- không tuyên bố SLA realtime nhiều PDA nếu chưa test thật.
+- foreground sync open/resume;
+- background/screen-off không khởi tạo polling mới;
+- request đang chạy được phép drain.
 
 Scanner:
-- numeric MNV;
-- IME action;
-- hardware Enter suffix support;
-- Newland NLS-MT90 cần test thiết bị thật.
+- MNV numeric;
+- IME/hardware Enter suffix support;
+- Newland/PDA hardware cần test thiết bị thật sau Beta4.
 
 Logging:
-- MANUAL -> thư mục báo lỗi thủ công;
-- CRASH -> thư mục báo lỗi tự động;
-- DAILY -> nhật ký Android;
-- local chỉ xóa sau ACK thành công;
-- redact secrets.
+- MANUAL -> `BÁO LỖI THỦ CÔNG`;
+- CRASH -> `BÁO LỖI TỰ ĐỘNG`;
+- DAILY -> `NHẬT KÝ ANDROID`;
+- redact secrets; local chỉ xóa sau ACK thành công.
 
-## 14. GitHub / guardrails
+## 12. DONE S03
 
-Repo public: `tam95supra-source/pick-pack-1291`, branch `main`.
+- Ghi rule no-local-CLI toàn dự án.
+- Browser-only OAuth/REST deploy GAS hoạt động.
+- OTA chuyển sang GAS + Drive Beta/Stable.
+- GAS 0.4.2 + WEB_APP + health gates PASS.
+- Icon owner artwork đúng và session persistent/single-active-device từ beta3.
+- Chốt Minimal Teal Corporate beta4.
+- Center login, bỏ Beta/version text.
+- Tối ưu login và QR latency.
+- PDA last-5 autocomplete; User Pick optional.
+- Giảm routine notifications.
+- Report layout/order/conditional support theo owner.
+- Forgot password -> admin email + MailApp authorization.
+- Reset thật superadmin và mail delivery PASS.
+- Build/sign/upload beta4 + OTA E2E PASS.
+- One-time reset workflow đã xóa.
 
-Implementation head trước các commit handover S02:
-`de1777859004d2b1060b5bfee62363d825b2b061` (`chore: remove forbidden legacy OTA workflow`).
+## 13. TODO / device acceptance
 
-Bắt buộc đọc:
-- `AGENTS.md`
-- `ARCHITECTURE_GUARDRAILS.md`
-- `docs/HANDOVER_POLICY.md`
-- `docs/HANDOVER_CURRENT.md`
+### P0 trên PDA thật
+- Cài/OTA beta4.
+- Login superadmin bằng **mail reset mới nhất**.
+- Đo loading login.
+- Force close/mở lại -> session phải còn.
+- Login account đó trên máy 2 -> máy 1 bị thay session ở request/sync kế.
+- QR nhân sự: latency + NOT_ENTERED/ACTIVE/ENDED.
+- PDA 5 số cuối -> gợi ý đúng; duplicate last5 không được chọn mơ hồ.
+- PICK không User Pick -> lưu được.
+- Báo cáo Minimal Teal trên kích thước PDA thật.
+- Forgot password cho một user thường -> mail admin, generic response, mật khẩu tạm login trong 2 giờ.
 
-Legacy OTA workflow còn tham chiếu Supabase đã được xóa. Không quay lại Supabase/provisional S01.
+### P0 trước release kế tiếp
+- Sửa/consolidate `beta-preview.yml` hardcode beta3/versionCode9.
+- Rà soát và cleanup one-shot workflows nếu owner yêu cầu.
+- Nếu cần full-auto release: cấu hình/test 4 Android signing secrets bằng browser-only flow.
+- Không thay OTA authority về GitHub Releases.
 
-## 15. DONE S02
+### Stable
+- Chưa promote Stable chỉ vì Beta build PASS.
+- Stable cần soak/test Beta thật trước khi release.
+- Stable dùng cùng OTA code nhưng chỉ đọc `BẢN ỔN ĐỊNH`.
 
-- Chốt và vận hành lại kiến trúc App <-> Apps Script <-> Google Sheets.
-- GAS 0.4.1 owner deploy + health PASS.
-- Beta 0.4.1 build/ký/Drive đã mở.
-- Cải thiện cache/master revision, scanner Enter, swipe-back, logging route, UI Mẫu 1.
-- Nhận và implement yêu cầu 0.4.2 về icon chính xác, cache search nhanh, danh sách nhân sự, card QR, dọn text, report nguồn lực/thâm niên/hỗ trợ/khấu trừ.
-- Android/GAS source 0.4.2 implement xong; CI compile/package PASS.
-- GAS deploy bundle 0.4.2 đã đóng gói.
-- APK 0.4.2 đã staged nhưng chưa release.
-- Phát hiện checksum mismatch P0 trước handover.
-- Xác định OTA hiện phụ thuộc GitHub Release, không phụ thuộc file Drive.
-- Thảo luận push OTA qua FCM nhưng chưa approve.
-- Hướng dẫn owner cấp quyền `clasp`/Actions secrets; chưa xác nhận hoàn tất.
+## 14. Known risks / technical debt
 
-## 16. TODO / backlog
+- `beta-preview.yml` stale hardcodes là rủi ro phát nhầm version.
+- Nhiều workflow one-shot cần consolidate có kiểm soát.
+- GAS còn constant GitHub Releases legacy dù runtime OTA authority đã là Drive; có thể cleanup sau.
+- Actual latency/UX trên PDA thật chưa đo end-to-end sau beta4.
+- Android installer vẫn cần user interaction trên thiết bị bình thường.
+- Forgot-password public route hiện có generic response + 5-minute rate limit; cần theo dõi abuse/mail quota nếu rollout rộng.
 
-### P0
-1. **Đầu S03: chỉ đọc handover rồi chờ lệnh.**
-2. Khi owner ra lệnh: re-verify staged APK 0.4.2 signer + SHA và sửa checksum mismatch.
-3. Deploy/verify GAS 0.4.2 live.
-4. Verify Sheet schema `Khấu trừ nhân sự`.
-5. Sau backend PASS mới unlock APK 0.4.2.
-6. Publish GitHub prerelease 0.4.2 đúng Beta channel.
-7. Test update in-place 0.4.1 -> 0.4.2.
+## 15. Cách tiếp tục S04
 
-### Test nghiệp vụ
-- login thật;
-- hardware scanner/Newland;
-- cache/search latency;
-- NOT_ENTERED/ACTIVE/ENDED;
-- PICK PDA + User Pick;
-- PACK theo Ca;
-- resource conflict >=2 PDA;
-- VÀO/RA/resource change;
-- Công nhật + Khấu trừ;
-- báo cáo Ca 1+HC / Ca 2 / Cả ngày;
-- tenure <=30/>30;
-- hỗ trợ/khấu trừ;
-- manual/crash/daily logs;
-- revision/master cache refresh.
-
-### CI/OTA
-- Nếu owner đã cấu hình secrets và ra lệnh: nối auto deploy GAS + sign/publish release.
-- Push-triggered OTA/FCM chỉ làm sau khi owner phê duyệt rõ.
-
-## 17. SUPERSEDED
-
-- Supabase/Edge Function/Postgres Pick Pack -> **SUPERSEDED**.
-- Mẫu 3 -> Mẫu 1.
-- VÀO/RA tách card -> `QUÉT QR NHÂN SỰ` context-aware.
-- Beta giới hạn -> full-function Beta.
-- Tài nguyên card độc lập -> resource change trong flow phiên nhân sự.
-- OTA metadata qua backend cũ -> GitHub Releases.
-- APK nằm trên Drive != OTA release.
-
-## 18. Điểm bắt đầu S03
-
-S03 phải:
-1. đọc file này;
-2. đọc `AGENTS.md`;
-3. đọc `ARCHITECTURE_GUARDRAILS.md`;
-4. đọc snapshot S02;
-5. ghi nhận: live GAS lần cuối vẫn 0.4.1; source GAS 0.4.2; build 0.4.2 PASS nhưng staged checksum mismatch; 0.4.2 chưa GitHub Release; FCM chưa duyệt; deploy/signing secrets chưa được xác nhận;
-6. trả lời ngắn rằng đã kiểm tra và **CHỜ LỆNH**;
-7. **không tự chạy bất kỳ build/deploy/workflow/release/write/mutation nào**.
-
-Đây là yêu cầu trực tiếp cuối S02 của chủ dự án và có priority cao nhất cho hành vi mở đầu S03.
+1. Đọc handover/guardrails, xác nhận trạng thái, chờ owner.
+2. Nếu owner báo lỗi Beta4: inspect logs/reproduce trước, không đổi kiến trúc.
+3. Nếu release tiếp: **sửa CI hardcode trước**, tăng version/versionCode, deploy GAS nếu source GAS đổi, build, signer gate, Drive upload, OTA E2E.
+4. Nếu Stable: soak Beta trước, giữ fixed signer, upload duy nhất vào Stable folder.
+5. Không hướng dẫn owner dùng CMD/PowerShell/terminal.
