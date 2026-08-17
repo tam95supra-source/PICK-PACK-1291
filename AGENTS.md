@@ -41,7 +41,13 @@ Before a material implementation change, verify that it directly serves the late
 - Do not commit secrets, plaintext passwords, Google credentials, Android signing keys, or private tokens to the public repository.
 - Beta must exercise the real business functions needed for testing.
 - Preserve Android signing identity for in-place updates.
-- Automatic update checks may use GitHub Releases; this does not make GitHub an operational data backend.
+- Starting with the OTA-enabled Android 0.4.2 build (`0.4.2-beta.2` for Beta), runtime update discovery must call the approved Google Apps Script `update_check` route.
+- `BETA` must read release APKs only from Google Drive folder `BẢN THỬ NGHIỆM` (`1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg`).
+- `STABLE` must read release APKs only from Google Drive folder `BẢN ỔN ĐỊNH` (`1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4`).
+- Do not restore GitHub Releases as the steady-state OTA authority for 0.4.2+ unless the owner explicitly changes this requirement.
+- GitHub prerelease `v0.4.2-beta.2-publicbeta` is only a one-time compatibility bridge so legacy Beta clients that still check GitHub can migrate to the Drive-OTA build.
+- OTA APK downloads must be SHA-256 verified before the Android installer is launched.
+- OTA checks remain foreground-oriented: check on app open/foreground opportunities; do not introduce background/screen-off polling.
 
 ## 6. Architecture enforcement
 
