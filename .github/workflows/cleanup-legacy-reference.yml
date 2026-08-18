@@ -1,0 +1,37 @@
+name: One-shot Legacy Wording Cleanup
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/cleanup-legacy-reference.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Normalize approved architecture wording
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt')
+          lines=p.read_text(encoding='utf-8').splitlines()
+          changed=False
+          for i,line in enumerate(lines):
+              if line.startswith(' * No ') and 'database endpoint is used here.' in line:
+                  lines[i]=' * Google Apps Script is the only API endpoint used by this transport.'
+                  changed=True
+          assert changed
+          p.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+          git commit -m 'chore: normalize approved transport wording'
+          git push origin HEAD:main
