@@ -1,0 +1,51 @@
+name: Service M2 Publisher V5 Run Observer
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/service-m2-publisher-v5-run-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  observe-publisher-v5:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_HEAD_SHA: f472ba700235810a8c979f8b08a4175a4afa7750
+    steps:
+      - name: Find and wait for exact Beta19 OTA publisher V5 run
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID=''
+          for i in $(seq 1 40); do
+            DATA=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/service-m2-beta19-ota-publish-v5.yml/runs?branch=agent%2Fservice-migration-m2&per_page=20")
+            RUN_ID=$(node -e 'const j=JSON.parse(process.argv[1]),sha=process.env.TARGET_HEAD_SHA,x=(j.workflow_runs||[]).find(r=>r.head_sha===sha&&r.event==="push");process.stdout.write(x?String(x.id):"")' "$DATA")
+            [[ -n "$RUN_ID" ]] && break
+            sleep 2
+          done
+          [[ -n "$RUN_ID" ]] || { echo PUBLISHER_V5_RUN_NOT_FOUND >&2; exit 1; }
+          echo "PUBLISHER_V5_RUN_ID=$RUN_ID"
+          for i in $(seq 1 320); do
+            R=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")
+            STATUS=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.status||"")' "$R")
+            CONCLUSION=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.conclusion||"")' "$R")
+            echo "publisher_v5 status=$STATUS conclusion=$CONCLUSION"
+            if [[ "$STATUS" == completed ]]; then
+              if [[ "$CONCLUSION" != success ]]; then
+                gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed || true
+                exit 1
+              fi
+              exit 0
+            fi
+            sleep 5
+          done
+          echo PUBLISHER_V5_OBSERVER_TIMEOUT >&2
+          exit 1
