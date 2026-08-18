@@ -2,7 +2,7 @@
 
 Status: **CHỐT / authoritative**  
 Effective from: 2026-08-18  
-Supersedes: Minimal Teal Corporate / Mẫu 2 and fixed-teal assumptions.
+Supersedes: Minimal Teal Corporate / Mẫu 2, fixed-teal assumptions, and the S09 three-line identity header.
 
 This document records the owner-approved product UI/UX system. Future implementation must preserve these rules unless the owner explicitly changes them.
 
@@ -13,6 +13,7 @@ This document records the owner-approved product UI/UX system. Future implementa
 - Theme choice is centralized through `ThemeManager`; do not scatter hardcoded primary-theme colors across screens.
 - The 7 color selectors have **no color-name text** and must always fit on **one horizontal row**, with equal sizing and no wrap/overflow.
 - Functional status colors may retain conventional semantics where necessary: success/active = green, warning/pending = amber/orange, destructive/error = red. They must not become unrelated decorative palettes.
+- On the real PDA, rounded cards/inputs/navigation must not show muddy grey shadow halos. Prefer clean white/soft theme surfaces and subtle theme-tinted outlines. Avoid elevation haze on routine rounded surfaces.
 
 ## 2. Global app shell
 
@@ -34,17 +35,21 @@ Rules:
 - Network/API work initiated by the destination screen must not block rendering of the destination shell. Show cached/current information first when available, then update asynchronously.
 - Inner workflow screens under Nghiệp vụ may change content within the same authenticated Activity; returning to the tab root must not require launching a second Activity.
 
-## 3. Top header
+## 3. Top header — S10 owner correction
 
-On authenticated tabs, do not use `PICK PACK 1291` as the main top-bar title.
+On authenticated tabs, do not use `PICK PACK 1291` or duplicate root-tab titles as the main top-bar title.
 
-The compact identity area contains three user-facing lines:
+The identity area now shows **only one greeting line**:
 
-- Họ tên
-- Vị trí
-- Tên user / login ID, hiển thị trực tiếp, không tiền tố `Tài khoản:`
+`Chào buổi <sáng/trưa/chiều/tối>, <Họ tên>`
 
-Each item stays on its own line. Text must be constrained/ellipsized so long values never break the header or overlap the status area.
+Rules:
+
+- Greeting period is resolved from the **actual local clock on the PDA**.
+- Do **not** show login/user ID in the top header.
+- Do **not** show position/role in the top header.
+- Do not show an avatar placeholder when no real photo exists.
+- Long names must fit/ellipsize without overlapping the status area.
 
 The right side reserves a compact status area for:
 
@@ -132,13 +137,20 @@ Use concise Vietnamese consistently. Avoid mixing `server`, `request`, `ACK`, `r
 - Confirmation dialogs are reserved for genuinely consequential or explicitly owner-approved actions, including destructive actions and manual diagnostic-log submission.
 - Manual log submission uses Yes/No confirmation.
 
-## 8. Input / scanner interaction
+## 8. Input / scanner / select interaction
 
 For MNV/PDA scanner-oriented flows:
 
 - Enter/OK from hardware PDA or keyboard triggers the operation immediately.
 - Do not reserve screen space for redundant `Kiểm tra` buttons when Enter/OK is the accepted trigger.
 - Error/not-found state should appear inline or through the standard top notification, not a blocking OK dialog.
+
+For required catalog/select fields:
+
+- Do not show a decorative blank/dash (`—`) option.
+- A required field must resolve to a real catalog value before save.
+- If its matching catalog is genuinely unavailable, show a clear unavailable/configuration state and prevent invalid save rather than silently accepting blank.
+- Preserve explicit business-rule exceptions such as optional User Pick; do not convert an intentionally optional business field into a required one merely to remove a dash placeholder.
 
 ## 9. Settings ownership
 
@@ -167,7 +179,33 @@ QR, Công nhật, Tài nguyên, Báo cáo, Nhân sự, Lịch sử, Đồng bộ
 
 Do not leave inner screens as raw controls or sparse developer forms while the home screen is polished.
 
-## 11. Report layout
+### Lịch sử
+
+Lịch sử is an operational activity view, not a raw debug/event dump.
+
+- Provide a useful summary of total/completed/items needing attention.
+- Provide a simple filter for normal users.
+- Group recent activity by date/time in a readable hierarchy.
+- Use semantic action icons/status chips.
+- Translate backend error codes into user-facing explanations; do not display raw `PP_*` errors as the primary UI.
+
+### Đồng bộ
+
+Đồng bộ is an operational status dashboard rather than a sparse key/value page.
+
+- Show clear current connectivity/sync state.
+- Show pending items, useful last-refresh information and app channel/version.
+- Provide an explicit `Làm mới trạng thái` action while keeping automatic foreground sync active.
+- Do not expose internal protocol/revision jargon.
+
+## 11. Staff data presentation
+
+- Full staff master remains searchable from local cache.
+- Staff UI renders incrementally/lazily instead of constructing thousands of cards synchronously on tab click.
+- Search still covers the full local master cache.
+- Vietnamese phone numbers are displayed/stored with their leading `0`; app input must normalize legacy 9-digit values and validate saved phone numbers as 10 digits beginning with `0`.
+
+## 12. Report layout
 
 Reports should look like one coherent information block, with sections separated by spacing, headers and subtle background hierarchy rather than heavy rounded outlines around every table.
 
@@ -179,7 +217,7 @@ Existing business display rules remain active:
 - compact PDA-friendly spacing
 - zero-value display/collapsing behavior remains according to existing report rules
 
-## 12. Review gate
+## 13. Review gate
 
 Before a Beta/Stable release candidate is accepted, UI-related source must satisfy at minimum:
 
@@ -190,15 +228,18 @@ Before a Beta/Stable release candidate is accepted, UI-related source must satis
 - correct tab order
 - 7 theme swatches remain one row
 - visual tokens remain centralized
+- no three-line login/position identity header
+- required selects do not expose a blank/dash placeholder
+- History/Sync remain useful operational screens rather than raw sparse/debug views
 
 Any deliberate exception requires a new explicit owner decision and must be recorded as `SUPERSEDED` in the cumulative handover.
 
-## S09 actual-device corrections
+## S09 actual-device corrections — retained unless superseded
 
 - Root tabs do not render a duplicate page title in the top gradient header.
-- The authenticated identity header shows exactly three user lines: display name, position, login ID. No avatar placeholder and no `Tài khoản:` prefix.
 - Connection status is persistent Activity state; rebuilding tab content must never reset the header to a transient `Mạng: Đang nối/Đang kết nối` message.
 - Staff list must render incrementally/lazily; search still queries the complete local master cache. Never rebuild thousands of staff card views synchronously during a tab click.
 - `Danh mục` is a UI schema: headers use `SHEET_FIELD`. Use the matching catalog for editable/selectable business fields. Do not expose system-owned/status catalogs in contexts where the user is not allowed to edit them. Example: `DANH SÁCH PDA_Tình trạng` is not selectable while assigning a PDA to PICK.
 - Catalog namespaces are strict. Never borrow values from another sheet even when field names look similar. `Danh sách Admin` is a protected system namespace: its `Vị trí` is fixed to `superadmin`, `admin`, `user` and may only change after an explicit owner decision.
 
+The former S09 rule requiring exactly three identity lines (display name, position, login ID) is **SUPERSEDED by the S10 owner correction in section 3**.
