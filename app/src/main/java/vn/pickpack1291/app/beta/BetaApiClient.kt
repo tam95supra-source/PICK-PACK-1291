@@ -54,7 +54,7 @@ class BetaApiClient(context: Context) {
 
     fun clearSession() {
         synchronized(sessionLock) { sharedToken = null }
-        prefs.edit().remove(KEY_TOKEN).remove(KEY_LOGIN).remove(KEY_NAME).remove(KEY_ROLE).remove(KEY_POSITION).apply()
+        prefs.edit().remove(KEY_TOKEN).remove(KEY_LOGIN).remove(KEY_NAME).remove(KEY_ROLE).remove(KEY_POSITION).remove(KEY_EMAIL).apply()
     }
 
     fun restoredAccount(): JSONObject? {
@@ -66,6 +66,7 @@ class BetaApiClient(context: Context) {
             put("display_name", prefs.getString(KEY_NAME, login).orEmpty().ifBlank { login })
             put("role", prefs.getString(KEY_ROLE, "USER").orEmpty().ifBlank { "USER" })
             put("position", prefs.getString(KEY_POSITION, "").orEmpty())
+            put("email", prefs.getString(KEY_EMAIL, "").orEmpty())
         }
     }
 
@@ -78,6 +79,7 @@ class BetaApiClient(context: Context) {
             e.putString(KEY_NAME, account.optString("display_name", login))
             e.putString(KEY_ROLE, account.optString("role", "USER"))
             e.putString(KEY_POSITION, account.optString("position", ""))
+            e.putString(KEY_EMAIL, account.optString("email", ""))
         }
         e.apply()
     }
@@ -125,21 +127,26 @@ class BetaApiClient(context: Context) {
 
     fun call(action: String, payload: JSONObject = JSONObject(), callback: (Result) -> Unit) {
         executor.execute {
-            try {
-                val result = when (action) {
-                    "change_password" -> changePassword(payload)
-                    "account_upsert" -> accountUpsert(payload)
-                    else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
-                }
-                if (result.ok) {
-                    val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
-                    if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
-                }
-                if (result.code == 401) clearSession()
-                callback(result)
-            } catch (t: Throwable) {
-                callback(failure(t))
-            }
+  try {
+      val result = when (action) {
+          "change_password" -> changePassword(payload)
+          "account_upsert" -> accountUpsert(payload)
+          else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
+      }
+      if (result.ok) {
+          val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+          if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
+      }
+      if (result.code == 401) clearSession()
+      val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
+      if(action in tracked) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())
+      callback(result)
+  } catch (t: Throwable) {
+      val result=failure(t)
+      val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
+      if(action in tracked) AppHistory.record(appContext,action,false,result.error.orEmpty())
+      callback(result)
+  }
         }
     }
 
@@ -360,6 +367,7 @@ class BetaApiClient(context: Context) {
         private const val KEY_NAME = "display_name"
         private const val KEY_ROLE = "role"
         private const val KEY_POSITION = "position"
+        private const val KEY_EMAIL = "email"
         private const val KEY_DEVICE_ID = "device_id"
         private const val RELEASES_URL = "https://api.github.com/repos/tam95supra-source/pick-pack-1291/releases?per_page=30"
     }

@@ -56,6 +56,8 @@ object LocalLogManager {
         uploadNext(api, files, 0)
     }
 
+    fun pendingCount(context: Context): Int = logDir(context).listFiles()?.count { it.isFile } ?: 0
+
     fun sendManualReport(context: Context, api: BetaApiClient, screen: String, syncState: String, callback: (BetaApiClient.Result) -> Unit) {
         val file = write(context, "MANUAL_REPORT", buildString {
             appendLine("type=MANUAL"); appendCommon(context)
@@ -80,13 +82,18 @@ object LocalLogManager {
     }
 
     private fun uploadFile(api: BetaApiClient, file: File, type: String, callback: (BetaApiClient.Result) -> Unit) {
+        val eventId = UUID.randomUUID().toString()
         val payload = JSONObject().put("text", runCatching { file.readText().take(60000) }.getOrDefault("LOG_READ_FAILED")).put("file_name", file.name)
         api.call("diagnostic_log", JSONObject()
-            .put("event_id", UUID.randomUUID().toString())
-            .put("log_type", type)
-            .put("channel", BuildConfig.CHANNEL)
-            .put("app_version", BuildConfig.VERSION_NAME)
-            .put("payload", payload), callback)
+  .put("event_id", eventId)
+  .put("log_type", type)
+  .put("channel", BuildConfig.CHANNEL)
+  .put("app_version", BuildConfig.VERSION_NAME)
+  .put("payload", payload)) { result ->
+  val ack = result.json?.optString("ack_event_id").orEmpty()
+  if (result.ok && ack == eventId) callback(result)
+  else callback(BetaApiClient.Result(false, if(result.code>0)result.code else 502, result.json, result.error ?: "LOG_ACK_MISMATCH"))
+        }
     }
 
     private fun StringBuilder.appendCommon(context: Context) {

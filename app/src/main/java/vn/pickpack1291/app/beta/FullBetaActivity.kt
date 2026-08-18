@@ -25,17 +25,17 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class FullBetaActivity : Activity() {
-    private val navy = Color.rgb(15, 78, 74)
-    private val blue = Color.rgb(13, 148, 136)
+    private val navy:Int get() = ThemeManager.primaryDark(this)
+    private val blue:Int get() = ThemeManager.primary(this)
     private val red = Color.rgb(218, 45, 53)
     private val green = Color.rgb(36, 153, 85)
     private val orange = Color.rgb(217, 119, 6)
-    private val teal = Color.rgb(15, 118, 110)
-    private val bg = Color.rgb(247, 250, 249)
+    private val teal:Int get() = ThemeManager.primary(this)
+    private val bg:Int get() = ThemeManager.background(this)
     private val surface = Color.WHITE
     private val ink = Color.rgb(24, 44, 42)
     private val muted = Color.rgb(100, 116, 139)
-    private val line = Color.rgb(214, 229, 226)
+    private val line:Int get() = ThemeManager.line(this)
 
     private val api by lazy { BetaApiClient(applicationContext) }
     private val syncApi by lazy { BetaApiClient(applicationContext) }
@@ -44,6 +44,7 @@ class FullBetaActivity : Activity() {
     private var accountName = ""
     private var accountRole = ""
     private var accountPosition = ""
+    private var accountEmail = ""
     private var syncText: TextView? = null
     private var currentScreen = "LOGIN"
     private var liveEmployeeMnv = ""
@@ -52,10 +53,10 @@ class FullBetaActivity : Activity() {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
                 UpdateManager.check(this@FullBetaActivity)
                 if (status.connected) {
-                    syncText?.text = "●  GOOGLE SHEET LIVE • Rev ${status.serverSeq}"
+                    syncText?.text = "✓ Online • R${status.serverSeq}"
                     syncText?.setTextColor(green)
                 } else {
-                    syncText?.text = "●  Mất kết nối Google Sheet"
+                    syncText?.text = "! Offline"
                     syncText?.setTextColor(red)
                 }
                 if (status.masterChanged || status.masterRevision != MasterDataCache.revision(this@FullBetaActivity)) refreshMasterCache()
@@ -96,6 +97,8 @@ class FullBetaActivity : Activity() {
         accountName = saved.optString("display_name", accountLogin)
         accountRole = saved.optString("role", "USER")
         accountPosition = saved.optString("position", "")
+        accountEmail = saved.optString("email", "")
+        LocalLogManager.uploadAutomaticPending(this, api)
         dashboard()
         foregroundSync.start()
     }
@@ -104,7 +107,7 @@ class FullBetaActivity : Activity() {
         foregroundSync.stop()
         liveEmployeeMnv = ""
         currentScreen = "LOGIN"
-        accountLogin = ""; accountName = ""; accountRole = ""; accountPosition = ""
+        accountLogin = ""; accountName = ""; accountRole = ""; accountPosition = ""; accountEmail = ""
 
         val user = input("Nhập tài khoản", false)
         val saved = getPreferences(MODE_PRIVATE).getString("last_login", "").orEmpty()
@@ -137,6 +140,7 @@ class FullBetaActivity : Activity() {
                 accountName = a.optString("display_name", accountLogin)
                 accountRole = a.optString("role", "USER")
                 accountPosition = a.optString("position", "")
+                accountEmail = a.optString("email", "")
                 getPreferences(MODE_PRIVATE).edit().putString("last_login", accountLogin).apply()
                 pass.setText("")
                 if (MasterDataCache.revision(this@FullBetaActivity) == 0L) refreshMasterCache()
@@ -164,10 +168,7 @@ class FullBetaActivity : Activity() {
                 api.forgotPassword(loginId) { r -> runOnUiThread {
                     isEnabled = true; text = "QUÊN MẬT KHẨU?"
                     if (!r.ok) { showError(r.error ?: "Không gửi được yêu cầu đặt lại mật khẩu"); return@runOnUiThread }
-                    AlertDialog.Builder(this@FullBetaActivity)
-                        .setTitle("Đã tiếp nhận")
-                        .setMessage("Nếu tài khoản hợp lệ, mật khẩu mới đã được gửi tới quản trị viên. Liên hệ quản trị viên để nhận mật khẩu mới.")
-                        .setPositiveButton("OK", null).show()
+                    TopNotice.show(this@FullBetaActivity,"Nếu tài khoản hợp lệ, mật khẩu mới đã được gửi tới mail đã cấu hình.",TopNotice.Kind.SUCCESS)
                 } }
             }
         }, matchWrap())
@@ -184,51 +185,44 @@ class FullBetaActivity : Activity() {
     private fun dashboard() {
         currentScreen = "DASHBOARD"
         liveEmployeeMnv = ""
-        val root = column(bg)
-        root.addView(appBar("Trang chủ", false))
-        val body = column(bg).apply { setPadding(dp(12), dp(12), dp(12), dp(46)) }
-        body.addView(txt("Xin chào, ${accountName.ifBlank { accountLogin }}", 16f, ink, true))
-        body.addView(txt(roleText(accountRole), 10.5f, muted, false))
-        body.addView(gap(10))
-        body.addView(fullCard("▣", "QUÉT QR NHÂN SỰ", teal, dp(88)) { employeeScan() })
-        body.addView(gap(8))
-        body.addView(section("CHỨC NĂNG"))
-        body.addView(fullCard("⌕", "DANH SÁCH NHÂN SỰ", Color.rgb(20, 128, 120), dp(64)) { openModule("STAFF") })
-        if (accountRole == "ADMIN" || accountRole == "SUPERADMIN") {
-            body.addView(cardRow(
-                tile("◉", "CÔNG NHẬT", green) { openModule("LABOR") },
-                tile("☷", "THEO DÕI CA", Color.rgb(67, 122, 115)) { openModule("LISTS") }
-            ))
-        } else {
-            body.addView(fullCard("☷", "THEO DÕI CA", Color.rgb(67, 122, 115), dp(64)) { openModule("LISTS") })
+        val root=column(bg)
+        root.addView(appBar("PICK PACK 1291",false))
+        val body=column(bg).apply{setPadding(dp(12),dp(10),dp(12),dp(92))}
+        body.addView(txt("Nghiệp vụ",15f,ink,true));body.addView(txt("${accountName.ifBlank{accountLogin}} • ${roleText(accountRole)}",9.8f,muted,false));body.addView(gap(9))
+        val hero=column(surface).apply{
+  setPadding(dp(14),dp(14),dp(14),dp(14));background=outlineBg(surface,12);setOnClickListener{employeeScan()}
+  addView(row(surface).apply{
+      addView(txt("▣",27f,teal,true).apply{gravity=Gravity.CENTER},size(dp(52),dp(58)))
+      addView(column(surface).apply{addView(txt("QUÉT QR NHÂN SỰ",15f,teal,true));addView(txt("Quét hoặc nhập MNV, Enter/OK để xử lý",10f,muted,false))},LinearLayout.LayoutParams(0,-2,1f))
+      addView(txt("›",25f,teal,false).apply{gravity=Gravity.CENTER},size(dp(30),dp(58)))
+  },matchWrap())
         }
-        body.addView(cardRow(
-            tile("▥", "BÁO CÁO", teal) { openModule("REPORT") },
-            tile("⚙", "CÀI ĐẶT", navy) { openModule("SETTINGS") }
-        ))
-        root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        setScreen(root)
-        refreshStatus()
+        body.addView(hero,matchWrap());body.addView(gap(8))
+        if(accountRole=="ADMIN"||accountRole=="SUPERADMIN") body.addView(menuRow("◉","Công nhật","Bắt đầu / hoàn thành công nhật") { openModule("LABOR") })
+        body.addView(menuRow("▥","Báo cáo nhân sự","Báo cáo vận hành theo ca / ngày") { openModule("REPORT") })
+        body.addView(menuRow("☷","Theo dõi ca","Phiên làm việc và công nhật hôm nay") { openModule("LISTS") })
+        body.addView(menuRow("↔","Tài nguyên","PDA, User Pick, Bàn Pack / User Pack") { openModule("RESOURCES") })
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f))
+        setScreen(root);refreshStatus()
     }
 
     private fun openModule(module: String, mnv: String = "") {
         startActivity(Intent(this, OperationsActivity::class.java).apply {
-            putExtra("module", module); putExtra("login", accountLogin); putExtra("name", accountName); putExtra("role", accountRole); putExtra("position", accountPosition); putExtra("mnv", mnv)
+            putExtra("module", module); putExtra("login", accountLogin); putExtra("name", accountName); putExtra("role", accountRole); putExtra("position", accountPosition); putExtra("email", accountEmail); putExtra("mnv", mnv)
         })
     }
 
     private fun employeeScan() {
-        currentScreen = "SCAN"
-        liveEmployeeMnv = ""
-        val root = column(bg); root.addView(appBar("QUÉT QR NHÂN SỰ", true))
-        val body = column(bg).apply { setPadding(dp(16), dp(16), dp(16), dp(58)) }
-        val mnv = mnvInput("Quét QR hoặc nhập MNV")
-        body.addView(labelled("Mã nhân viên", mnv)); body.addView(gap(10))
-        val check = primary("KIỂM TRA", navy) {}
-        fun submit() { val v=mnv.text.toString().trim(); if(v.isBlank()){toast("Quét QR hoặc nhập MNV.");return}; check.isEnabled=false;check.text="ĐANG KIỂM TRA..."; loadEmployee(v, check) }
-        check.setOnClickListener { submit() }; bindScannerEnter(mnv) { if (check.isEnabled) submit() }
-        body.addView(check, matchWrap())
-        root.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1,0,1f)); setScreen(root); mnv.requestFocus()
+        currentScreen = "SCAN"; liveEmployeeMnv = ""
+        val root=column(bg);root.addView(appBar("QUÉT QR NHÂN SỰ",true))
+        val body=column(bg).apply{setPadding(dp(16),dp(16),dp(16),dp(92))}
+        val mnv=mnvInput("Quét QR hoặc nhập MNV")
+        body.addView(labelled("Mã nhân viên",mnv));body.addView(gap(6))
+        body.addView(txt("Nhận Enter/OK từ PDA hoặc bàn phím để chạy ngay.",9.8f,muted,false))
+        var busy=false
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét MNV.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;loadEmployee(v);mnv.postDelayed({busy=false},600)}
+        bindScannerEnter(mnv){submit()}
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);mnv.requestFocus()
     }
 
     private fun loadEmployee(mnv: String, button: Button? = null) {
@@ -315,12 +309,26 @@ class FullBetaActivity : Activity() {
         body.addView(enter,matchWrap())
     }
 
-    private fun refreshStatus() { syncApi.call("sync_status") { r -> runOnUiThread { if(r.code==401){sessionExpired();return@runOnUiThread}; val j=r.json; if(r.ok&&j!=null){val p=j.optInt("projection_pending",0);syncText?.text="● LIVE  R${j.optLong("server_seq",0)}";syncText?.setTextColor(green)}else{syncText?.text="●  Mất kết nối";syncText?.setTextColor(red)} } } }
+    private fun refreshStatus(){syncApi.call("sync_status"){r->runOnUiThread{if(r.code==401){sessionExpired();return@runOnUiThread};val j=r.json;if(r.ok&&j!=null){syncText?.text="✓ Online • R${j.optLong("server_seq",0)}";syncText?.setTextColor(Color.WHITE)}else{syncText?.text="! Offline";syncText?.setTextColor(Color.WHITE)}}}}
 
     private fun employeeCard(e: JSONObject)=column(surface).apply{setPadding(dp(14),dp(12),dp(14),dp(12));background=outlineBg(surface,9);addView(txt("${e.optString("mnv")} • ${e.optString("full_name")}",15.5f,navy,true));addView(gap(3));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}",10.5f,ink,false));addView(txt("${dash(e.optString("department"))} • Site ${dash(e.optString("site"))} • Kho ${dash(e.optString("warehouse"))}",10f,muted,false))}
     private fun details(items:List<Pair<String,String>>)=column(surface).apply{setPadding(dp(13),dp(9),dp(13),dp(9));background=outlineBg(surface,9);items.forEach{(k,v)->addView(row(surface).apply{addView(txt(k,10.5f,muted,false),LinearLayout.LayoutParams(0,-2,.45f));addView(txt(if(v.isBlank())"—" else v,10.7f,ink,true).apply{gravity=Gravity.END},LinearLayout.LayoutParams(0,-2,.55f));setPadding(0,dp(4),0,dp(4))})}}
 
-    private fun appBar(title:String,back:Boolean)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(9),dp(7),dp(10),dp(7));addView(txt(if(back)"‹" else "",if(back)31f else 22f,Color.WHITE,false).apply{gravity=Gravity.CENTER;if(back)setOnClickListener{navigateBack()}},size(dp(42),dp(45)));addView(txt(title,17f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("● SYNC",9.5f,Color.rgb(218,229,248),true).apply{gravity=Gravity.CENTER;setPadding(dp(8),dp(5),dp(8),dp(5))};addView(syncText,size(dp(86),dp(36)))}
+    private fun appBar(title:String,back:Boolean)=row(navy).apply{
+        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(6),dp(8),dp(6))
+        addView(txt(if(back)"‹" else "",if(back)30f else 20f,Color.WHITE,false).apply{gravity=Gravity.CENTER;if(back)setOnClickListener{navigateBack()}},size(dp(40),dp(44)))
+        addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        syncText=txt("↻ Đang nối",8.8f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(4),dp(4),dp(4),dp(4))}
+        addView(syncText,size(dp(102),dp(40)))
+    }
+    private fun menuRow(icon:String,title:String,sub:String,click:()->Unit)=row(surface).apply{
+        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(11),dp(9),dp(9),dp(9));background=outlineBg(surface,10)
+        addView(txt(icon,22f,teal,true).apply{gravity=Gravity.CENTER},size(dp(45),dp(50)))
+        addView(column(surface).apply{addView(txt(title,12.8f,ink,true));addView(txt(sub,9.7f,muted,false))},LinearLayout.LayoutParams(0,-2,1f))
+        addView(txt("›",22f,teal,false).apply{gravity=Gravity.CENTER},size(dp(26),dp(48)))
+        setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(7)}
+    }
+
     private fun fullCard(symbol:String,title:String,color:Int,height:Int,click:()->Unit)=row(color).apply{gravity=Gravity.CENTER_VERTICAL;background=round(color,12);setPadding(dp(12),0,dp(12),0);addView(txt(symbol,25f,Color.WHITE,true).apply{gravity=Gravity.CENTER},size(dp(48),-1));addView(txt(title,14f,Color.WHITE,true).apply{gravity=Gravity.CENTER_VERTICAL},LinearLayout.LayoutParams(0,-2,1f));addView(txt("›",24f,Color.WHITE,false).apply{gravity=Gravity.CENTER},size(dp(30),-1));setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,height)}
     private fun tile(symbol:String,title:String,color:Int,click:()->Unit)=column(surface).apply{gravity=Gravity.CENTER;background=outlineBg(surface,12);addView(txt(symbol,23f,color,true).center());addView(gap(3));addView(txt(title,11.5f,ink,true).center());setOnClickListener{click()}}
     private fun cardRow(a:View,b:View)=row(bg).apply{addView(a,LinearLayout.LayoutParams(0,dp(86),1f).apply{marginEnd=dp(4);topMargin=dp(4);bottomMargin=dp(4)});addView(b,LinearLayout.LayoutParams(0,dp(86),1f).apply{marginStart=dp(4);topMargin=dp(4);bottomMargin=dp(4)})}
@@ -343,9 +351,40 @@ class FullBetaActivity : Activity() {
     private fun setScreen(content:View){setContentView(host(content))}
     private fun navigateBack(){when(currentScreen){"EMPLOYEE"->employeeScan();"SCAN"->dashboard();"DASHBOARD"->finish();else->dashboard()}}
     private fun refreshMasterCache(){cacheApi.call("master_snapshot"){r->if(r.ok&&r.json!=null)MasterDataCache.save(applicationContext,r.json)}}
-    private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){if(currentScreen!="LOGIN"&&currentScreen!="DASHBOARD")navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(27)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(23),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION") val t=i.systemWindowInsetTop;@Suppress("DEPRECATION") val b=i.systemWindowInsetBottom;top=t;bottom=b};v.setPadding(0,top+dp(7),0,bottom+dp(3));i};root.requestApplyInsets();return root}
+    private fun host(content:View):View{
+        val root=EdgeSwipeBackLayout(this){if(currentScreen!="LOGIN"&&currentScreen!="DASHBOARD")navigateBack()}.apply{setBackgroundColor(bg)}
+        val navHeight=if(currentScreen=="LOGIN")0 else dp(62)
+        root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(22)+navHeight})
+        if(currentScreen!="LOGIN")root.addView(bottomNav("BUSINESS"),FrameLayout.LayoutParams(-1,navHeight,Gravity.BOTTOM).apply{bottomMargin=dp(20)})
+        root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM))
+        root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i};root.requestApplyInsets();return root
+    }
+    private fun bottomNav(active:String): LinearLayout = row(surface).apply {
+        gravity = Gravity.CENTER
+        setPadding(dp(3),dp(3),dp(3),dp(3))
+        background = GradientDrawable().apply { setColor(surface); setStroke(dp(1),line) }
+        val items = listOf(
+            Triple("▦","Nghiệp vụ","BUSINESS"),
+            Triple("◉","Nhân sự","STAFF"),
+            Triple("◷","Lịch sử","HISTORY"),
+            Triple("↻","Đồng bộ","SYNC"),
+            Triple("⚙","Cài đặt","SETTINGS")
+        )
+        items.forEach { item ->
+            val cell = column(surface).apply {
+                gravity = Gravity.CENTER
+                addView(txt(item.first,17f,if(item.third==active)teal else muted,true).apply { gravity=Gravity.CENTER })
+                addView(txt(item.second,8.4f,if(item.third==active)teal else muted,item.third==active).apply { gravity=Gravity.CENTER; maxLines=1 })
+                setOnClickListener { _ ->
+                    if(item.third=="BUSINESS") dashboard() else openModule(item.third)
+                }
+            }
+            addView(cell,LinearLayout.LayoutParams(0,-1,1f))
+        }
+    }
+
     private fun sessionExpired(){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản này đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi. Đăng nhập lại để tiếp tục.").setCancelable(false).setPositiveButton("ĐĂNG NHẬP"){_,_->login()}.show()}
-    private fun showError(raw:String){val msg=when{raw.contains("INVALID_CREDENTIALS")->"Sai tài khoản hoặc mật khẩu.";raw.contains("LOGIN_TEMP_LOCKED")->"Tài khoản tạm khóa 15 phút do đăng nhập sai nhiều lần.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy MNV.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Kiểm tra lại.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack đã được dùng trong ngày.";raw.contains("UNAUTHORIZED")->"Phiên đăng nhập đã hết hạn.";else->raw};AlertDialog.Builder(this).setTitle("Không thực hiện được").setMessage(msg).setPositiveButton("OK",null).show()}
+    private fun showError(raw:String){val msg=when{raw.contains("INVALID_CREDENTIALS")->"Sai tài khoản hoặc mật khẩu.";raw.contains("LOGIN_TEMP_LOCKED")->"Tài khoản tạm khóa 15 phút do đăng nhập sai nhiều lần.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy MNV.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Kiểm tra lại.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack đã được dùng trong ngày.";raw.contains("UNAUTHORIZED")->"Phiên đăng nhập đã hết hạn.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}
     private fun roleText(r:String)=when(r){"SUPERADMIN"->"Superadmin";"ADMIN"->"Admin";"USER"->"Điều phối";else->BuildConfig.CHANNEL}
     private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Bangkok")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}catch(_:Throwable){v}}
     private fun dash(v:String)=v.takeIf{it.isNotBlank()&&it!="null"}?:"—"
@@ -360,6 +399,6 @@ class FullBetaActivity : Activity() {
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun size(w:Int,h:Int)=ViewGroup.LayoutParams(w,h)
     private fun matchWrap()=LinearLayout.LayoutParams(-1,-2)
-    private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_SHORT).show()
+    private fun toast(s:String)=TopNotice.show(this,s,TopNotice.Kind.SUCCESS)
     companion object{private const val FOOTER="Copyright 2026 - tamnv2 - Chuyên viên Pick Pack 1291 - Supra DCHY"}
 }

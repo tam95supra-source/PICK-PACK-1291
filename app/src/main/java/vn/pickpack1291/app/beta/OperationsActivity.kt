@@ -2,6 +2,7 @@ package vn.pickpack1291.app.beta
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -26,17 +27,17 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class OperationsActivity : Activity() {
-    private val navy = Color.rgb(15,78,74)
-    private val blue = Color.rgb(13,148,136)
+    private val navy:Int get()=ThemeManager.primaryDark(this)
+    private val blue:Int get()=ThemeManager.primary(this)
     private val red = Color.rgb(218,45,53)
     private val green = Color.rgb(36,153,85)
     private val orange = Color.rgb(217,119,6)
-    private val teal = Color.rgb(15,118,110)
-    private val bg = Color.rgb(247,250,249)
+    private val teal:Int get()=ThemeManager.primary(this)
+    private val bg:Int get()=ThemeManager.background(this)
     private val surface = Color.WHITE
     private val ink = Color.rgb(24,44,42)
     private val muted = Color.rgb(100,116,139)
-    private val line = Color.rgb(214,229,226)
+    private val line:Int get()=ThemeManager.line(this)
     private val api by lazy { BetaApiClient(applicationContext) }
     private val syncApi by lazy { BetaApiClient(applicationContext) }
     private val cacheApi by lazy { BetaApiClient(applicationContext) }
@@ -46,6 +47,7 @@ class OperationsActivity : Activity() {
     private lateinit var name: String
     private lateinit var role: String
     private var position = ""
+    private var email = ""
     private var initialMnv = ""
     private var screenState = "ROOT"
     private var syncText: TextView? = null
@@ -53,7 +55,7 @@ class OperationsActivity : Activity() {
         ForegroundSyncCoordinator(this, syncApi, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
                 UpdateManager.check(this@OperationsActivity)
-                syncText?.text = if(status.connected) "● LIVE  R${status.serverSeq}" else "● OFFLINE"
+                syncText?.text = if(status.connected) "✓ Online • R${status.serverSeq}" else "! Offline"
                 syncText?.setTextColor(if(status.connected) green else red)
                 if(status.masterChanged || status.masterRevision != MasterDataCache.revision(this@OperationsActivity)) refreshMasterCache()
                 if (!status.connected || !status.changed) return
@@ -81,6 +83,7 @@ class OperationsActivity : Activity() {
         name = intent.getStringExtra("name") ?: login
         role = intent.getStringExtra("role") ?: "USER"
         position = intent.getStringExtra("position") ?: ""
+        email = intent.getStringExtra("email") ?: api.restoredAccount()?.optString("email").orEmpty()
         initialMnv = intent.getStringExtra("mnv") ?: ""
         if (api.token == null) { finish(); return }
         when(module){
@@ -89,6 +92,8 @@ class OperationsActivity : Activity() {
             "REPORT"->reportScreen()
             "SETTINGS"->settingsScreen()
             "STAFF"->staffScreen()
+            "HISTORY"->historyScreen()
+            "SYNC"->syncScreen()
             else->listsScreen()
         }
     }
@@ -107,17 +112,14 @@ class OperationsActivity : Activity() {
     private fun isAdmin() = role == "ADMIN" || role == "SUPERADMIN"
     private fun isSuper() = role == "SUPERADMIN"
 
-    private fun laborHome() {
-        screenState = "LABOR_HOME"
-        if (!isAdmin()) { simpleMessage("CÔNG NHẬT", "Chức năng Công nhật dành cho ADMIN/SUPERADMIN theo phân quyền hiện tại."); return }
-        val root=baseRoot("CÔNG NHẬT"); val body=body()
-        body.addView(txt("Scan để bắt đầu hoặc kết thúc công nhật.",10.5f,muted,false));body.addView(gap(9))
-        val mnv=mnvInput("MNV").apply{setText(initialMnv)}
-        body.addView(labelled("Mã nhân viên",mnv));body.addView(gap(9));val button=primary("KIỂM TRA",navy){}
-        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){toast("Nhập MNV.");return};button.isEnabled=false;button.text="ĐANG KIỂM TRA...";api.call("employee_context",JSONObject().put("mnv",v).put("include_labor",true).put("include_options",false)){r->runOnUiThread{button.isEnabled=true;button.text="KIỂM TRA";if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"Không kiểm tra được MNV");return@runOnUiThread};showLaborContext(r.json?:JSONObject(),MasterDataCache.snapshot(this@OperationsActivity)?:JSONObject())}}}
-        button.setOnClickListener{submit()};bindScannerEnter(mnv){if(button.isEnabled)submit()};body.addView(button,matchWrap())
-        if(initialMnv.isNotBlank()) button.post{submit()}
-        attach(root,body)
+    private fun laborHome(){
+        screenState="LABOR_HOME"
+        if(!isAdmin()){simpleMessage("CÔNG NHẬT","Chức năng Công nhật dành cho ADMIN/SUPERADMIN theo phân quyền hiện tại.");return}
+        val root=baseRoot("CÔNG NHẬT");val body=body();body.addView(txt("◉ Quét / nhập MNV rồi Enter/OK để xử lý công nhật.",10.5f,muted,false));body.addView(gap(9))
+        val mnv=mnvInput("MNV").apply{setText(initialMnv)};body.addView(labelled("Mã nhân viên",mnv));body.addView(gap(5));body.addView(txt("Không cần nút kiểm tra.",9.5f,muted,false))
+        var busy=false
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập MNV.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;api.call("employee_context",JSONObject().put("mnv",v).put("include_labor",true).put("include_options",false)){r->runOnUiThread{busy=false;if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"Không kiểm tra được MNV");return@runOnUiThread};showLaborContext(r.json?:JSONObject(),MasterDataCache.snapshot(this@OperationsActivity)?:JSONObject())}}}
+        bindScannerEnter(mnv){submit()};if(initialMnv.isNotBlank())mnv.post{submit()};attach(root,body);mnv.requestFocus()
     }
 
     private fun showLaborContext(ctx:JSONObject, masters:JSONObject){
@@ -133,10 +135,11 @@ class OperationsActivity : Activity() {
     }
 
     private fun resourceHome(){
-        screenState = "RESOURCE_HOME"
-        val root=baseRoot("TÀI NGUYÊN");val body=body();val mnv=mnvInput("MNV").apply{setText(initialMnv)};body.addView(labelled("Mã nhân viên",mnv));body.addView(gap(9));val button=primary("KIỂM TRA PHIÊN",navy){}
-        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){toast("Nhập MNV.");return};button.isEnabled=false;api.call("employee_context",JSONObject().put("mnv",v)){r->runOnUiThread{button.isEnabled=true;if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"Không kiểm tra được MNV");return@runOnUiThread};if(r.json?.optString("state")!="ACTIVE"){showError("MNV phải đang trong phiên ACTIVE.");return@runOnUiThread};api.call("master_options",JSONObject().put("mnv",v)){m->runOnUiThread{if(handleAuth(m))return@runOnUiThread;showResourceEditor(r.json?:JSONObject(),m.json?:JSONObject())}}}}}
-        button.setOnClickListener{submit()};bindScannerEnter(mnv){if(button.isEnabled)submit()};body.addView(button,matchWrap());if(initialMnv.isNotBlank())button.post{submit()};attach(root,body)
+        screenState="RESOURCE_HOME"
+        val root=baseRoot("TÀI NGUYÊN");val body=body();body.addView(txt("↔ Nhập / quét MNV rồi Enter/OK để mở tài nguyên đang dùng.",10.5f,muted,false));body.addView(gap(8))
+        val mnv=mnvInput("MNV").apply{setText(initialMnv)};body.addView(labelled("Mã nhân viên",mnv));var busy=false
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập MNV.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;api.call("employee_context",JSONObject().put("mnv",v)){r->runOnUiThread{if(handleAuth(r)){busy=false;return@runOnUiThread};if(!r.ok){busy=false;showError(r.error?:"Không kiểm tra được MNV");return@runOnUiThread};if(r.json?.optString("state")!="ACTIVE"){busy=false;showError("MNV phải đang trong phiên ACTIVE.");return@runOnUiThread};api.call("master_options",JSONObject().put("mnv",v)){m->runOnUiThread{busy=false;if(handleAuth(m))return@runOnUiThread;showResourceEditor(r.json?:JSONObject(),m.json?:JSONObject())}}}}}
+        bindScannerEnter(mnv){submit()};if(initialMnv.isNotBlank())mnv.post{submit()};attach(root,body);mnv.requestFocus()
     }
 
     private fun showResourceEditor(ctx:JSONObject,masters:JSONObject){
@@ -152,29 +155,154 @@ class OperationsActivity : Activity() {
     }
 
     private fun staffScreen(){
-        screenState = "STAFF"
-        val root=baseRoot("DANH SÁCH NHÂN SỰ")
+        screenState="STAFF"
+        val root=baseRoot("NHÂN SỰ")
         val body=body()
-        val q=input("Tìm MNV / họ tên",false).apply{setSingleLine(true);imeOptions=EditorInfo.IME_ACTION_SEARCH}
-        body.addView(q,matchWrap());body.addView(gap(8))
-        val box=column(bg);body.addView(box,matchWrap())
+        val q=input("Tìm MNV / họ tên",false).apply {
+            setSingleLine(true)
+            imeOptions=EditorInfo.IME_ACTION_SEARCH
+        }
+        body.addView(q,matchWrap())
+        body.addView(gap(7))
+        if(isAdmin()){
+            body.addView(primary("＋ THÊM NHÂN SỰ",teal){ staffEditor(null) },matchWrap())
+            body.addView(gap(7))
+        }
+        val box=column(bg)
+        body.addView(box,matchWrap())
+
         fun render(query:String){
             box.removeAllViews()
-            val a=MasterDataCache.searchStaff(this,query,100)
-            for(i in 0 until a.length()){
-                val e=a.optJSONObject(i)?:continue
-                box.addView(listCard("${e.optString("mnv")} • ${e.optString("full_name")}","${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}\nNgày vào: ${dash(e.optString("start_date"))}"));box.addView(gap(6))
+            val arr=MasterDataCache.searchStaff(this,query,2000)
+            for(i in 0 until arr.length()){
+                val employee=arr.optJSONObject(i) ?: continue
+                val card=column(surface).apply {
+                    setPadding(dp(11),dp(9),dp(11),dp(9))
+                    background=outlineBg(surface,8)
+                    addView(txt("◉  ${employee.optString("mnv")} • ${employee.optString("full_name")}",12.5f,ink,true))
+                    addView(txt("${dash(employee.optString("main_position"))} • ${dash(employee.optString("supplier"))} • ${dash(employee.optString("department"))}",9.7f,muted,false))
+                    if(isAdmin()){
+                        addView(gap(5))
+                        val actions=row(surface)
+                        val edit=primary("✎ SỬA",teal){ staffEditor(employee) }.apply { textSize=9.2f; setSingleLine(true) }
+                        val del=primary("× XÓA",red){ confirmDeleteStaff(employee) }.apply { textSize=9.2f; setSingleLine(true) }
+                        actions.addView(edit,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginEnd=dp(3)})
+                        actions.addView(del,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginStart=dp(3)})
+                        addView(actions,matchWrap())
+                    }
+                }
+                box.addView(card,matchWrap())
+                box.addView(gap(6))
             }
-            if(a.length()==0)box.addView(info("Không có kết quả."))
+            if(arr.length()==0) box.addView(info("ⓘ Không có nhân sự phù hợp."))
         }
+
         q.addTextChangedListener(object:TextWatcher{
-            override fun beforeTextChanged(v:CharSequence?,start:Int,count:Int,after:Int)=Unit
-            override fun onTextChanged(v:CharSequence?,start:Int,before:Int,count:Int){render(v?.toString().orEmpty())}
+            override fun beforeTextChanged(v:CharSequence?,s:Int,c:Int,a:Int)=Unit
+            override fun onTextChanged(v:CharSequence?,s:Int,b:Int,c:Int){ render(v?.toString().orEmpty()) }
             override fun afterTextChanged(v:Editable?)=Unit
         })
+        q.setOnEditorActionListener { _,_,_ -> render(q.text.toString()); true }
         render("")
         attach(root,body)
-        q.requestFocus()
+    }
+
+    private fun staffEditor(existing:JSONObject?){
+        if(!isAdmin()) return
+        val box=column(surface).apply { setPadding(dp(6),0,dp(6),0) }
+        val mnv=input("Mã nhân viên",false).apply {
+            setText(existing?.optString("mnv").orEmpty())
+            isEnabled=existing==null
+        }
+        val full=input("Họ và tên",false).apply { setText(existing?.optString("full_name").orEmpty()) }
+        val phone=input("Số điện thoại",false).apply { setText(existing?.optString("phone").orEmpty()) }
+        val pos=input("Vị trí chính",false).apply { setText(existing?.optString("main_position").orEmpty()) }
+        val supplier=input("Nhà cung cấp",false).apply { setText(existing?.optString("supplier").orEmpty()) }
+        val department=input("Bộ phận",false).apply { setText(existing?.optString("department").orEmpty()) }
+        val site=input("Site",false).apply { setText(existing?.optString("site").orEmpty()) }
+        val warehouse=input("Kho",false).apply { setText(existing?.optString("warehouse").orEmpty()) }
+        val startDate=input("Ngày bắt đầu dd/MM/yyyy",false).apply { setText(existing?.optString("start_date").orEmpty()) }
+        val note=input("Ghi chú",false).apply { setText(existing?.optString("note").orEmpty()) }
+        listOf(mnv,full,phone,pos,supplier,department,site,warehouse,startDate,note).forEach { field ->
+            box.addView(field,matchWrap())
+            box.addView(gap(5))
+        }
+        val scroller=ScrollView(this).apply { addView(box) }
+        AlertDialog.Builder(this)
+            .setTitle(if(existing==null) "Thêm nhân sự" else "Sửa nhân sự")
+            .setView(scroller)
+            .setNegativeButton("Hủy",null)
+            .setPositiveButton("LƯU") { _,_ ->
+                val id=mnv.text.toString().trim()
+                val nm=full.text.toString().trim()
+                if(id.isBlank() || nm.isBlank()){
+                    TopNotice.show(this,"MNV và họ tên là bắt buộc.",TopNotice.Kind.ERROR)
+                } else {
+                    val payload=JSONObject()
+                        .put("event_id",UUID.randomUUID().toString())
+                        .put("mnv",id)
+                        .put("full_name",nm)
+                        .put("phone",phone.text.toString())
+                        .put("main_position",pos.text.toString())
+                        .put("supplier",supplier.text.toString())
+                        .put("department",department.text.toString())
+                        .put("site",site.text.toString())
+                        .put("warehouse",warehouse.text.toString())
+                        .put("start_date",startDate.text.toString())
+                        .put("note",note.text.toString())
+                    api.call("staff_upsert",payload) { result ->
+                        runOnUiThread {
+                            if(handleAuth(result)) {
+                                Unit
+                            } else if(!result.ok) {
+                                showError(result.error ?: "Không lưu được nhân sự")
+                            } else {
+                                reloadMaster {
+                                    TopNotice.show(this,"Đã lưu nhân sự.",TopNotice.Kind.SUCCESS)
+                                    staffScreen()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun confirmDeleteStaff(employee:JSONObject){
+        AlertDialog.Builder(this)
+            .setTitle("Xóa nhân sự?")
+            .setMessage("Xóa ${employee.optString("mnv")} • ${employee.optString("full_name")}? Lịch sử nghiệp vụ đã phát sinh vẫn được giữ.")
+            .setNegativeButton("KHÔNG",null)
+            .setPositiveButton("CÓ") { _,_ ->
+                val payload=JSONObject()
+                    .put("event_id",UUID.randomUUID().toString())
+                    .put("mnv",employee.optString("mnv"))
+                api.call("staff_delete",payload) { result ->
+                    runOnUiThread {
+                        if(handleAuth(result)) {
+                            Unit
+                        } else if(!result.ok) {
+                            showError(result.error ?: "Không xóa được nhân sự")
+                        } else {
+                            reloadMaster {
+                                TopNotice.show(this,"Đã xóa nhân sự.",TopNotice.Kind.SUCCESS)
+                                staffScreen()
+                            }
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun reloadMaster(done:()->Unit){
+        cacheApi.call("master_snapshot") { result ->
+            runOnUiThread {
+                if(result.ok && result.json!=null) MasterDataCache.save(this,result.json)
+                done()
+            }
+        }
     }
 
     private fun listsScreen(){
@@ -208,7 +336,7 @@ class OperationsActivity : Activity() {
         val wrap=column(surface).apply{setPadding(dp(1),dp(2),dp(1),dp(2));background=outlineBg(surface,6)};if(title.isNotBlank())wrap.addView(txt(title,11f,navy,true).apply{gravity=Gravity.CENTER;setPadding(0,0,0,dp(3))})
         if(data==null){wrap.addView(txt("Chưa có dữ liệu",10f,muted,false));return wrap}
         val cols=jsonStrings(data.optJSONArray("columns"));val rows=data.optJSONArray("rows")?:JSONArray();val table=TableLayout(this).apply{isStretchAllColumns=true;isShrinkAllColumns=true}
-        fun cell(v:String,bold:Boolean=false,header:Boolean=false)=TextView(this).apply{text=v;textSize=if(header)8.2f else 8.5f;setTextColor(if(header)navy else ink);typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT;gravity=Gravity.CENTER;setPadding(dp(1),dp(3),dp(1),dp(3));maxLines=3;background=GradientDrawable().apply{setColor(if(header)Color.rgb(232,241,246) else Color.WHITE);setStroke(dp(1),line)}}
+        fun cell(v:String,bold:Boolean=false,header:Boolean=false)=TextView(this).apply{text=v;textSize=if(header)8.2f else 8.5f;setTextColor(if(header)navy else ink);typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT;gravity=Gravity.CENTER;setPadding(dp(1),dp(3),dp(1),dp(3));maxLines=3;background=GradientDrawable().apply{setColor(if(header)Color.rgb(232,241,246) else Color.WHITE)}}
         val hr=TableRow(this);hr.addView(cell(firstTitle,true,true));cols.forEach{hr.addView(cell(it,true,true))};hr.addView(cell("Tổng",true,true));table.addView(hr)
         for(i in 0 until rows.length()){val row=rows.optJSONObject(i)?:continue;val tr=TableRow(this);tr.addView(cell(row.optString(rowKey),true));val counts=row.optJSONObject("counts")?:JSONObject();cols.forEach{c->val n=counts.optInt(c);tr.addView(cell(if(n==0)"" else n.toString()))};val total=row.optInt("total");tr.addView(cell(if(total==0)"" else total.toString(),true));table.addView(tr)}
         val totals=data.optJSONObject("totals");if(totals!=null){val tr=TableRow(this);tr.addView(cell("Tổng",true,true));cols.forEach{c->val n=totals.optInt(c);tr.addView(cell(if(n==0)"" else n.toString(),true,true))};val total=data.optInt("total");tr.addView(cell(if(total==0)"" else total.toString(),true,true));table.addView(tr)}
@@ -218,49 +346,87 @@ class OperationsActivity : Activity() {
     private fun supportGrid(data:JSONObject?):View{
         val wrap=column(surface).apply{setPadding(dp(1),dp(2),dp(1),dp(2));background=outlineBg(surface,6)};wrap.addView(txt("NHÂN SỰ ĐI HỖ TRỢ",11f,navy,true).apply{gravity=Gravity.CENTER;setPadding(0,0,0,dp(3))})
         val table=TableLayout(this).apply{isStretchAllColumns=true;isShrinkAllColumns=true}
-        fun cell(v:String,bold:Boolean=false,header:Boolean=false)=TextView(this).apply{text=v;textSize=8.8f;setTextColor(if(header)navy else ink);typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT;gravity=Gravity.CENTER;setPadding(dp(1),dp(3),dp(1),dp(3));maxLines=3;background=GradientDrawable().apply{setColor(if(header)Color.rgb(232,241,246) else Color.WHITE);setStroke(dp(1),line)}}
+        fun cell(v:String,bold:Boolean=false,header:Boolean=false)=TextView(this).apply{text=v;textSize=8.8f;setTextColor(if(header)navy else ink);typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT;gravity=Gravity.CENTER;setPadding(dp(1),dp(3),dp(1),dp(3));maxLines=3;background=GradientDrawable().apply{setColor(if(header)Color.rgb(232,241,246) else Color.WHITE)}}
         val h=TableRow(this);h.addView(cell("Thông tin công nhật",true,true));h.addView(cell("Số lượng",true,true));table.addView(h)
         val rows=data?.optJSONArray("rows")?:JSONArray();for(i in 0 until rows.length()){val x=rows.optJSONObject(i)?:continue;val tr=TableRow(this);tr.addView(cell(x.optString("labor_type"),true));val q=x.optInt("quantity");tr.addView(cell(if(q==0)"" else q.toString()));table.addView(tr)}
         wrap.addView(table,matchWrap());return wrap
     }
 
+    private fun historyScreen(){
+        screenState="HISTORY";val root=baseRoot("LỊCH SỬ");val body=body();body.addView(info("◷ Lịch sử thao tác trên thiết bị này. Trạng thái cho biết request đã được server ACK hay chưa."));body.addView(gap(8));val a=AppHistory.items(this);if(a.length()==0)body.addView(info("Chưa có thao tác được ghi nhận."));for(i in 0 until a.length()){val x=a.optJSONObject(i)?:continue;val ok=x.optBoolean("synced");val at=java.text.SimpleDateFormat("dd/MM HH:mm:ss",java.util.Locale.US).format(java.util.Date(x.optLong("at")));body.addView(listCard((if(ok)"✓ " else "! ")+AppHistory.label(x.optString("action")),"$at • ${if(ok)"ĐÃ ĐỒNG BỘ" else "CHƯA ĐỒNG BỘ"}${if(x.optString("detail").isBlank())"" else " • ${x.optString("detail")}"}"));body.addView(gap(6))};attach(root,body)
+    }
+
+    private fun syncScreen(){
+        screenState="SYNC";val root=baseRoot("ĐỒNG BỘ");val body=body();val state=info("↻ Đang đọc trạng thái kết nối...");body.addView(state,matchWrap());body.addView(gap(8));val detailsBox=column(bg);body.addView(detailsBox,matchWrap());api.call("sync_status"){r->runOnUiThread{detailsBox.removeAllViews();if(handleAuth(r))return@runOnUiThread;if(r.ok){val j=r.json?:JSONObject();state.text="✓ Kết nối API: Online";detailsBox.addView(details(listOf("Mạng / API" to "Online","Server revision" to j.optLong("server_seq").toString(),"Master revision" to j.optLong("master_revision").toString(),"Cache máy" to MasterDataCache.revision(this).toString(),"Log local chờ ACK" to LocalLogManager.pendingCount(this).toString(),"Chế độ" to j.optString("mode","APP_GSHEET"),"Kênh app" to "${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}","Service mở rộng" to "Chưa cấu hình")))}else{state.text="! Kết nối API: Offline";detailsBox.addView(info("App giữ dữ liệu local cần thiết và sẽ thử lại khi trở lại foreground."))}}};attach(root,body)
+    }
+
     private fun settingsScreen(){
-        screenState = "SETTINGS"
-        val root=baseRoot("CÀI ĐẶT");val body=body();body.addView(section("Tài khoản"));body.addView(listCard("$name • ${roleText(role)}","Tài khoản: $login${if(position.isBlank())"" else " • Vị trí: $position"}"));body.addView(gap(7));body.addView(primary("ĐỔI MẬT KHẨU",navy){changePasswordDialog()},matchWrap());if(isAdmin()){body.addView(gap(7));body.addView(primary("QUẢN LÝ TÀI KHOẢN",blue){accountManager()},matchWrap())};body.addView(section("Đồng bộ / dữ liệu"));val sync=info("Đang đọc trạng thái Google Sheet...");body.addView(sync,matchWrap());api.call("sync_status"){r->runOnUiThread{if(r.ok){val j=r.json?:JSONObject();sync.text="Google Sheet rev ${j.optLong("server_seq")} • Master rev ${j.optLong("master_revision")} • cache máy rev ${MasterDataCache.revision(this@OperationsActivity)}"}else sync.text="Không đọc được trạng thái Google Sheet"}};body.addView(section("Cập nhật"));body.addView(info("${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}\nTự kiểm tra phiên bản mới: BẬT. App kiểm tra khi mở/foreground và tự hiện thông báo cập nhật."));body.addView(section("Nhật ký"));body.addView(primary("GỬI BÁO LỖI / CHẨN ĐOÁN",teal){sendDiagnostic()},matchWrap());body.addView(section("Thiết bị"));body.addView(info("Android ${Build.VERSION.RELEASE} • ${Build.MANUFACTURER} ${Build.MODEL}"));body.addView(gap(14));body.addView(primary("ĐĂNG XUẤT",red){api.call("logout"){runOnUiThread{api.clearSession();finishAffinity()}}},matchWrap());attach(root,body)
+        screenState="SETTINGS";val root=baseRoot("CÀI ĐẶT");val body=body();body.addView(section("Tài khoản"));body.addView(listCard("$name • ${roleText(role)}","Tài khoản: $login${if(position.isBlank())"" else " • Vị trí: $position"}\nMail reset: ${email.ifBlank{"Chưa cấu hình"}}"));body.addView(gap(7))
+        val accountButtons=row(bg);val passBtn=primary("ĐỔI MẬT KHẨU",navy){changePasswordDialog()}.apply{textSize=9.6f;setSingleLine(true)};val mailBtn=primary("ĐỔI MAIL",teal){changeEmailDialog()}.apply{textSize=9.6f;setSingleLine(true)};accountButtons.addView(passBtn,LinearLayout.LayoutParams(0,dp(46),1f).apply{marginEnd=dp(3)});accountButtons.addView(mailBtn,LinearLayout.LayoutParams(0,dp(46),1f).apply{marginStart=dp(3)});body.addView(accountButtons,matchWrap())
+        if(isAdmin()){body.addView(gap(7));body.addView(primary("◉ QUẢN LÝ TÀI KHOẢN",blue){accountManager()},matchWrap())}
+        body.addView(section("Giao diện"));body.addView(themePicker(),matchWrap())
+        body.addView(section("Đồng bộ / dữ liệu"));body.addView(info("↻ Chi tiết kết nối, revision và log chờ ACK nằm ở tab Đồng bộ."))
+        body.addView(section("Cập nhật"));body.addView(info("⬆ ${BuildConfig.CHANNEL} • ${BuildConfig.VERSION_NAME}\nTự kiểm tra phiên bản mới khi mở/foreground: BẬT."))
+        body.addView(section("Nhật ký"));body.addView(primary("▤ GỬI BÁO LỖI / CHẨN ĐOÁN",teal){sendDiagnostic()},matchWrap())
+        body.addView(section("Thiết bị"));body.addView(info("▣ Android ${Build.VERSION.RELEASE} • ${Build.MANUFACTURER} ${Build.MODEL}"));body.addView(gap(14));body.addView(primary("ĐĂNG XUẤT",red){api.call("logout"){runOnUiThread{api.clearSession();finishAffinity()}}},matchWrap());attach(root,body)
     }
-
-    private fun changePasswordDialog(){
-        val box=column(surface).apply{setPadding(dp(8),0,dp(8),0)};val current=input("Mật khẩu hiện tại",true);val next=input("Mật khẩu mới (tối thiểu 8 ký tự)",true);val confirm=input("Nhập lại mật khẩu mới",true);box.addView(current);box.addView(gap(7));box.addView(next);box.addView(gap(7));box.addView(confirm);AlertDialog.Builder(this).setTitle("Đổi mật khẩu").setView(box).setNegativeButton("Hủy",null).setPositiveButton("CẬP NHẬT"){_,_->if(next.text.toString()!=confirm.text.toString()){showError("Mật khẩu xác nhận không khớp.");return@setPositiveButton};api.call("change_password",JSONObject().put("current_password",current.text.toString()).put("new_password",next.text.toString())){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Đổi mật khẩu thất bại")else toast("Đã đổi mật khẩu")}}}.show()
-    }
-
-    private fun sendDiagnostic(){LocalLogManager.sendManualReport(this,api,module,syncText?.text?.toString().orEmpty()){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không gửi được báo lỗi")else AlertDialog.Builder(this).setTitle("Đã gửi").setMessage("Báo lỗi thủ công đã được lưu đúng thư mục BÁO LỖI THỦ CÔNG.").setPositiveButton("OK",null).show()}}}
+    private fun themePicker()=row(surface).apply{gravity=Gravity.CENTER;setPadding(dp(5),dp(7),dp(5),dp(7));val selected=ThemeManager.selectedIndex(this@OperationsActivity);ThemeManager.swatches().forEachIndexed{i,c->val sw=TextView(this@OperationsActivity).apply{text=if(i==selected)"✓" else "";textSize=16f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;gravity=Gravity.CENTER;background=round(c,8);setOnClickListener{ThemeManager.select(this@OperationsActivity,i);recreate()}};addView(sw,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginStart=dp(2);marginEnd=dp(2)})}}
+    private fun changePasswordDialog(){val box=column(surface).apply{setPadding(dp(8),0,dp(8),0)};val current=input("Mật khẩu hiện tại",true);val next=input("Mật khẩu mới (tối thiểu 8 ký tự)",true);val confirm=input("Nhập lại mật khẩu mới",true);box.addView(current);box.addView(gap(7));box.addView(next);box.addView(gap(7));box.addView(confirm);AlertDialog.Builder(this).setTitle("Đổi mật khẩu").setView(box).setNegativeButton("Hủy",null).setPositiveButton("CẬP NHẬT"){_,_->if(next.text.toString()!=confirm.text.toString()){showError("Mật khẩu xác nhận không khớp.");return@setPositiveButton};api.call("change_password",JSONObject().put("current_password",current.text.toString()).put("new_password",next.text.toString())){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Đổi mật khẩu thất bại")else TopNotice.show(this,"Đã đổi mật khẩu.",TopNotice.Kind.SUCCESS)}}}.show()}
+    private fun changeEmailDialog(){val value=input("Địa chỉ mail nhận reset mật khẩu",false).apply{setText(email)};AlertDialog.Builder(this).setTitle("Đổi mail").setView(value).setNegativeButton("Hủy",null).setPositiveButton("CẬP NHẬT"){_,_->val next=value.text.toString().trim();api.call("change_email",JSONObject().put("email",next)){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không đổi được mail")else{email=r.json?.optJSONObject("account")?.optString("email",next)?:next;TopNotice.show(this,"Đã cập nhật mail nhận reset.",TopNotice.Kind.SUCCESS);settingsScreen()}}}}.show()}
+    private fun sendDiagnostic(){AlertDialog.Builder(this).setTitle("Gửi log thủ công?").setMessage("Gửi gói chẩn đoán hiện tại lên hệ thống?").setNegativeButton("NO",null).setPositiveButton("YES"){_,_->LocalLogManager.sendManualReport(this,api,module,syncText?.text?.toString().orEmpty()){r->runOnUiThread{if(handleAuth(r))return@runOnUiThread;if(!r.ok)showError(r.error?:"Không gửi được báo lỗi")else TopNotice.show(this,"Đã gửi log và nhận ACK; file local đã được xóa.",TopNotice.Kind.SUCCESS)}}}.show()}
 
     private fun accountManager(){
         screenState = "ACCOUNT_MANAGER"
-        val root=baseRoot("QUẢN LÝ TÀI KHOẢN");val body=body();body.addView(primary("TẠO TÀI KHOẢN",green){accountCreateDialog()},matchWrap());body.addView(gap(10));val box=column(bg);body.addView(box,matchWrap());api.call("account_list"){r->runOnUiThread{box.removeAllViews();if(handleAuth(r))return@runOnUiThread;if(!r.ok){box.addView(info(r.error?:"Lỗi"));return@runOnUiThread};val a=r.json?.optJSONArray("items")?:JSONArray();for(i in 0 until a.length()){val x=a.optJSONObject(i)?:continue;val card=column(surface).apply{setPadding(dp(12),dp(10),dp(12),dp(10));background=outlineBg(surface,8);addView(txt("${x.optString("login_id")} • ${x.optString("display_name")}",13f,navy,true));addView(txt("${x.optString("role")} • ${x.optString("status")}",10f,muted,false));if(x.optString("login_id")!=login){addView(gap(6));val newStatus=if(x.optString("status")=="ACTIVE")"DISABLED" else "ACTIVE";addView(smallButton(if(newStatus=="DISABLED")"VÔ HIỆU HÓA" else "KÍCH HOẠT",if(newStatus=="DISABLED")red else green).apply{setOnClickListener{api.call("account_status",JSONObject().put("login_id",x.optString("login_id")).put("status",newStatus)){rr->runOnUiThread{if(!rr.ok)showError(rr.error?:"Lỗi")else accountManager()}}}})}};box.addView(card,matchWrap());box.addView(gap(7))}}};attach(root,body)
+        val root=baseRoot("QUẢN LÝ TÀI KHOẢN");val body=body();body.addView(primary("TẠO TÀI KHOẢN",green){accountCreateDialog()},matchWrap());body.addView(gap(10));val box=column(bg);body.addView(box,matchWrap());api.call("account_list"){r->runOnUiThread{box.removeAllViews();if(handleAuth(r))return@runOnUiThread;if(!r.ok){box.addView(info(r.error?:"Lỗi"));return@runOnUiThread};val a=r.json?.optJSONArray("items")?:JSONArray();for(i in 0 until a.length()){val x=a.optJSONObject(i)?:continue;val card=column(surface).apply{setPadding(dp(12),dp(10),dp(12),dp(10));background=outlineBg(surface,8);addView(txt("${x.optString("login_id")} • ${x.optString("display_name")}",13f,navy,true));addView(txt("${x.optString("role")} • ${x.optString("status")} • ${x.optString("email")}",10f,muted,false));if(x.optString("login_id")!=login){addView(gap(6));val newStatus=if(x.optString("status")=="ACTIVE")"DISABLED" else "ACTIVE";addView(smallButton(if(newStatus=="DISABLED")"VÔ HIỆU HÓA" else "KÍCH HOẠT",if(newStatus=="DISABLED")red else green).apply{setOnClickListener{api.call("account_status",JSONObject().put("login_id",x.optString("login_id")).put("status",newStatus)){rr->runOnUiThread{if(!rr.ok)showError(rr.error?:"Lỗi")else accountManager()}}}})}};box.addView(card,matchWrap());box.addView(gap(7))}}};attach(root,body)
     }
 
     private fun accountCreateDialog(){
-        val box=column(surface).apply{setPadding(dp(8),0,dp(8),0)};val loginInput=input("Tài khoản",false);val display=input("Tên hiển thị",false);val roles=if(isSuper())arrayOf("USER","ADMIN")else arrayOf("USER");val roleSp=spinner(roles);val pass=input("Mật khẩu ban đầu (>=8 ký tự)",true);box.addView(loginInput);box.addView(gap(6));box.addView(display);box.addView(gap(6));box.addView(roleSp);box.addView(gap(6));box.addView(pass);AlertDialog.Builder(this).setTitle("Tạo tài khoản").setView(box).setNegativeButton("Hủy",null).setPositiveButton("TẠO"){_,_->api.call("account_upsert",JSONObject().put("login_id",loginInput.text.toString().trim()).put("display_name",display.text.toString().trim()).put("role",roleSp.selectedItem.toString()).put("password",pass.text.toString())){r->runOnUiThread{if(!r.ok)showError(r.error?:"Không tạo được tài khoản")else accountManager()}}}.show()
+        val box=column(surface).apply{setPadding(dp(8),0,dp(8),0)};val loginInput=input("Tài khoản",false);val display=input("Tên hiển thị",false);val mail=input("Mail nhận reset",false).apply{setText("tam95.supra@gmail.com")};val roles=if(isSuper())arrayOf("USER","ADMIN")else arrayOf("USER");val roleSp=spinner(roles);val pass=input("Mật khẩu ban đầu (>=8 ký tự)",true);box.addView(loginInput);box.addView(gap(6));box.addView(display);box.addView(gap(6));box.addView(mail);box.addView(gap(6));box.addView(roleSp);box.addView(gap(6));box.addView(pass);AlertDialog.Builder(this).setTitle("Tạo tài khoản").setView(box).setNegativeButton("Hủy",null).setPositiveButton("TẠO"){_,_->api.call("account_upsert",JSONObject().put("login_id",loginInput.text.toString().trim()).put("display_name",display.text.toString().trim()).put("email",mail.text.toString().trim()).put("role",roleSp.selectedItem.toString()).put("password",pass.text.toString())){r->runOnUiThread{if(!r.ok)showError(r.error?:"Không tạo được tài khoản")else accountManager()}}}.show()
     }
 
     private fun refreshMasterCache(){cacheApi.call("master_snapshot"){r->if(r.ok&&r.json!=null)MasterDataCache.save(applicationContext,r.json)}}
     private fun navigateBack(){when(screenState){"LABOR_CONTEXT"->laborHome();"RESOURCE_EDITOR"->resourceHome();"ACCOUNT_MANAGER"->settingsScreen();else->finish()}}
-    private fun simpleMessage(title:String,message:String){val root=baseRoot(title);val body=body();body.addView(info(message));attach(root,body)}
+    private fun simpleMessage(title:String,message:String){val root=baseRoot(title);val body=body();body.addView(info("ⓘ $message"));attach(root,body)}
     private fun baseRoot(title:String)=column(bg).apply{addView(appBar(title))}
-    private fun body()=column(bg).apply{setPadding(dp(15),dp(13),dp(15),dp(58))}
+    private fun body()=column(bg).apply{setPadding(dp(12),dp(11),dp(12),dp(88))}
     private fun attach(root:LinearLayout,body:LinearLayout){root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setContentView(host(root))}
-    private fun appBar(title:String)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(9),dp(7),dp(10),dp(7));addView(txt("‹",31f,Color.WHITE,false).apply{gravity=Gravity.CENTER;setOnClickListener{navigateBack()}},size(dp(42),dp(45)));addView(txt(title,17f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("● SYNC",9.5f,Color.rgb(218,229,248),true).apply{gravity=Gravity.CENTER;setPadding(dp(8),dp(5),dp(8),dp(5))};addView(syncText,size(dp(86),dp(36)))}
+    private fun appBar(title:String)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(6),dp(8),dp(6));addView(txt("‹",30f,Color.WHITE,false).apply{gravity=Gravity.CENTER;setOnClickListener{navigateBack()}},size(dp(40),dp(44)));addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("↻ Đang nối",8.8f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(4),dp(4),dp(4),dp(4))};addView(syncText,size(dp(102),dp(40)))}
+    private fun activeTab()=when(module){"STAFF"->"STAFF";"HISTORY"->"HISTORY";"SYNC"->"SYNC";"SETTINGS"->"SETTINGS";else->"BUSINESS"}
+    private fun bottomNav(): LinearLayout = row(surface).apply {
+        gravity=Gravity.CENTER
+        setPadding(dp(3),dp(3),dp(3),dp(3))
+        background=GradientDrawable().apply { setColor(surface); setStroke(dp(1),line) }
+        val active=activeTab()
+        val items=listOf(
+            Triple("▦","Nghiệp vụ","BUSINESS"),
+            Triple("◉","Nhân sự","STAFF"),
+            Triple("◷","Lịch sử","HISTORY"),
+            Triple("↻","Đồng bộ","SYNC"),
+            Triple("⚙","Cài đặt","SETTINGS")
+        )
+        items.forEach { item ->
+            val cell=column(surface).apply {
+                gravity=Gravity.CENTER
+                addView(txt(item.first,17f,if(item.third==active)teal else muted,true).apply { gravity=Gravity.CENTER })
+                addView(txt(item.second,8.4f,if(item.third==active)teal else muted,item.third==active).apply { gravity=Gravity.CENTER; maxLines=1 })
+                setOnClickListener { _ -> navigateTab(item.third) }
+            }
+            addView(cell,LinearLayout.LayoutParams(0,-1,1f))
+        }
+    }
+
+    private fun navigateTab(target:String){if(target==activeTab())return;if(target=="BUSINESS"){finish();return};startActivity(Intent(this,OperationsActivity::class.java).apply{putExtra("module",target);putExtra("login",login);putExtra("name",name);putExtra("role",role);putExtra("position",position);putExtra("email",email)});finish()}
 
     private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}
-    private fun showError(raw:String){val msg=when{raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"MNV đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"MNV không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};AlertDialog.Builder(this).setTitle("Không thực hiện được").setMessage(msg).setPositiveButton("OK",null).show()}
+    private fun showError(raw:String){val msg=when{raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"MNV đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"MNV không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("EMAIL_INVALID")->"Địa chỉ mail không hợp lệ.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy nhân sự.";raw.contains("STAFF_ACTIVE_SESSION")->"Nhân sự đang có phiên ACTIVE, chưa thể xóa.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}
 
     private fun employeeCard(e:JSONObject)=column(surface).apply{setPadding(dp(13),dp(11),dp(13),dp(11));background=outlineBg(surface,9);addView(txt("${e.optString("mnv")} • ${e.optString("full_name")}",15f,navy,true));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}",10.5f,ink,false));addView(txt("${dash(e.optString("department"))} • Site ${dash(e.optString("site"))} • Kho ${dash(e.optString("warehouse"))}",10f,muted,false))}
     private fun listCard(title:String,sub:String)=column(surface).apply{setPadding(dp(12),dp(10),dp(12),dp(10));background=outlineBg(surface,8);addView(txt(title,12.5f,ink,true));addView(gap(2));addView(txt(sub,10f,muted,false))}
     private fun metric(title:String,value:String,color:Int)=column(surface).apply{setPadding(dp(13),dp(11),dp(13),dp(11));background=outlineBg(surface,9);addView(txt(title,11f,color,true));addView(gap(3));addView(txt(value,13f,ink,true))}
     private fun jsonMapCard(title:String,j:JSONObject?)=column(surface).apply{setPadding(dp(13),dp(10),dp(13),dp(10));background=outlineBg(surface,9);addView(txt(title,11f,navy,true));if(j==null||j.length()==0)addView(txt("Chưa có dữ liệu",10f,muted,false))else{val keys=j.keys();while(keys.hasNext()){val k=keys.next();addView(txt("$k: ${j.optInt(k)}",10.5f,ink,false))}}}
     private fun details(items:List<Pair<String,String>>)=column(surface).apply{setPadding(dp(13),dp(9),dp(13),dp(9));background=outlineBg(surface,9);items.forEach{(k,v)->addView(row(surface).apply{addView(txt(k,10.3f,muted,false),LinearLayout.LayoutParams(0,-2,.45f));addView(txt(if(v.isBlank())"—" else v,10.5f,ink,true).apply{gravity=Gravity.END},LinearLayout.LayoutParams(0,-2,.55f));setPadding(0,dp(3),0,dp(3))})}}
-    private fun section(v:String)=txt(v,13.5f,navy,true).apply{setPadding(0,dp(12),0,dp(3))}
+    private fun section(v:String)=txt("${sectionIcon(v)}  $v",13.5f,navy,true).apply{setPadding(0,dp(12),0,dp(3))}
+    private fun sectionIcon(v:String)=when{v.contains("Tài khoản",true)->"♙";v.contains("Giao diện",true)->"◈";v.contains("Đồng bộ",true)->"↻";v.contains("Cập nhật",true)->"⬆";v.contains("Nhật ký",true)->"▤";v.contains("Thiết bị",true)->"▣";else->"◆"}
     private fun status(v:String,fg:Int,c:Int)=txt(v,11.3f,fg,true).apply{gravity=Gravity.CENTER;setPadding(dp(10),dp(9),dp(10),dp(9));background=round(c,8)}
     private fun info(v:String)=txt(v,10.3f,muted,false).apply{setPadding(dp(11),dp(9),dp(11),dp(9));background=outlineBg(Color.rgb(244,247,251),8)}
     private fun mnvInput(h:String)=input(h,false).apply{setSingleLine(true);inputType=InputType.TYPE_CLASS_NUMBER;keyListener=DigitsKeyListener.getInstance("0123456789");imeOptions=EditorInfo.IME_ACTION_DONE}
@@ -272,7 +438,7 @@ class OperationsActivity : Activity() {
     private fun spinner(items:Array<String>)=Spinner(this).apply{adapter=ArrayAdapter(this@OperationsActivity,android.R.layout.simple_spinner_dropdown_item,items);setPadding(dp(7),dp(3),dp(7),dp(3));minimumHeight=dp(46);background=outline()}
     private fun primary(t:String,c:Int,click:()->Unit)=Button(this).apply{text=t;textSize=12.2f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;isAllCaps=false;minHeight=dp(48);background=round(c,7);setOnClickListener{click()}}
     private fun smallButton(t:String,c:Int)=Button(this).apply{text=t;textSize=9.5f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;isAllCaps=false;background=round(c,6);setPadding(dp(3),0,dp(3),0)}
-    private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(27)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(23),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val t=i.systemWindowInsetTop;@Suppress("DEPRECATION")val b=i.systemWindowInsetBottom;top=t;bottom=b};v.setPadding(0,top+dp(7),0,bottom+dp(3));i};root.requestApplyInsets();return root}
+    private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(82)});root.addView(bottomNav(),FrameLayout.LayoutParams(-1,dp(60),Gravity.BOTTOM).apply{bottomMargin=dp(20)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i};root.requestApplyInsets();return root}
     private fun jsonStrings(a:JSONArray?):MutableList<String>{val out=mutableListOf<String>();if(a!=null)for(i in 0 until a.length()){val v=a.optString(i);if(v.isNotBlank())out.add(v)};return out}
     private fun selectByValue(sp:Spinner,values:List<String>,target:String){val i=values.indexOf(target);if(i>=0)sp.setSelection(i)}
     private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Bangkok")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}catch(_:Throwable){v}}
@@ -290,6 +456,6 @@ class OperationsActivity : Activity() {
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun size(w:Int,h:Int)=ViewGroup.LayoutParams(w,h)
     private fun matchWrap()=LinearLayout.LayoutParams(-1,-2)
-    private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_SHORT).show()
+    private fun toast(s:String)=TopNotice.show(this,s,TopNotice.Kind.SUCCESS)
     companion object{private const val FOOTER="Copyright 2026 - tamnv2 - Chuyên viên Pick Pack 1291 - Supra DCHY"}
 }

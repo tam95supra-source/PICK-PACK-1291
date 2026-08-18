@@ -45,6 +45,7 @@ function doPost(e) {
     if (action === 'logout') return ppJson_(ppLogout_(auth));
     if (action === 'password_challenge') return ppJson_(ppPasswordChallenge_(auth));
     if (action === 'change_password') return ppJson_(ppChangePassword_(auth, body));
+    if (action === 'change_email') return ppJson_(ppWithLock_(function(){ return ppChangeEmail_(auth, body); }));
     if (action === 'employee_context') return ppJson_(ppEmployeeContext_(body));
     if (action === 'master_options') return ppJson_(ppMasterOptions_(body));
     if (action === 'master_snapshot') return ppJson_(ppMasterSnapshot_());
@@ -58,6 +59,8 @@ function doPost(e) {
     if (action === 'resource_list') return ppJson_(ppResourceList_());
     if (action === 'report_daily') return ppJson_(ppReportDaily_());
     if (action === 'staff_search') return ppJson_(ppStaffSearch_(body));
+    if (action === 'staff_upsert') return ppJson_(ppWithLock_(function(){ return ppStaffUpsert_(auth, body); }));
+    if (action === 'staff_delete') return ppJson_(ppWithLock_(function(){ return ppStaffDelete_(auth, body); }));
     if (action === 'diagnostic_log') return ppJson_(ppDiagnosticLog_(auth, body));
     if (action === 'account_list') return ppJson_(ppAccountList_(auth));
     if (action === 'account_upsert') return ppJson_(ppWithLock_(function(){ return ppAccountUpsert_(auth, body); }));
@@ -415,7 +418,7 @@ function ppAdminRows_() {
   const sh=ppSheet_(PP.ADMIN), vals=sh.getDataRange().getDisplayValues(), out=[];
   for(let i=1;i<vals.length;i++){
     if(!String(vals[i][0]||'').trim())continue;
-    out.push({row:i+1,login_id:String(vals[i][0]||'').trim(),verifier:String(vals[i][1]||'').trim(),role:String(vals[i][2]||'USER').trim().toUpperCase(),display_name:String(vals[i][3]||vals[i][0]||'').trim(),position:String(vals[i][4]||'').trim(),status:String(vals[i][8]||'ACTIVE').trim().toUpperCase()||'ACTIVE'});
+    out.push({row:i+1,login_id:String(vals[i][0]||'').trim(),verifier:String(vals[i][1]||'').trim(),role:String(vals[i][2]||'USER').trim().toUpperCase(),display_name:String(vals[i][3]||vals[i][0]||'').trim(),position:String(vals[i][4]||'').trim(),email:String(vals[i][5]||PP.RESET_ADMIN_EMAIL).trim()||PP.RESET_ADMIN_EMAIL,status:String(vals[i][8]||'ACTIVE').trim().toUpperCase()||'ACTIVE'});
   }
   const raw=JSON.stringify(out);if(raw.length<90000)cache.put(key,raw,300);return out;
 }
@@ -428,14 +431,14 @@ function ppCredentialParts_(v){const p=ppVerifierParts_(v);if(p)return {algorith
 function ppResetPasswordValue_(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';let out='PP-';const bytes=ppRandom_(12);for(let i=0;i<10;i++){const n=(bytes[i]+256)%256;out+=chars.charAt(n%chars.length);}return out;}
 function ppResetKey_(password,salt){return ppB64u_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,Utilities.newBlob('PP_RESET_V1|'+salt+'|'+password).getBytes()));}
 function ppForgotPassword_(body){
-  const login=String(body.login_id||'').trim(),generic={ok:true,delivery:'ADMIN_EMAIL',message:'RESET_REQUEST_ACCEPTED'};
+  const login=String(body.login_id||'').trim(),generic={ok:true,delivery:'ACCOUNT_EMAIL',message:'RESET_REQUEST_ACCEPTED'};
   if(!login)return generic;
   const rateKey='PP_RESET_RATE_'+ppSha256Hex_(login+'|'+ppDeviceId_(body)).slice(0,48),cache=CacheService.getScriptCache();if(cache.get(rateKey))return generic;
   const a=ppAccount_(login);cache.put(rateKey,'1',300);if(!a||a.status!=='ACTIVE')return generic;
   const password=ppResetPasswordValue_(),salt=ppB64u_(ppRandom_(16)),expires=Date.now()+2*60*60*1000,key=ppResetKey_(password,salt),resetVerifier='reset_sha256$'+expires+'$'+salt+'$'+key,sh=ppSheet_(PP.ADMIN),old=a.verifier;
   try{
     sh.getRange(a.row,2).setValue(resetVerifier);ppEnsureAdminHeaders_();sh.getRange(a.row,10).setValue('FORGOT_PASSWORD');sh.getRange(a.row,11).setValue(ppNowVisible_());ppClearActiveSessionForLogin_(a.login_id);ppBumpRevision_();ppBumpMasterRevision_();
-    MailApp.sendEmail({to:PP.RESET_ADMIN_EMAIL,subject:'[PICK PACK 1291] Mật khẩu mới - '+a.login_id,body:'Tài khoản: '+a.login_id+'\nTên: '+a.display_name+'\nQuyền: '+a.role+'\nMật khẩu mới: '+password+'\nHết hạn kích hoạt: 2 giờ.\n\nMật khẩu sẽ được nâng cấp sang PBKDF2 ngay lần đăng nhập đầu tiên.',htmlBody:'<b>PICK PACK 1291 - Đặt lại mật khẩu</b><br><br>Tài khoản: <b>'+a.login_id+'</b><br>Tên: '+a.display_name+'<br>Quyền: '+a.role+'<br>Mật khẩu mới: <b style="font-size:18px">'+password+'</b><br>Hết hạn kích hoạt: 2 giờ.<br><br>Mật khẩu sẽ được nâng cấp sang PBKDF2 ngay lần đăng nhập đầu tiên.'});
+    MailApp.sendEmail({to:(a.email||PP.RESET_ADMIN_EMAIL),subject:'[PICK PACK 1291] Mật khẩu mới - '+a.login_id,body:'Tài khoản: '+a.login_id+'\nTên: '+a.display_name+'\nQuyền: '+a.role+'\nMật khẩu mới: '+password+'\nHết hạn kích hoạt: 2 giờ.\n\nMật khẩu sẽ được nâng cấp sang PBKDF2 ngay lần đăng nhập đầu tiên.',htmlBody:'<b>PICK PACK 1291 - Đặt lại mật khẩu</b><br><br>Tài khoản: <b>'+a.login_id+'</b><br>Tên: '+a.display_name+'<br>Quyền: '+a.role+'<br>Mật khẩu mới: <b style="font-size:18px">'+password+'</b><br>Hết hạn kích hoạt: 2 giờ.<br><br>Mật khẩu sẽ được nâng cấp sang PBKDF2 ngay lần đăng nhập đầu tiên.'});
   }catch(err){try{sh.getRange(a.row,2).setValue(old);ppBumpRevision_();ppBumpMasterRevision_();}catch(_){}throw err;}
   return generic;
 }
@@ -452,7 +455,7 @@ function ppLogin_(body) {
     ppSheet_(PP.ADMIN).getRange(a.row,2).setValue(upgrade);ppEnsureAdminHeaders_();ppSheet_(PP.ADMIN).getRange(a.row,10).setValue(a.login_id);ppSheet_(PP.ADMIN).getRange(a.row,11).setValue(ppNowVisible_());ppBumpRevision_();ppBumpMasterRevision_();a=ppAccount_(login);
   }
   const session=ppBindSession_(a.login_id,ppDeviceId_(body)), token=ppMakeToken_(a,session);
-  return {ok:true,token:token,account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||''},session:{issued_at:session.issued_at,device_label:String(body._device_label||'').slice(0,120)}};
+  return {ok:true,token:token,account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||'',email:a.email||PP.RESET_ADMIN_EMAIL},session:{issued_at:session.issued_at,device_label:String(body._device_label||'').slice(0,120)}};
 }
 function ppPasswordChallenge_(auth) {
   const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:auth.login_id,purpose:'PASSWORD',challenge:challenge}),120); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
@@ -462,23 +465,40 @@ function ppChangePassword_(auth,body) {
   ppSheet_(PP.ADMIN).getRange(auth.row,2).setValue(newVerifier); ppEnsureAdminHeaders_(); ppSheet_(PP.ADMIN).getRange(auth.row,10).setValue(auth.login_id); ppSheet_(PP.ADMIN).getRange(auth.row,11).setValue(ppNowVisible_()); ppBumpRevision_(); ppBumpMasterRevision_();
   const fresh=ppAccount_(auth.login_id), session=ppActiveSession_(auth.login_id);
   const token=(fresh&&session&&session.session_id===auth._session_id&&session.device_id===auth._device_id)?ppMakeToken_(fresh,session):'';
-  return {ok:true,token:token,account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||''}:null};
+  return {ok:true,token:token,account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||'',email:fresh.email||PP.RESET_ADMIN_EMAIL}:null};
 }
 function ppAccountList_(auth) {
   if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
-  const items=ppAdminRows_().filter(function(x){return ppIsSuper_(auth)||x.role==='USER';}).map(function(x){return {login_id:x.login_id,role:x.role,display_name:x.display_name,status:x.status,failed_attempts:0,locked_until:null};}); return {ok:true,items:items};
+  const items=ppAdminRows_().filter(function(x){return ppIsSuper_(auth)||x.role==='USER';}).map(function(x){return {login_id:x.login_id,role:x.role,display_name:x.display_name,position:x.position||'',email:x.email||PP.RESET_ADMIN_EMAIL,status:x.status,failed_attempts:0,locked_until:null};});return {ok:true,items:items};
 }
 function ppAccountUpsert_(auth,body) {
   if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
-  const login=String(body.login_id||'').trim(),display=String(body.display_name||login).trim(),role=String(body.role||'USER').toUpperCase(),verifier=String(body.password_verifier||'').trim(),position=String(body.position||'').trim(); if(!login||['USER','ADMIN'].indexOf(role)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'}; if(!ppIsSuper_(auth)&&role!=='USER')return {ok:false,error:'FORBIDDEN'};
-  const old=ppAccount_(login); if(old&&(old.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&old.role!=='USER')))return {ok:false,error:'FORBIDDEN'}; if(!old&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'}; if(verifier&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};
-  ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);
-  if(old){sh.getRange(old.row,1).setValue(login);if(verifier)sh.getRange(old.row,2).setValue(verifier);sh.getRange(old.row,3).setValue(role.toLowerCase());sh.getRange(old.row,4).setValue(display);if(position)sh.getRange(old.row,5).setValue(position);sh.getRange(old.row,9).setValue('ACTIVE');sh.getRange(old.row,10).setValue(auth.login_id);sh.getRange(old.row,11).setValue(ppNowVisible_());}
-  else {sh.appendRow([login,verifier,role.toLowerCase(),display,position,'','','','ACTIVE',auth.login_id,ppNowVisible_()]);}
-  ppBumpRevision_(); ppBumpMasterRevision_(); return {ok:true};
+  const login=String(body.login_id||'').trim(),display=String(body.display_name||login).trim(),role=String(body.role||'USER').toUpperCase(),verifier=String(body.password_verifier||'').trim(),position=String(body.position||'').trim(),email=String(body.email||'').trim()||PP.RESET_ADMIN_EMAIL;
+  if(!login||['USER','ADMIN'].indexOf(role)<0||!ppEmailValid_(email))return {ok:false,error:'ACCOUNT_FIELDS_INVALID'};if(!ppIsSuper_(auth)&&role!=='USER')return {ok:false,error:'FORBIDDEN'};
+  const old=ppAccount_(login);if(old&&(old.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&old.role!=='USER')))return {ok:false,error:'FORBIDDEN'};if(!old&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};if(verifier&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};
+  ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);
+  if(old){sh.getRange(old.row,1).setValue(login);if(verifier)sh.getRange(old.row,2).setValue(verifier);sh.getRange(old.row,3).setValue(role.toLowerCase());sh.getRange(old.row,4).setValue(display);if(position)sh.getRange(old.row,5).setValue(position);sh.getRange(old.row,6).setValue(email);sh.getRange(old.row,9).setValue('ACTIVE');sh.getRange(old.row,10).setValue(auth.login_id);sh.getRange(old.row,11).setValue(ppNowVisible_());}
+  else{sh.appendRow([login,verifier,role.toLowerCase(),display,position,email,'','','ACTIVE',auth.login_id,ppNowVisible_()]);}
+  ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
 }
 function ppAccountStatus_(auth,body) {
-  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'}; const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),t=ppAccount_(login); if(!t||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'}; if(t.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&t.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'}; ppEnsureAdminHeaders_(); const sh=ppSheet_(PP.ADMIN);sh.getRange(t.row,9).setValue(status);sh.getRange(t.row,10).setValue(auth.login_id);sh.getRange(t.row,11).setValue(ppNowVisible_());if(status==='DISABLED')ppClearActiveSessionForLogin_(login);ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};const login=String(body.login_id||'').trim(),status=String(body.status||'').toUpperCase(),target=ppAccount_(login);if(!target||['ACTIVE','DISABLED'].indexOf(status)<0)return {ok:false,error:'ACCOUNT_FIELDS_INVALID'};if(target.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&target.role!=='USER')||login===auth.login_id)return {ok:false,error:'FORBIDDEN'};ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);sh.getRange(target.row,9).setValue(status);sh.getRange(target.row,10).setValue(auth.login_id);sh.getRange(target.row,11).setValue(ppNowVisible_());if(status==='DISABLED')ppClearActiveSessionForLogin_(login);ppBumpRevision_();ppBumpMasterRevision_();return {ok:true};
+}
+function ppEmailValid_(email){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email||''))&&String(email||'').length<=180;}
+function ppChangeEmail_(auth,body){
+  const email=String(body.email||'').trim();if(!ppEmailValid_(email))return {ok:false,error:'EMAIL_INVALID'};ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);sh.getRange(auth.row,6).setValue(email);sh.getRange(auth.row,10).setValue(auth.login_id);sh.getRange(auth.row,11).setValue(ppNowVisible_());ppBumpRevision_();ppBumpMasterRevision_();const fresh=ppAccount_(auth.login_id),session=ppActiveSession_(auth.login_id);const token=(fresh&&session&&session.session_id===auth._session_id&&session.device_id===auth._device_id)?ppMakeToken_(fresh,session):'';return {ok:true,token:token,account:fresh?{login_id:fresh.login_id,role:fresh.role,display_name:fresh.display_name,position:fresh.position||'',email:fresh.email||PP.RESET_ADMIN_EMAIL}:null};
+}
+function ppMasterMutationSeen_(eventId){if(!eventId)return false;return !!PropertiesService.getScriptProperties().getProperty('PP_MASTER_EVT_'+ppSha256Hex_(eventId).slice(0,32));}
+function ppMarkMasterMutation_(eventId){PropertiesService.getScriptProperties().setProperty('PP_MASTER_EVT_'+ppSha256Hex_(eventId).slice(0,32),ppNowIso_());}
+function ppStaffUpsert_(auth,body){
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};const eventId=String(body.event_id||'').trim(),mnv=String(body.mnv||'').trim(),full=String(body.full_name||'').trim();if(!eventId||!mnv||!full)return {ok:false,error:'STAFF_FIELDS_INVALID'};if(ppMasterMutationSeen_(eventId))return {ok:true,idempotent:true};
+  const sh=ppSheet_(PP.STAFF),vals=sh.getDataRange().getDisplayValues();let row=0;for(let i=1;i<vals.length;i++){if(String(vals[i][0]||'').trim()===mnv){row=i+1;break;}}
+  const data=[mnv,full,String(body.phone||'').trim(),String(body.main_position||'').trim(),String(body.supplier||'').trim(),String(body.department||'').trim(),String(body.site||'').trim(),String(body.warehouse||'').trim(),String(body.start_date||'').trim(),String(body.note||'').trim(),auth.login_id,ppNowVisible_()];
+  if(row){sh.getRange(row,1,1,12).setValues([data]);}else{const target=sh.getLastRow()+1;if(target>2)sh.getRange(target-1,1,1,12).copyTo(sh.getRange(target,1,1,12),SpreadsheetApp.CopyPasteType.PASTE_FORMAT,false);sh.getRange(target,1,1,12).setValues([data]);}
+  ppMarkMasterMutation_(eventId);const rev=ppBumpRevision_();const master=ppBumpMasterRevision_();return {ok:true,result:{event_id:eventId,revision:rev,master_revision:master}};
+}
+function ppStaffDelete_(auth,body){
+  if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};const eventId=String(body.event_id||'').trim(),mnv=String(body.mnv||'').trim();if(!eventId||!mnv)return {ok:false,error:'STAFF_FIELDS_INVALID'};if(ppMasterMutationSeen_(eventId))return {ok:true,idempotent:true};const active=ppSessionMap_(ppBusinessVisible_())[mnv];if(active&&active.state==='ACTIVE')return {ok:false,error:'STAFF_ACTIVE_SESSION'};const sh=ppSheet_(PP.STAFF),vals=sh.getDataRange().getDisplayValues();let row=0;for(let i=1;i<vals.length;i++){if(String(vals[i][0]||'').trim()===mnv){row=i+1;break;}}if(!row)return {ok:false,error:'EMPLOYEE_NOT_FOUND'};sh.deleteRow(row);ppMarkMasterMutation_(eventId);const rev=ppBumpRevision_();const master=ppBumpMasterRevision_();return {ok:true,result:{event_id:eventId,revision:rev,master_revision:master}};
 }
 
 function ppAuthenticate_(body) {
@@ -513,7 +533,7 @@ function ppEnsureOperationalHeaders_() {
   const ra=ppSheet_(PP.RA); if(ra.getRange(1,20).getValue()!=='Event ID')ra.getRange(1,20,1,3).setValues([['Event ID','App action','App revision']]);
   const lb=ppSheet_(PP.LABOR); if(lb.getRange(1,20).getValue()!=='Event ID')lb.getRange(1,20,1,3).setValues([['Event ID','Finish Event ID','App revision']]); if(lb.getRange(1,23).getValue()!=='Khấu trừ nhân sự')lb.getRange(1,23).setValue('Khấu trừ nhân sự');
 }
-function ppEnsureAdminHeaders_(){const sh=ppSheet_(PP.ADMIN);if(sh.getRange(1,9).getValue()!=='Trạng thái tài khoản')sh.getRange(1,9,1,3).setValues([['Trạng thái tài khoản','Người cập nhật','Thời gian cập nhật']]);}
+function ppEnsureAdminHeaders_(){const sh=ppSheet_(PP.ADMIN);if(sh.getRange(1,6).getValue()!=='Mail')sh.getRange(1,6).setValue('Mail');if(sh.getRange(1,9).getValue()!=='Trạng thái tài khoản')sh.getRange(1,9,1,3).setValues([['Trạng thái tài khoản','Người cập nhật','Thời gian cập nhật']]);}
 function ppSyncStatus_(){return {ok:true,business_date:ppBusinessIso_(),server_seq:ppRevision_(),master_revision:ppMasterRevision_(),last_event_at:ppNowIso_(),projection_pending:0,mode:'APP_GSHEET'};}
 function ppDiagnosticLog_(auth,body) {
   const eventId=String(body.event_id||'').trim(); if(!eventId)return {ok:false,error:'EVENT_ID_REQUIRED'};
