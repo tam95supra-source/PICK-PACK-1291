@@ -51,9 +51,11 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/apply_s12_gas_patch.py
+          python3 tools/apply_s12_gas_health_patch.py
           grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
           grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
           grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
+          grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S12.js
           node --check /tmp/PICK_PACK_API_S12.js
           echo 'S12 GAS transform + syntax: PASS'
@@ -67,11 +69,11 @@ jobs:
           RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW"
           if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
-          RESP=$(printf '%s' "$GOOGLE_OAUTH_REFRESH_TOKEN" | curl -fsS https://oauth2.googleapis.com/token \
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
             --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token@-" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
             --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
           [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
@@ -143,7 +145,7 @@ jobs:
           OK=false
           for i in $(seq 1 15); do
             curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"health"}' > /tmp/h.json || true
-            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json; then OK=true; break; fi
+            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json && grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/h.json; then OK=true; break; fi
             sleep 4
           done
           [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
@@ -154,4 +156,4 @@ jobs:
           curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
           grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta.json; grep -q '"channel":"BETA"' /tmp/beta.json
           grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable.json; grep -q '"channel":"STABLE"' /tmp/stable.json
-          echo 'Live health + reset route + OTA channel isolation: PASS'
+          echo 'Live S12 health + reset route + OTA channel isolation: PASS'
