@@ -1,0 +1,3 @@
+confirmation=OWNER_LOCKED_M2_EXTERNAL_PREFLIGHT
+requested_by=owner
+beta=0.4.2-beta.19
