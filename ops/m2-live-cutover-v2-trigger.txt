@@ -1,0 +1,7 @@
+confirmation=OWNER_LOCKED_M2_CUTOVER
+target_version=0.4.2-beta.19
+target_version_code=25
+service_generation=m2-prod-20260819-001
+rollback_folder_id=1P7KM5b5D_P69OkyKdmLx0HbL3wRpg0yG
+requested_by=owner
+run=2026-08-19T05:51:00+07:00
