@@ -19,4 +19,6 @@ runpy.run_path(str(ROOT / "tools/apply_s11_compact_report_patch.py"), run_name="
 runpy.run_path(str(ROOT / "tools/apply_s12_real_pda_patch.py"), run_name="__main__")
 # Compile-only hotfix preserves helper functions that the S12 density block intentionally reuses.
 runpy.run_path(str(ROOT / "tools/apply_s12_compile_hotfix.py"), run_name="__main__")
-print(f"Applied S10 + S11 + S12 runtime patches in build workspace: {source}")
+# S13 enlarges scan/MNV entry and replaces device-local history with shared MNV session timelines.
+runpy.run_path(str(ROOT / "tools/apply_s13_shared_history_ui_patch.py"), run_name="__main__")
+print(f"Applied S10 + S11 + S12 + S13 runtime patches in build workspace: {source}")
