@@ -43,34 +43,20 @@ once(
 ''',
     'operational store fields',
 )
-
 once(
-    '''                lastConnected = status.connected
-                refreshHeaderConnection()
-                if(status.masterChanged || status.masterRevision != MasterDataCache.revision(this@OperationsActivity)) refreshMasterCache()
-                if (!status.connected || !status.changed) return
-                warmOperationalCaches(true)
-                if(module=="BUSINESS" && liveEmployeeMnv.isNotBlank()){ loadEmployee(liveEmployeeMnv); return }
-                when (screenState) {
-                    "LISTS" -> listsScreen()
-                    "REPORT" -> reportScreen()
-                }
-''',
-    '''                lastConnected = status.connected
-                refreshHeaderConnection()
+    '                refreshHeaderConnection()\n',
+    '''                refreshHeaderConnection()
                 if(status.connected && status.businessDate.isNotBlank() && status.retentionFloor.isNotBlank()) {
                     operationalSync.reconcile(status.businessDate,status.retentionFloor,status.retentionEpoch,status.dayRevisions)
                 }
-                if(status.masterChanged || status.masterRevision != MasterDataCache.revision(this@OperationsActivity)) refreshMasterCache()
-                if (!status.connected || !status.changed) return
-                if(module=="BUSINESS" && liveEmployeeMnv.isNotBlank()){ loadEmployee(liveEmployeeMnv); return }
-                when (screenState) {
-                    "LISTS" -> listsScreen()
-                }
 ''',
-    'revision listener local sync',
+    'sync manifest hook',
 )
-
+once(
+    '                warmOperationalCaches(true)\n',
+    '',
+    'remove revision screen warming',
+)
 once(
     '        if (api.token != null) { foregroundSync.start(); warmOperationalCaches(false) }\n',
     '        if (api.token != null) foregroundSync.start()\n',
