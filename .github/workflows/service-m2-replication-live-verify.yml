@@ -5,13 +5,18 @@ on:
     branches: [ agent/service-migration-m2 ]
     paths:
       - 'ops/m2-replication-live-verify-trigger.txt'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/m2-replication-live-verify-trigger.txt'
+      - '.github/workflows/service-m2-replication-live-verify.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: service-m2-replication-live-verify
+  group: service-m2-replication-live-verify-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -23,6 +28,7 @@ env:
 
 jobs:
   verify:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -90,8 +96,6 @@ jobs:
           Path('/tmp/wrangler.repverify.jsonc').write_text(s)
           PY
           TS=$(date -u +%Y-%m-%dT%H:%M:%S.000Z); EVENT="m2-replication-shadow-${GITHUB_RUN_ID}"; export EVENT
-          SQL="UPDATE authority_state SET authority_seq=authority_seq+1,updated_at='$TS' WHERE singleton_id=1 AND scope='STAGING_SHADOW'; INSERT INTO events(event_id,event_type,entity_type,entity_id,business_date,authority_epoch,authority_seq,service_generation,base_version,new_version,actor_id,actor_role,device_id,occurred_at,committed_at,payload_json,idempotency_key,origin,schema_version,checksum) SELECT '$EVENT','M1_SHADOW_PROBE','TEST','$EVENT',(SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 1),authority_epoch,authority_seq,service_generation,0,1,'M2_PREFLIGHT','SUPERADMIN','github-actions','$TS','$TS','{}','idem:$EVENT','SERVICE',1,'preflight' FROM authority_state WHERE singleton_id=1; INSERT INTO sheet_replication_outbox(event_id,status,next_attempt_at) VALUES('$EVENT','PENDING','$TS';"
-          # Use D1 auto-commit statements; remote D1 rejects explicit BEGIN/SAVEPOINT.
           npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.repverify.jsonc --command "UPDATE authority_state SET authority_seq=authority_seq+1,updated_at='$TS' WHERE singleton_id=1 AND scope='STAGING_SHADOW';" >/tmp/rep-update.txt
           npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.repverify.jsonc --command "INSERT INTO events(event_id,event_type,entity_type,entity_id,business_date,authority_epoch,authority_seq,service_generation,base_version,new_version,actor_id,actor_role,device_id,occurred_at,committed_at,payload_json,idempotency_key,origin,schema_version,checksum) SELECT '$EVENT','M1_SHADOW_PROBE','TEST','$EVENT',(SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 1),authority_epoch,authority_seq,service_generation,0,1,'M2_PREFLIGHT','SUPERADMIN','github-actions','$TS','$TS','{}','idem:$EVENT','SERVICE',1,'preflight' FROM authority_state WHERE singleton_id=1;" >/tmp/rep-event.txt
           npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.repverify.jsonc --command "INSERT INTO sheet_replication_outbox(event_id,status,next_attempt_at) VALUES('$EVENT','PENDING','$TS');" >/tmp/rep-outbox.txt
