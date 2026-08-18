@@ -55,9 +55,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/apply_s12_gas_patch.py
-          python3 tools/apply_s12_gas_health_patch.py
-          python3 tools/apply_s13_shared_history_gas_patch.py
+          if grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs; then
+            echo 'S12 report transform already present; skip.'
+          else
+            python3 tools/apply_s12_gas_patch.py
+          fi
+          if grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs; then
+            echo 'S12 health marker already present; skip.'
+          else
+            python3 tools/apply_s12_gas_health_patch.py
+          fi
+          if grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then
+            echo 'S13 shared history transform already present; skip.'
+          else
+            python3 tools/apply_s13_shared_history_gas_patch.py
+          fi
           grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
           grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
           grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
