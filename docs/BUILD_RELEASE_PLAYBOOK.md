@@ -1,7 +1,7 @@
 # BUILD / RELEASE PLAYBOOK — PICK PACK 1291
 
 Status: **CHỐT / authoritative operating procedure**  
-Updated: 2026-08-18 12:42 +07:00
+Updated: 2026-08-18 16:25 +07:00
 
 Purpose: minimize wall-clock time from source change to verified OTA **without weakening correctness, channel isolation, signer identity or business gates**.
 
@@ -29,11 +29,11 @@ Only these workflows are intended to remain permanent:
 2. `Release Preflight - Beta and Stable`
 3. `Deploy Current GAS`
 4. `Verify Google Apps Script Credentials`
-5. `Verify Beta OTA`
+5. `Verify OTA - Beta and Stable`
 
 Do **not** create observer/status/finalizer/OTA workflows per release. Do not write workflow status receipts to `main`.
 
-Permanent trigger files may be updated by automation when browser `workflow_dispatch` is not available. A trigger update is not a release artifact and must not contain secrets.
+Permanent trigger files may be updated when browser `workflow_dispatch` is not available. A trigger update is not a release artifact and must not contain secrets.
 
 ## 3. Tier A — App Fast Check
 
@@ -111,23 +111,25 @@ Release Preflight has two independent jobs running **in parallel**:
 - exact SDK fast path
 - Beta Release + Stable Release assemble
 - package/version validation
-- upload authoritative unsigned Beta artifact
-- optional fixed-signer validation when all signing secrets are ready
+- upload authoritative unsigned Beta/Stable artifacts
+- when signing secrets are configured, sign the exact validated artifacts in-run
+- verify the fixed signer identity in-run
+- upload signed Beta/Stable validation artifacts
 
 A final pass job succeeds only when both parallel branches pass.
 
 ### Build exactly once
 
-The unsigned Beta APK produced by successful Release Preflight is the **authoritative release candidate for that commit**.
+The unsigned APKs produced by successful Release Preflight are the **authoritative release candidates for that commit**. The signed artifacts must be derived from those exact validated bytes; no second release build is allowed before publish.
 
 After Preflight:
 
-- do not rebuild the APK before signing
-- do not run another release assemble merely to publish
-- download/reuse the exact artifact from the successful Preflight run
-- artifact includes release metadata tying it to commit/version
+- do not rebuild the APK before publish
+- reuse the exact signed Beta validation artifact from the successful Preflight run when automated signing is active
+- Stable signed artifact may be validated technically but is **not published** without explicit owner approval
+- artifacts include release metadata tying them to commit/version
 
-This removes duplicate release builds from the OTA path.
+This removes duplicate release builds and manual signing setup from the normal OTA path.
 
 ## 6. Android SDK / Gradle fast path
 
@@ -147,7 +149,7 @@ Gradle policy:
 
 Do not enable configuration-cache or other aggressive flags until a controlled Beta+Stable compatibility test proves them safe.
 
-## 7. Signing — current bottleneck and target state
+## 7. Signing — automated state confirmed
 
 Fixed signer SHA-256:
 
@@ -155,45 +157,58 @@ Fixed signer SHA-256:
 
 Never generate a replacement signer.
 
-### Target one-click state
-
-The long-term fastest path requires these four GitHub Secrets to be confirmed/configured:
+These four GitHub Secrets are now **confirmed configured and working**:
 
 - `ANDROID_SIGNING_KEY_B64`
 - `ANDROID_SIGNING_STORE_PASSWORD`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 - `ANDROID_SIGNING_ALIAS`
 
-When all four are ready, Release Preflight can sign the **same validated artifact** and verify the fixed signer in-run.
+Confirmed by successful `Release Preflight - Beta and Stable` for `0.4.2-beta.10`, where the runner:
 
-### Current state until secrets are configured
+1. received all four secrets,
+2. decoded the approved keystore only inside the ephemeral runner,
+3. signed the exact validated Beta and Stable release artifacts,
+4. verified the fixed signer SHA-256 on both,
+5. uploaded signed validation artifacts,
+6. deleted temporary keystore/password files in the cleanup step.
 
-The four signing secrets are not yet confirmed complete. Therefore:
+### Normal signing path from now on
 
-1. Download the exact unsigned artifact from the successful Preflight run.
-2. Use only the official encrypted signing recovery material already stored in the approved project Drive tree.
-3. Decrypt/sign in temporary assistant-controlled runtime; never print or commit material.
-4. Verify fixed signer SHA before upload.
-5. Delete decrypted material immediately.
+- Do **not** recreate signing secrets per release.
+- Do **not** ask the owner to rebuild/re-enter them for Beta versus Stable.
+- Release Preflight signs both channels from the same approved fixed identity.
+- Publish only the channel explicitly authorized for release.
+- Stable remains blocked by owner approval even though its signed validation artifact can be produced during Preflight.
 
-Do not build a temporary Apps Script signing bridge and do not create a temporary signing workflow for each release.
+### Emergency fallback only
 
-Signing recovery is the only remaining material source until owner-approved one-time secret configuration is completed.
+The official encrypted signing recovery material in the approved project Drive tree remains an emergency recovery source if GitHub signing secrets are ever lost/corrupted. It is **not** the normal release path anymore.
+
+If emergency recovery is required:
+
+1. reuse the exact validated unsigned artifact,
+2. decrypt/sign only in temporary assistant-controlled runtime,
+3. verify the fixed signer,
+4. delete plaintext signing material immediately.
+
+Do not create a temporary Apps Script signing bridge, replacement signing identity, unrelated external signing service or per-release signing workflow.
 
 ## 8. OTA publish — Beta fast path
 
-After Preflight PASS and signing:
+After Preflight PASS:
 
-1. Compute signed APK SHA-256.
-2. Upload checksum and APK directly to `BẢN THỬ NGHIỆM` through the approved Google Drive connector/path.
-3. Do not rebuild.
-4. Update permanent `ops/beta-ota-verify-trigger.txt` with:
+1. Download/reuse the exact **signed Beta validation APK** from the successful Preflight run.
+2. Compute/confirm the signed APK SHA-256.
+3. Upload checksum and APK directly to `BẢN THỬ NGHIỆM` through the approved Google Drive connector/path.
+4. Do not rebuild or re-sign.
+5. Update permanent `ops/beta-ota-verify-trigger.txt` with:
    - previous Beta version
    - target Beta version
    - expected signed APK SHA-256
-5. Permanent `Verify Beta OTA` performs the E2E gates.
+6. Permanent `Verify OTA - Beta and Stable` performs the E2E Beta gates.
 
-`Verify Beta OTA` must check:
+The Beta OTA gate must check:
 
 - previous Beta discovers target Beta
 - GAS reports `source=GOOGLE_DRIVE`, `channel=BETA`
@@ -210,12 +225,13 @@ No one-shot OTA verifier or status observer is needed.
 
 ## 9. Stable release
 
-Stable uses the same safety principles but is never promoted merely because builds pass.
+Stable uses the same safety principles but is never promoted merely because builds/signing pass.
 
 Required before Stable publish:
 
 - owner-approved Beta soak/business acceptance
 - explicit owner instruction to promote Stable
+- reuse the exact signed Stable validation artifact from the approved Preflight commit, or rerun Preflight only if source/version changed
 - Stable-specific Drive folder only
 - fixed signer and SHA verification
 - Stable OTA E2E
@@ -225,11 +241,11 @@ Required before Stable publish:
 
 For an Android-only Beta release:
 
-`source -> Fast Check -> Release Preflight -> reuse artifact -> sign -> Drive upload -> Verify Beta OTA -> RELEASED`
+`source -> Fast Check -> Release Preflight(build + fixed signing) -> signed Beta artifact -> Drive upload -> Verify OTA -> RELEASED`
 
 For Android + GAS:
 
-`source -> Fast Check -> Deploy Current GAS -> Release Preflight -> reuse artifact -> sign -> Drive upload -> Verify Beta OTA -> RELEASED`
+`source -> Fast Check -> Deploy Current GAS -> Release Preflight(build + fixed signing) -> signed Beta artifact -> Drive upload -> Verify OTA -> RELEASED`
 
 The following are **after-release housekeeping**, never blockers before the owner can receive the OTA:
 
@@ -239,7 +255,7 @@ The following are **after-release housekeeping**, never blockers before the owne
 - historical receipts
 - release summary prose
 
-Temporary signing plaintext must still be deleted immediately after signing; that security cleanup is not deferred.
+Signing secret plaintext is never written to repo/logs; temporary keystore/password files remain runner-local and are deleted by cleanup.
 
 ## 11. Version policy
 
@@ -259,6 +275,7 @@ Prevent:
 - replace coherent multiline functions/components
 - assert unique marker count before mutation
 - fix the first/root compiler error, not cascades
+- when a standalone transform is used, validate it against the current source before release build
 
 ### Multiline source embedded in workflow YAML
 
@@ -301,7 +318,7 @@ Prevent:
 
 ### Stale hardcoded versions
 
-Observed: old Beta workflow targeted beta.3 after source advanced.
+Observed: old Beta workflow targeted an obsolete version after source advanced.
 
 Prevent:
 - dynamic source metadata everywhere
@@ -345,6 +362,15 @@ Prevent:
 - permanent workflows use `gradle/actions/setup-gradle` + `gradle`
 - never create a job that assumes a wrapper exists
 
+### OTA response-schema mismatch
+
+Observed in S10: verifier expected legacy `update_available/version/download_url` while live GAS returned `available/version_name/apk_url`.
+
+Prevent:
+- permanent verifier accepts the live GAS response contract
+- verify against actual live `update_check` before declaring a release failure
+- do not rebuild/re-sign an APK when the failure is verifier-only
+
 ### Release housekeeping on critical path
 
 Observed in S09: probes/status/finalizer/docs work extended elapsed time after the useful release gates.
@@ -357,11 +383,3 @@ Prevent:
 ## 13. Owner workstation rule
 
 The owner is never asked to run local CLI. Git/Gradle/signing/verification CLI work is performed by CI or assistant-controlled tooling. Owner-facing setup remains browser/UI based.
-
-## 14. Cleanup rule
-
-- No per-release one-shot workflows.
-- No status/observer receipts committed to `main`.
-- Keep only permanent workflows listed in section 2.
-- Decrypted signing material is ephemeral and deleted immediately.
-- Release artifacts may remain for their configured short retention to support exact artifact reuse/debugging.
