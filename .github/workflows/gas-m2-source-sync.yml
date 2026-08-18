@@ -5,6 +5,8 @@ on:
     branches: [ agent/service-migration-m2 ]
     paths:
       - '.github/workflows/gas-m2-source-sync.yml'
+      - 'tools/apply_m2_service_migration_gas_patch.py'
+      - 'google-apps-script/SERVICE_MIGRATION_M2.gs'
   workflow_dispatch:
 
 permissions:
@@ -32,7 +34,7 @@ jobs:
           if ! grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s13_shared_history_gas_patch.py; fi
           if ! grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s15_local_first_gas_patch.py; fi
           if ! grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s17_sqlite_recovery_gas_patch.py; fi
-          if ! grep -q "M2_SERVICE_AUTHORITY_ROUTING" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_m2_service_migration_gas_patch.py; fi
+          python3 tools/apply_m2_service_migration_gas_patch.py
       - name: Validate final GAS source
         shell: bash
         run: |
@@ -40,7 +42,13 @@ jobs:
           python3 -m py_compile tools/apply_m2_service_migration_gas_patch.py
           grep -q "action === 'service_discovery'" google-apps-script/PICK_PACK_API.gs
           grep -q "ppM2OperationalRoute_" google-apps-script/PICK_PACK_API.gs
+          grep -q "M2_SERVICE_AUTHORITY_CONTROL_ROUTES" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'm2_reconcile_begin'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'm2_fallback_flush'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'm2_failback_complete'" google-apps-script/PICK_PACK_API.gs
           grep -q "function ppM2Discovery_" google-apps-script/SERVICE_MIGRATION_M2.gs
+          grep -q "function ppM2BeginReconcile_" google-apps-script/SERVICE_MIGRATION_M2.gs
+          grep -q "function ppM2CompleteFailback_" google-apps-script/SERVICE_MIGRATION_M2.gs
           grep -q "SERVICE_PRIMARY_NOT_CONFIGURED" google-apps-script/SERVICE_MIGRATION_M2.gs
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
           cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
