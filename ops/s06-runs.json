@@ -1,1 +1,1 @@
-[{"conclusion":"","databaseId":32090316723,"displayTitle":"ops: retry Sample 1 smooth navigation build","headSha":"052637e1df88a40422ae18295d155ae39e7bf10d","status":"in_progress"},{"conclusion":"failure","databaseId":32090143180,"displayTitle":"ops: trigger Sample 1 smooth navigation build","headSha":"8f3c29acb356f692ba3b5f43a5a32e44ffbfa3a4","status":"completed"}]
+[{"conclusion":"success","databaseId":32090665801,"displayTitle":"ops: verify live beta6 OTA","headSha":"7e9a9cc12ff16172eca926b7585cec4f80a7c7d3","status":"completed"}]
