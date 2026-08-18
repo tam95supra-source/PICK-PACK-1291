@@ -13,22 +13,55 @@ permissions:
 jobs:
   observe:
     runs-on: ubuntu-latest
+    env:
+      LIVE_API: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      VERSION: 0.4.2-beta.5
+      EXPECTED_SHA: c910e5e1fd172d47ec13bde2e34dd3098e340af1445eaa12072583c0da4a7a7a
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Record OTA and beta4 toolkit workflow status
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify live Drive OTA end-to-end
         shell: bash
         run: |
           set -euo pipefail
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow ota-beta-release.yml --limit 6 --json databaseId,status,conclusion,headSha,displayTitle > ops/ota-beta-status.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow build-beta4-final.yml --limit 10 --json databaseId,status,conclusion,headSha,displayTitle > ops/beta4-toolkit-runs.json
+          curl -fsSL -H 'content-type: application/json' "$LIVE_API" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.4"}' > /tmp/from-beta4.json
+          URL=$(python3 - "$VERSION" "$EXPECTED_SHA" <<'PY'
+          import json,sys
+          j=json.load(open('/tmp/from-beta4.json'))
+          assert j.get('ok') is True,j
+          assert j.get('available') is True,j
+          assert j.get('channel')=='BETA',j
+          assert j.get('source')=='GOOGLE_DRIVE',j
+          assert j.get('version_name')==sys.argv[1],j
+          assert j.get('sha256','').lower()==sys.argv[2].lower(),j
+          assert j.get('apk_url'),j
+          print(j['apk_url'])
+          PY
+          )
+          curl -fsSL --retry 3 "$URL" -o /tmp/ota-beta5.apk
+          DOWN_SHA=$(sha256sum /tmp/ota-beta5.apk | awk '{print $1}')
+          test "$DOWN_SHA" = "$EXPECTED_SHA"
+          curl -fsSL -H 'content-type: application/json' "$LIVE_API" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.5"}' > /tmp/self.json
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/self.json')); assert j.get('ok') is True,j; assert j.get('available') is False,j
+          PY
+          curl -fsSL -H 'content-type: application/json' "$LIVE_API" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+          python3 - "$VERSION" "$EXPECTED_SHA" <<'PY' > ops/beta5-ota-verify.json
+          import json,sys
+          beta=json.load(open('/tmp/from-beta4.json')); stable=json.load(open('/tmp/stable.json'))
+          assert stable.get('ok') is True,stable
+          assert stable.get('version_name')!=sys.argv[1],stable
+          print(json.dumps({'ok':True,'version':sys.argv[1],'sha256':sys.argv[2],'size':beta.get('size'),'source':beta.get('source'),'beta4_to_beta5':True,'self_update':False,'stable_isolated':True,'download_sha_match':True},separators=(',',':')))
+          PY
+      - name: Record proof
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/ota-beta-status.json ops/beta4-toolkit-runs.json
-          git diff --cached --quiet && exit 0
-          git commit -m 'chore: record beta OTA and beta4 toolkit status'
+          git add ops/beta5-ota-verify.json
+          git commit -m 'chore: record beta5 OTA verification'
           git pull --rebase origin main
           git push origin HEAD:main
