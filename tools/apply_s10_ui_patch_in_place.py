@@ -25,5 +25,6 @@ runpy.run_path(str(ROOT / "tools/apply_s13_shared_history_ui_patch.py"), run_nam
 runpy.run_path(str(ROOT / "tools/apply_s14_device_cache_scan_patch.py"), run_name="__main__")
 # S15 replaces screen-result caching with a revision-driven 45-day SQLite local-first store,
 # adds report date selection from cached dates, and compacts/restyles scanner controls.
-runpy.run_path(str(ROOT / "tools/apply_s15_local_first_ui_patch.py"), run_name="__main__")
+# The wrapper only hardens one duplicated S14 anchor; it executes the authoritative S15 patch.
+runpy.run_path(str(ROOT / "tools/apply_s15_local_first_ui_patch_wrapper.py"), run_name="__main__")
 print(f"Applied S10 + S11 + S12 + S13 + S14 + S15 runtime patches in build workspace: {source}")
