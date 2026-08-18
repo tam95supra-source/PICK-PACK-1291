@@ -1,0 +1,78 @@
+name: Recover exact M1 source bundle
+
+on:
+  push:
+    branches: [ agent/service-foundation-m1 ]
+    paths:
+      - '.github/workflows/service-m1-source-recover.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: service-m1-source-recover
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-foundation-m1
+          fetch-depth: 0
+
+      - name: Decode and verify exact reviewed bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, re
+          files=[Path(f'.m1-source/chunk-{i:02d}.b64') for i in range(4)]
+          text=''.join(p.read_text(encoding='utf-8-sig') for p in files)
+          compact=re.sub(r'\s+', '', text)
+          try:
+              data=base64.b64decode(compact, validate=True)
+          except Exception as exc:
+              raise SystemExit(f'base64 decode failed after whitespace normalization: {exc}')
+          digest=hashlib.sha256(data).hexdigest()
+          expected='8082900892389b11333caa08b50cd37a02b2864391ff64d40d36e7d750f0e176'
+          if digest != expected:
+              raise SystemExit(f'bundle checksum mismatch: {digest}')
+          Path('/tmp/m1-source.zip').write_bytes(data)
+          print(f'bundle PASS sha256={digest} bytes={len(data)}')
+          PY
+          unzip -t /tmp/m1-source.zip >/dev/null
+          unzip -oq /tmp/m1-source.zip -d .
+          rm -rf service/node_modules service/.wrangler service/m1-artifacts service/worker-configuration.d.ts service/package-lock.json
+          rm -f .github/workflows/service-m1-staging.yml
+
+      - name: Verify required M1 source is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in \
+            service/src/bootstrap.ts \
+            service/src/core.ts \
+            service/src/index.ts \
+            service/src/replication.ts \
+            service/scripts/m1-bootstrap.mjs \
+            service/scripts/m1-test.mjs; do
+            test -s "$f" || { echo "Missing $f" >&2; exit 1; }
+          done
+
+      - name: Commit recovered source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ARCHITECTURE_GUARDRAILS.md docs/SERVICE_MIGRATION_M1.md service
+          if git diff --cached --quiet; then
+            echo 'Exact source already present; no commit needed.'
+          else
+            git commit -m 'feat: recover complete reviewed M1 service source'
+            git push origin HEAD:agent/service-foundation-m1
+          fi
