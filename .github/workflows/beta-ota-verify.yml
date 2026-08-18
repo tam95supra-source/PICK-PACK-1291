@@ -114,13 +114,15 @@ jobs:
           python3 - <<'PY'
           import json,os
           j=json.load(open('/tmp/from.json'))
+          available=j.get('available',j.get('update_available'))
+          version=j.get('version_name',j.get('version',''))
+          url=j.get('apk_url') or j.get('download_url') or j.get('url') or ''
           assert j.get('ok') is True, j
-          assert j.get('update_available') is True, j
-          assert str(j.get('version','')) == os.environ['TARGET_VERSION'], j
+          assert available is True, j
+          assert str(version) == os.environ['TARGET_VERSION'], j
           assert str(j.get('sha256','')).lower() == os.environ['EXPECTED_SHA'].lower(), j
           assert str(j.get('source','')) == 'GOOGLE_DRIVE', j
           assert str(j.get('channel','')) == os.environ['CHANNEL'], j
-          url=j.get('download_url') or j.get('url') or ''
           assert url, j
           open('/tmp/url.txt','w').write(url)
           PY
@@ -184,11 +186,13 @@ jobs:
           python3 - <<'PY'
           import json,os
           s=json.load(open('/tmp/self.json')); o=json.load(open('/tmp/other.json'))
-          assert s.get('ok') is True and s.get('update_available') is False, s
+          s_available=s.get('available',s.get('update_available'))
+          other_version=o.get('version_name',o.get('version',''))
+          assert s.get('ok') is True and s_available is False, s
           assert str(s.get('channel','')) == os.environ['CHANNEL'], s
           assert o.get('ok') is True, o
           assert str(o.get('channel','')) == os.environ['OTHER_CHANNEL'], o
-          assert str(o.get('version','')) != os.environ['TARGET_VERSION'], o
+          assert str(other_version) != os.environ['TARGET_VERSION'], o
           PY
 
       - name: OTA gate result
