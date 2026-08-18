@@ -26,8 +26,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 14
-            versionName = "0.4.2-beta.8"
+            versionCode = 15
+            versionName = "0.4.2-beta.9"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }

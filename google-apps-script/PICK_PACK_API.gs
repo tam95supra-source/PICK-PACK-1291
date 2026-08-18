@@ -198,7 +198,7 @@ function ppPackShift_(label,table) {
   return '';
 }
 function ppMasterSnapshotData_() {
-  const rev=ppMasterRevision_(), cache=CacheService.getScriptCache(), key='PP_MASTER_V4_'+rev;
+  const rev=ppMasterRevision_(), cache=CacheService.getScriptCache(), key='PP_MASTER_V5_'+rev;
   const cached=cache.get(key);
   if(cached){ try { return JSON.parse(cached); } catch(_) {} }
   const staff=ppObjects_(PP.STAFF).map(function(r){return {
@@ -217,9 +217,22 @@ function ppMasterSnapshotData_() {
     const k=shift+'|'+userPack; if(seen[k]){ warnings.push('USER_PACK_DUPLICATE:'+k+':'+seen[k]+':'+table); return; }
     seen[k]=table; packs.push({table:table,label:label,user_pack:userPack,shift:shift});
   });
-  const rows=ppObjects_(PP.CATALOG), labor=[], markers=[];
-  rows.forEach(function(r){ const a=r['CÔNG NHẬT_Thông tin công nhật'],b=r['CÔNG NHẬT_Mốc thời gian']; if(a&&labor.indexOf(a)<0)labor.push(a);if(b&&markers.indexOf(b)<0)markers.push(b); });
-  const out={master_revision:rev,staff:staff,pdas:pdas,user_picks:userPicks,pack_tables:tables,pack_bundles:packs,labor_types:labor,time_markers:markers,config_warnings:warnings};
+  const catalogRaw=ppValues_(PP.CATALOG), catalogFields={};
+  if(catalogRaw.length){
+    const headers=catalogRaw[0].map(function(v){return String(v||'').trim();});
+    headers.forEach(function(h,col){
+      if(!h)return;
+      const values=[];
+      for(let i=1;i<catalogRaw.length;i++){
+        const v=String((catalogRaw[i]||[])[col]||'').trim();
+        if(v && values.indexOf(v)<0) values.push(v);
+      }
+      catalogFields[h]=values;
+    });
+  }
+  const labor=(catalogFields['CÔNG NHẬT_Thông tin công nhật']||[]).slice();
+  const markers=(catalogFields['CÔNG NHẬT_Mốc thời gian']||[]).slice();
+  const out={master_revision:rev,staff:staff,pdas:pdas,user_picks:userPicks,pack_tables:tables,pack_bundles:packs,labor_types:labor,time_markers:markers,catalog_fields:catalogFields,config_warnings:warnings};
   const raw=JSON.stringify(out); if(raw.length<95000) cache.put(key,raw,600);
   return out;
 }
@@ -473,7 +486,7 @@ function ppAccountList_(auth) {
 }
 function ppAccountUpsert_(auth,body) {
   if(!ppIsAdmin_(auth))return {ok:false,error:'FORBIDDEN'};
-  const login=String(body.login_id||'').trim(),display=String(body.display_name||login).trim(),role=String(body.role||'USER').toUpperCase(),verifier=String(body.password_verifier||'').trim(),position=String(body.position||'').trim(),email=String(body.email||'').trim()||PP.RESET_ADMIN_EMAIL;
+  const login=String(body.login_id||'').trim(),display=String(body.display_name||login).trim(),role=String(body.role||'USER').toUpperCase(),verifier=String(body.password_verifier||'').trim(),position=role.toLowerCase(),email=String(body.email||'').trim()||PP.RESET_ADMIN_EMAIL;
   if(!login||['USER','ADMIN'].indexOf(role)<0||!ppEmailValid_(email))return {ok:false,error:'ACCOUNT_FIELDS_INVALID'};if(!ppIsSuper_(auth)&&role!=='USER')return {ok:false,error:'FORBIDDEN'};
   const old=ppAccount_(login);if(old&&(old.role==='SUPERADMIN'||(!ppIsSuper_(auth)&&old.role!=='USER')))return {ok:false,error:'FORBIDDEN'};if(!old&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};if(verifier&&!ppVerifierParts_(verifier))return {ok:false,error:'PASSWORD_POLICY'};
   ppEnsureAdminHeaders_();const sh=ppSheet_(PP.ADMIN);

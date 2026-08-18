@@ -192,3 +192,13 @@ Before a Beta/Stable release candidate is accepted, UI-related source must satis
 - visual tokens remain centralized
 
 Any deliberate exception requires a new explicit owner decision and must be recorded as `SUPERSEDED` in the cumulative handover.
+
+## S09 actual-device corrections
+
+- Root tabs do not render a duplicate page title in the top gradient header.
+- The authenticated identity header shows exactly three user lines: display name, position, login ID. No avatar placeholder and no `Tài khoản:` prefix.
+- Connection status is persistent Activity state; rebuilding tab content must never reset the header to a transient `Mạng: Đang nối/Đang kết nối` message.
+- Staff list must render incrementally/lazily; search still queries the complete local master cache. Never rebuild thousands of staff card views synchronously during a tab click.
+- `Danh mục` is a UI schema: headers use `SHEET_FIELD`. Use the matching catalog for editable/selectable business fields. Do not expose system-owned/status catalogs in contexts where the user is not allowed to edit them. Example: `DANH SÁCH PDA_Tình trạng` is not selectable while assigning a PDA to PICK.
+- Catalog namespaces are strict. Never borrow values from another sheet even when field names look similar. `Danh sách Admin` is a protected system namespace: its `Vị trí` is fixed to `superadmin`, `admin`, `user` and may only change after an explicit owner decision.
+
