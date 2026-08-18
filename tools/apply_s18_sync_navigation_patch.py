@@ -15,7 +15,8 @@ def replace_block(text: str, start_marker: str, end_marker: str, replacement: st
         raise SystemExit(f"S18 block end {label!r} not found")
     return text[:start] + replacement + text[end:]
 
-# Track genuine outbound business/account mutations as upload activity.
+# Track genuine outbound business/account mutations as upload activity. S13 shared history remains
+# server-authoritative: this transform must not restore device-local mutation history.
 ct = client.read_text(encoding="utf-8")
 ct = replace_block(
     ct,
@@ -36,13 +37,11 @@ ct = replace_block(
                     if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
                 }
                 if (result.code == 401) clearSession()
-                val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
-                if(action in tracked) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())
+                // S13 shared history is server-authoritative; no local mutation history.
                 callback(result)
             } catch (t: Throwable) {
                 val result=failure(t)
-                val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
-                if(action in tracked) AppHistory.record(appContext,action,false,result.error.orEmpty())
+                // Failed requests do not create shared business history.
                 callback(result)
             } finally {
                 if (trackUpload) SyncDirectionTracker.endUpload()
@@ -103,6 +102,7 @@ text = replace_block(
         }
         renderDetails(if(online)"Tốt" else "Đang chờ")
 
+        val handler=android.os.Handler(android.os.Looper.getMainLooper())
         val ticker=object:Runnable{
             override fun run(){
                 if(screenState!="SYNC")return
@@ -120,10 +120,10 @@ text = replace_block(
                     }
                     syncStatusText?.text=if(d.active)"${d.symbol} ${d.shortLabel}" else "Sẵn sàng"
                 }
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this,250)
+                handler.postDelayed(this,250)
             }
         }
-        android.os.Handler(android.os.Looper.getMainLooper()).post(ticker)
+        handler.post(ticker)
 
         api.call("sync_status"){r->runOnUiThread{
             if(handleAuth(r))return@runOnUiThread
@@ -173,32 +173,10 @@ if text.count(old_nav) != 1:
     raise SystemExit(f"S18 navigateTab anchor expected 1, got {text.count(old_nav)}")
 text = text.replace(old_nav, new_nav, 1)
 
-old_back = '''    private fun navigateBack(){
-        when(screenState){
-            "LABOR_CONTEXT"->laborHome()
-            "RESOURCE_EDITOR"->resourceHome()
-            "ACCOUNT_MANAGER"->settingsScreen()
-            "EMPLOYEE","EMPLOYEE_LOADING"->employeeScan()
-            "SCAN","LABOR_HOME","RESOURCE_HOME","REPORT","LISTS"->businessHome()
-            else->if(module!="BUSINESS"){module="BUSINESS";businessHome()}else finish()
-        }
-    }
-'''
-new_back = '''    private fun navigateBack(){
-        when(screenState){
-            "HISTORY_DETAIL"->historyScreen()
-            "LABOR_CONTEXT"->laborHome()
-            "RESOURCE_EDITOR"->resourceHome()
-            "ACCOUNT_MANAGER"->settingsScreen()
-            "EMPLOYEE","EMPLOYEE_LOADING"->employeeScan()
-            "SCAN","LABOR_HOME","RESOURCE_HOME","REPORT","LISTS"->businessHome()
-            else->if(module!="BUSINESS"){module="BUSINESS";businessHome()}else finish()
-        }
-    }
-'''
-if text.count(old_back) != 1:
-    raise SystemExit(f"S18 navigateBack anchor expected 1, got {text.count(old_back)}")
-text = text.replace(old_back, new_back, 1)
+# S13 already owns HISTORY_DETAIL -> historyScreen() in navigateBack(). Assert it remains present;
+# dual-edge gesture simply calls the same navigateBack() path from either edge.
+if '            "HISTORY_DETAIL"->historyScreen()\n' not in text:
+    raise SystemExit("S18 expected S13 HISTORY_DETAIL back route is missing")
 
 activity.write_text(text, encoding="utf-8")
 print("S18 sync-direction + dual-edge navigation + parent-tab reset patch applied")
