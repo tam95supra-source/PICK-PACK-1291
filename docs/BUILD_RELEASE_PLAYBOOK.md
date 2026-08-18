@@ -25,12 +25,13 @@ Release/update architecture remains:
 
 ### Tier A — App Fast Check
 
-Runs on ordinary app/source changes.
+Runs on ordinary app/GAS source changes.
 
 Purpose:
 
 - fail quickly on source/UX/architecture regressions
-- validate both channel variants without running external live probes
+- validate both Android channel variants without running external live probes
+- validate GAS source syntax/required routes without deploying it
 - provide routine feedback in minutes, not a full release cycle
 
 Required gates:
@@ -41,12 +42,14 @@ Required gates:
 - no artificial tab transition implementation
 - no banned developer-facing user copy
 - no unauthorized backend endpoints
+- GAS syntax/route guards
 - Beta Debug assemble
 - Stable Debug assemble
 
 The fast pipeline must **not**:
 
 - call live GAS/Drive just because a small UI/source edit was pushed
+- deploy GAS live
 - sign a production APK
 - publish OTA
 - create GitHub Releases
@@ -71,6 +74,23 @@ Required gates:
 - fixed signing identity validation when the four signing secrets are available
 
 Release Preflight is validation only. It does not upload an OTA APK to Drive and does not publish a GitHub Release.
+
+### GAS live deployment — explicit only
+
+Editing `google-apps-script/**` does **not** deploy live automatically.
+
+Normal GAS edits are checked by `App Fast Check`. Live deployment uses the permanent `Deploy Current GAS` workflow only after an explicit browser `workflow_dispatch` or the dedicated permanent GAS deploy trigger used by automation.
+
+The GAS deploy workflow must:
+
+- validate current source first
+- update the existing approved Apps Script project/deployment
+- preserve the current WEB_APP access/execute-as contract
+- verify live health after propagation
+- verify account-email reset routing
+- verify BETA/STABLE Drive OTA channel isolation
+
+This separation prevents a source-edit commit from changing production GAS before validation/owner intent.
 
 ## 3. OTA publish sequence
 
@@ -98,7 +118,7 @@ Stable additionally requires owner-approved Beta soak/business testing. A succes
 
 Hosted runners often already contain an Android SDK.
 
-Both permanent pipelines must first check for the **exact required** platform/build-tools version. If present, use it directly.
+Both permanent Android pipelines must first check for the **exact required** platform/build-tools version. If present, use it directly.
 
 Only if the exact SDK is absent:
 
@@ -298,6 +318,13 @@ Before OTA:
 5. Run OTA E2E.
 6. Clean temporary release material.
 
+For GAS:
+
+1. Edit source.
+2. Pass Fast Check syntax/route guards.
+3. Deploy only with explicit `Deploy Current GAS` execution.
+4. Verify live health/reset/OTA isolation after deployment.
+
 ## 10. Owner workstation rule
 
 The owner is not asked to run local CLI commands. Git/Gradle/Android signing/verification work must be moved to GitHub Actions or other approved automation. Owner-facing steps use browser/UI only.
@@ -306,10 +333,11 @@ The owner is not asked to run local CLI commands. Git/Gradle/Android signing/ver
 
 Temporary one-shot workflows, trigger markers, observer receipts and decrypted signing material must be removed after their purpose is complete.
 
-Permanent workflows are:
+Current permanent workflow set is intentionally small:
 
-- fast source validation
-- release preflight
-- approved GAS deployment/validation workflows that remain necessary
+- `App Fast Check`
+- `Release Preflight - Beta and Stable`
+- `Deploy Current GAS`
+- `Verify Google Apps Script Credentials`
 
 Do not accumulate a new one-shot workflow for every ordinary edit.
