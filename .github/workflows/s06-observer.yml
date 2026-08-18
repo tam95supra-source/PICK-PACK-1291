@@ -14,15 +14,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Record S06 runs
+      - name: Record S06 OTA verification run
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow s06-sample1-smooth.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > ops/s06-runs.json
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow s06-ota-verify.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > ops/s06-runs.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ops/s06-runs.json
-          git commit -m 'chore: record S06 workflow status' || exit 0
+          git commit -m 'chore: record beta6 OTA run status' || exit 0
           git pull --rebase origin main
           git push origin HEAD:main
