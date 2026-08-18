@@ -1,30 +1,41 @@
 # HANDOVER CURRENT — PICK PACK 1291
 
 Status: **ACTIVE / cumulative / authoritative**  
-Last updated: **2026-08-18 21:29 +07:00 (Asia/Bangkok)**  
-Closed working session: **S11**  
-Next session: **S12**  
-Latest published Beta: **0.4.2-beta.18 / versionCode 24**
+Last updated: **2026-08-19 06:40 +07:00 (Asia/Bangkok)**  
+Closed working session: **S12**  
+Next session: **S13**  
+Latest published Beta: **0.4.2-beta.19 / versionCode 25**
 
-> **NEW-CHAT STOP RULE:** S12 must first read this file, `docs/handovers/HANDOVER_S11_2026-08-18.md`, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/ADMIN_ACCOUNT_RULES.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. After reporting that the state is understood, **WAIT FOR A NEW OWNER COMMAND**. Do not build, deploy, edit Sheet, publish OTA, promote Stable or change architecture merely because the session opened.
+> **NEW-CHAT STOP RULE:** S13 must first read this file, `docs/handovers/HANDOVER_S12_2026-08-19.md`, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/ADMIN_ACCOUNT_RULES.md`, `docs/BUILD_RELEASE_PLAYBOOK.md`, `docs/SERVICE_MIGRATION_M2.md` and `docs/HANDOVER_POLICY.md`. Then report that state is understood and **WAIT FOR A NEW OWNER COMMAND**. Do not publish Stable, merge PR #38, change authority, edit production data, or alter architecture merely because the session opened.
 
-> Patch labels such as S12/S13/S14/S15/S17/S18 below are **implementation patch labels**, not chat-session numbers. The latest closed chat session is **S11**.
+> **SUPERSEDED ARCHITECTURE NOTICE:** The S11 architecture `Android ↔ GAS ↔ Google Sheets` with Google Sheets as sole operational authority was deliberately superseded in S12 by the owner-approved M2 Service-first migration described below. Legacy GAS/Google behavior remains only for compatibility, operational replica, fallback and DR under M2 rules.
 
-## 1. Project objective and architecture — OWNER LOCK
+## 1. Project objective and current production architecture — OWNER LOCK
 
-Android APK for Pick Pack 1291 operational workflows.
+Pick Pack 1291 provides Android/PDA and Web/PWA operational workflows for personnel attendance, PICK/PACK resources, labor/Công nhật, reporting/history, admin and synchronization.
 
-Official architecture remains exactly:
+Current production architecture is:
 
-`Android App ↔ Google Apps Script Web App ↔ Google Sheets`
+`Android / Web-PWA ↔ Cloudflare Worker Service ↔ D1`
 
-- Google Sheets is the operational source of truth.
-- Google Apps Script is the transaction/API bridge tied to the workbook.
-- GitHub is source/CI/release infrastructure only.
-- Android local cache is a read/projection accelerator only; it is **not** a new business authority.
-- No Supabase/Firebase/Neon/Postgres/Cloudflare/new backend/storage/auth/sync authority without explicit owner approval.
-- Beta is full-function and uses real business rules/data.
-- Stable requires explicit owner promotion.
+with:
+
+- Durable Objects + WebSocket/Hibernation for realtime coordination;
+- Google Sheets as operational replica, compatibility layer, fallback and DR source/target under controlled M2 rules;
+- Google Apps Script retained as legacy compatibility/discovery/fallback bridge, including Beta18 compatibility;
+- GitHub as source/CI/release infrastructure;
+- Android local SQLite/cache remains a projection/offline mechanism and is not an independent business authority.
+
+Current authority state after cutover:
+
+- environment: `production`
+- authority scope: `PRODUCTION`
+- authority mode: `SERVICE_PRIMARY`
+- Service generation: `m2-prod-20260819-001`
+- production Web/PWA: `https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev`
+- Google replication final gate: `HEALTHY`, pending `0`
+
+Stable promotion still requires explicit owner command.
 
 ## 2. Owner workstation constraint — OWNER LOCK
 
@@ -32,170 +43,101 @@ Owner's company-managed workstation cannot use local CLI.
 
 Never ask owner to run CMD/PowerShell/Terminal/bash/git/gh/clasp/adb/Gradle/npm/npx/Java/keytool/OpenSSL or similar commands. Build/sign/deploy/release operations are handled by GitHub Actions or assistant-controlled tooling. Owner-facing setup should be browser/UI only.
 
-## 3. Authoritative workbook and tabs
+## 3. Production Google data model and role after M2
 
-Workbook: **`DỮ LIỆU THEO NGÀY`**.
+Production workbook remains `DỮ LIỆU THEO NGÀY` with exactly these visible tabs:
 
-Main tabs:
+1. `Danh mục`
+2. `LỊCH SỬ NGHIỆP VỤ`
+3. `DANH SÁCH PDA`
+4. `DANH SÁCH USER PICK`
+5. `DANH SÁCH BÀN PACK`
+6. `DANH SÁCH USER PACK`
+7. `DANH SÁCH NHÂN SỰ`
+8. `RA - VÀO TRONG CA`
+9. `CÔNG NHẬT`
+10. `Danh sách Admin`
 
-- `Danh mục`
-- `DANH SÁCH NHÂN SỰ`
-- `DANH SÁCH PDA`
-- `DANH SÁCH USER PICK`
-- `DANH SÁCH BÀN PACK`
-- `DANH SÁCH USER PACK`
-- `RA - VÀO TRONG CA`
-- `CÔNG NHẬT`
-- `Danh sách Admin`
-- `LỊCH SỬ NGHIỆP VỤ` may be lazily created/used by shared-history logic
+M2 rules:
 
-Catalog/select values must come from the matching Sheet/catalog namespace. Do not invent values outside the workbook catalog.
+- D1 canonical events/state are Service-primary after cutover.
+- Google operational projections remain required so legacy Beta18/GAS clients continue to function.
+- Replication failures must not block the D1 critical mutation path; outbox retries are used.
+- Google schema/header validation is mandatory before writes.
+- Production Sheet must not be deleted/overwritten as a DR target.
+- A mandatory pre-Service-migration rollback backup exists in Drive and must remain untouched.
+- A separate Service shadow/staging workbook exists for technical replication/DR exercises.
+- Public repo handovers must not expose unnecessary Drive IDs/URLs; internal Drive handover holds those details.
 
-## 4. Data-retention and edit window — OWNER LOCK, NEWEST RULE
+Catalog/select values must still come from the matching catalog namespace. Do not invent values outside project catalogs.
 
-Owner fixed these rules during S11:
+## 4. Data retention and correction window — OWNER LOCK
 
-1. **Only business date N and N-1 may be corrected/changed.**
-2. Operational data is kept for **maximum 45 days**.
-3. When a new day arrives, the oldest day is removed so the retained window remains at most 45 days.
-4. N and N-1 are mutable; older retained days are treated as immutable operational history.
-5. Backend authorization must enforce the N/N-1 correction window; Android UI alone is not sufficient.
+1. Only business date **N and N-1** may be corrected/changed.
+2. Operational data is retained for a maximum of **45 days**.
+3. N and N-1 remain mutable; older retained days are immutable operational history.
+4. Service/backend authorization must enforce the correction window; Android/Web UI alone is insufficient.
+5. Master catalogs/admin records are not subject to the same date-retention deletion rule.
+6. Android/PDA must not eagerly cache all 45 days by default after M2: normal synchronization prioritizes N/N-1 and fetches older retained dates on demand while the Service itself maintains the full 45-day retention floor.
 
-Retention applies to date-scoped operational/history data, not master catalogs/admin account records.
-
-## 5. Local-first 45-day data model — OWNER-APPROVED DIRECTION, IMPLEMENTED IN BETA15+
-
-**SUPERSEDED:** Beta14 screen-result caching (`report_daily`/`history_shared` JSON in SharedPreferences) is no longer the target architecture.
-
-Current model:
-
-`RAM hot state → SQLite 45-day local store → GAS revision/snapshot sync → Google Sheets authority`
-
-### Local operational store
-
-Android contains:
-
-- `OperationalDataStore.kt`
-- `OperationalSyncEngine.kt`
-- master-data cache remains separate for staff/catalog/resources
-
-The operational store is business-date indexed and keeps the retained date window locally. Report/history screens read local data rather than waiting for a screen-triggered API request.
-
-### Revision-driven synchronization
-
-GAS exposes a lightweight synchronization manifest/status containing business-date/revision information. PDA compares server day revisions with local revisions.
-
-Behavior:
-
-- changed day revision → fetch/replace only that day's snapshot;
-- normal steady state should mainly re-fetch N and/or N-1;
-- older immutable days are not repeatedly downloaded;
-- initial bootstrap prioritizes N and N-1 first, then fills remaining retained days in background;
-- replacement is atomic at local-store level so a day is not left half-old/half-new;
-- retention floor causes local deletion of expired dates without re-downloading unchanged retained days.
-
-### Foreground multi-PDA convergence
-
-No new push backend was introduced. Foreground revision polling remains the convergence mechanism.
-
-- PDA performing a mutation gets its own operation response immediately.
-- Other foreground PDAs observe the changed server revision and fetch the changed date.
-- Returning to foreground triggers synchronization promptly.
-- Screen-off/background polling is not intended as an always-on service.
-
-### UI rule
-
-Opening Report/History should not require waiting for Sheet/GAS network round trips after local data exists. Network is for synchronization, not for basic screen rendering.
-
-## 6. SQLite crash incident and recovery — CRITICAL
-
-### Incident
-
-Beta15/Beta16 introduced a crash loop on real Newland PDA / Android 11.
-
-Observed exception family:
-
-`SQLiteDatabaseLockedException / SQLITE_BUSY`
-
-Root cause was concurrent local database access/opening around SQLite journal-mode handling during retention cleanup (`OperationalDataStore.dropBefore()` path). The app could crash before the user had enough time to accept OTA.
-
-### Emergency recovery
-
-A server-side compatibility/recovery gate was deployed so vulnerable Beta15/Beta16 clients do not enter the problematic local-sync path during startup. This keeps them alive long enough to receive OTA.
-
-### Beta17 root fix
-
-Beta17 fixed the local database architecture:
-
-- process-wide shared SQLite helper/connection strategy;
-- serialized DB access;
-- local synchronization runs off the UI thread;
-- no unsafe concurrent journal-mode negotiation;
-- SQLite/cache failure must not crash the operational app;
-- stale revision is left for a later retry when local persistence fails;
-- reconciliation self-loop bug fixed so the same manifest does not endlessly re-enqueue itself.
-
-`OperationalSyncEngine` uses a single-thread executor and catches local-cache failures. This safety behavior must be preserved.
-
-### Recovery-gate caveat
-
-Beta17/Beta18 can derive a 45-day local floor from `business_date` when the compatibility response intentionally leaves `retention_floor` blank. Do not casually remove the compatibility behavior until active vulnerable devices are no longer relevant and the replacement behavior is deliberately verified.
-
-## 7. Stress-test dataset status
-
-A synthetic stress dataset was added to the workbook for model/device load testing:
-
-- about 300 synthetic personnel;
-- 45 retained days ending 18/08/2026 at generation time;
-- random complete Vào/Ra sessions and completed Công nhật records;
-- existing operational data was preserved;
-- resource fields were intentionally left blank for generated stress records;
-- generated catalog/select values came only from existing Sheet catalogs.
-
-Do not regenerate/replace this dataset unless owner asks. The 45-day retention mechanism may progressively remove oldest dates as normal operation advances.
-
-## 8. Business invariants — OWNER LOCK
+## 5. Business invariants — OWNER LOCK
 
 - `MNV` is the business key.
 - Session key: `MNV + business_date`.
 - State machine: `NOT_ENTERED → ACTIVE → ENDED`.
 - Once ENDED, normal flow cannot re-enter on the same business date.
 - Mutations use immutable/idempotent `event_id`.
+- Canonical events are immutable.
+- Optimistic versions/stale-write rejection are enforced by Service.
 - Exclusive resources are race-safe; one winner.
 - Failed resource change retains the previous resource.
-- Google Sheet/server state remains authoritative for mutations/resource exclusivity.
+- OPEN Công nhật/labor blocks EXIT.
+- EXIT releases currently owned resources.
+- Authority epoch/generation fencing prevents split-brain and stale fallback ingestion.
 
 ### PICK
 
 - requires PDA;
 - User Pick optional;
-- PDA entered/searched using validated last 5 serial digits;
+- PDA search/entry uses validated last 5 serial digits;
 - ambiguous duplicate 5-digit suffix cannot be accepted as unique;
 - daily User Pick consumption remains used after release/change/EXIT unless authorized reuse exists.
 
 ### PACK
 
-- Bàn Pack + mapped User Pack is an exclusive bundle;
+- Bàn Pack + mapped User Pack are controlled resources;
+- multi-user pack mapping is supported where catalog data legitimately contains multiple user-pack mappings for one table/shift;
 - daily User Pack consumption remains used after release/change/EXIT unless authorized reuse exists.
 
 ### ENTER / EXIT
 
-- timezone Asia/Bangkok;
+- timezone: Asia/Bangkok;
 - shifts: `Ca 1`, `Ca 2`, `HC`/`Ca HC` according route/UI mapping;
 - work choice: `PICK | PACK | KHÔNG`;
-- OPEN Công nhật blocks EXIT;
-- EXIT releases currently owned resources.
+- OPEN labor blocks EXIT.
 
 ### Công nhật
 
 - USER/Điều phối cannot operate Công nhật;
 - ADMIN/SUPERADMIN operate under correction-age permissions;
-- lifecycle `OPEN / COMPLETED / CANCELLED`;
-- resource policy `GIỮ / TRẢ`;
+- lifecycle: `OPEN / COMPLETED / CANCELLED`;
+- resource policy: `GIỮ / TRẢ`;
 - accepted MNV immutable;
 - OPEN Công nhật blocks EXIT.
 
-## 9. Authentication / admin / session — OWNER LOCK
+## 6. Production-data anomaly discovered during M2 bootstrap
+
+During real production bootstrap, `DANH SÁCH USER PACK` contained a duplicate `hy1.obpack18`: one valid mapping to `D18 / Ca 1-18` and another row referencing non-existent `D29`.
+
+Resolution — **CHỐT**:
+
+- do not rewrite production Sheet merely to make bootstrap pass;
+- bootstrap/reconciliation keeps valid mapping(s);
+- invalid `D29` row is reported as an anomaly instead of crashing import;
+- resource-pack schema was expanded to preserve legitimate one-to-many mappings, including the HP case with multiple valid user-pack mappings in the same shift;
+- migration `0003` implements the many-mapping model; verify exact filename on branch before code edits.
+
+## 7. Authentication / roles / session — OWNER LOCK
 
 Roles: SUPERADMIN, ADMIN, USER. Backend enforcement is mandatory.
 
@@ -205,7 +147,7 @@ Admin `Vị trí` values exactly:
 - `admin`
 - `user`
 
-Role mapping exactly:
+Role mapping:
 
 - SUPERADMIN → `superadmin`
 - ADMIN → `admin`
@@ -218,47 +160,57 @@ Credential model:
 - salted PBKDF2-HMAC-SHA256 verifier;
 - challenge/HMAC login proof;
 - plaintext password is not sent directly;
-- no password/verifier/token/private key/private signing material in public repo or handover.
+- never place passwords, verifiers, tokens, private keys or signing material in public repo or handover.
 
-Session model: **`SINGLE_ACTIVE_DEVICE_V1`**.
+Session model remains **`SINGLE_ACTIVE_DEVICE_V1`**:
 
 - persists across normal app/process close on same installation;
 - another installation replaces the active server session for that account;
 - old device is rejected on next protected request/sync;
 - logout/password/security changes may invalidate.
 
-Forgot-password remains generic, rate-limited and uses configured account email.
+## 8. Android local-first / offline model — CURRENT M2 RULE
 
-## 10. Shared operational history — CURRENT RULE
+Legacy S11 local-first SQLite behavior remains important, but transport authority changed to Service-primary.
 
-**SUPERSEDED:** device-local app action history is not the authoritative business History screen.
+Current M2 Android behavior:
 
-Shared History means operational MNV-session history visible consistently across accounts.
+- dynamic Service discovery through the stable GAS endpoint; no hardcoded mutable Service URL in app behavior;
+- Service-primary mutations while authority is Service-primary;
+- durable offline outbox;
+- WorkManager replay;
+- foreground WebSocket realtime with reconnect;
+- circuit breaker and GAS fallback when Service is unavailable/not authority;
+- exclusive operations may be represented as `OFFLINE_PROVISIONAL` until authoritative replay;
+- normal local sync keeps recent N/N-1 projections and fetches older retained dates on demand;
+- vulnerable Beta15/Beta16 SQLite recovery guards must not be casually removed.
+
+Important historical incident preserved:
+
+Beta15/Beta16 had `SQLiteDatabaseLockedException / SQLITE_BUSY` crash loops on real Android 11 PDA. Beta17 fixed process-wide SQLite coordination, serialized DB access, non-UI-thread reconciliation and failure containment. Preserve those guards.
+
+## 9. Realtime, fallback and failback — M2
+
+- Service uses Durable Object realtime coordination and WebSocket reconnect behavior.
+- Android and Web/PWA are expected to converge against the same authority state.
+- GAS fallback is fenced; it must not become an uncontrolled competing authority.
+- Failover/failback requires authority epoch/mode transitions and reconciliation, not merely URL switching.
+- Beta18 compatibility must remain functional after Service cutover.
+
+Production cutover already converged successfully: Service and GAS agree on `PRODUCTION / SERVICE_PRIMARY` and the same authority epoch at the final observer gate.
+
+Controlled production failover/failback acceptance is still pending final project closure and must be executed safely before declaring full M2 DoD complete.
+
+## 10. Shared history and reporting rules
+
+Shared History remains operational MNV-session history, not device-local app history.
 
 - one outer card per MNV/current business-date session;
-- tap MNV for detailed session timeline;
-- includes session-related operations such as ENTER, EXIT, resource change and labor start/finish;
-- admin-account management actions must not appear in MNV operational history;
-- Google Sheet audit projection `LỊCH SỬ NGHIỆP VỤ` is not a separate database authority;
-- RA/CÔNG NHẬT remain business-state authority;
-- existing current-day history can be synthesized from operational rows when audit projection is absent/incomplete.
+- detailed session timeline includes ENTER/EXIT/resource/labor events;
+- admin-account actions must not appear in MNV operational history;
+- Google `LỊCH SỬ NGHIỆP VỤ` is an operational projection, not an independent canonical event authority after M2.
 
-Beta15+ reads current shared-history projection from the local operational snapshot rather than performing a screen-specific network load.
-
-## 11. Report rules and local date selector
-
-### Report date
-
-Owner requested Report to allow selection of **every business date actually available in device cache**.
-
-Current behavior:
-
-- date selector is derived from `OperationalDataStore.availableDates()`;
-- entering Report prioritizes/selects **N (current business date)** when available;
-- report renders from the chosen cached day's local snapshot;
-- opening/changing report view is local-first rather than waiting for `report_daily` on each open.
-
-### Canonical manpower row order
+Report canonical manpower row order remains:
 
 1. Trưởng nhóm
 2. Chuyên viên
@@ -272,88 +224,40 @@ Current behavior:
 10. Phúc Long
 11. Tổng
 
-Supplier canonical order when present:
+Supplier order when present: `Inhouse, NLV, VW, MP, MGL, HGP, HAD, Tổng`.
 
-`Inhouse, NLV, VW, MP, MGL, HGP, HAD, Tổng`
+Tenure matrices remain `Thâm niên Picker` and `Thâm niên Packer`, split ≤30 days / >30 days.
 
-### Tenure matrices
+`Hỗ trợ bộ phận khác` only counts applicable Công nhật with `Khấu trừ nhân sự = Có`, de-duplicated per person/support type; hide block when zero.
 
-Separate bordered matrices:
+Shift scopes remain `Ca 1 + Ca HC`, `Ca 2`, `Cả ngày`.
 
-- `Thâm niên Picker`
-- `Thâm niên Packer`
+## 11. UI/UX current rules
 
-Rows:
-
-- Nhân sự mới ≤30 days
-- Nhân sự cũ >30 days
-
-### Hỗ trợ bộ phận khác
-
-- only Công nhật with `Khấu trừ nhân sự = Có`;
-- same person/support type de-duplicated;
-- by supplier + total;
-- hide entire support block when zero;
-- when support exists show post-deduction Picker/Packer old/new remainder.
-
-Shift scopes:
-
-- `Ca 1 + Ca HC`
-- `Ca 2`
-- `Cả ngày`
-
-## 12. UI/UX current state
-
-Read `docs/UI_UX_SYSTEM.md` before changing visual system.
+Read `docs/UI_UX_SYSTEM.md` before visual changes.
 
 Persistent bottom tabs exact order:
 
 `Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`
 
-### Header
+Header target identity: `Chào buổi <sáng/trưa/chiều/tối>, <Họ tên>` using PDA local clock. Avoid API/revision/protocol jargon in user-facing chips.
 
-Target identity line:
+Scan/search controls remain compact and hardware Enter/OK must trigger scanner actions.
 
-`Chào buổi <sáng/trưa/chiều/tối>, <Họ tên>`
+Navigation fixes from Beta18 remain required:
 
-Uses PDA local clock. Do not show login ID/role/position/avatar in the target header design. Keep `Mạng / Đồng bộ / Service` compact and user-facing; avoid API/revision/protocol jargon.
+- dual-edge swipe-back;
+- tapping active parent bottom-tab resets child screen to the tab root;
+- explicit History Detail back returns to History root.
 
-### Scan/search controls
+Sync direction semantics remain real runtime state, not decoration:
 
-Latest compact target is about **72dp** high after real-PDA feedback. Inputs use stronger border/background/icon treatment so the scan/input zone is visually obvious.
+- `↑` outbound mutation;
+- `↓` snapshot/revision download;
+- `↕` concurrent transfer;
+- `✓` idle/ready.
 
-Contextual placeholders remain purpose-specific, including Vào/Ra, Công nhật, Tài nguyên and staff search. Hardware Enter/OK triggers scanner actions.
-
-### Beta18 navigation fixes
-
-1. `EdgeSwipeBackLayout` accepts back gesture from **either edge**:
-   - left edge → swipe right;
-   - right edge → swipe left.
-2. When user is inside a child screen of the active bottom tab, tapping the active **parent tab** resets to that tab's root.
-   - Example: `Lịch sử → Chi tiết lịch sử → tap Lịch sử` returns to basic shared-history list.
-3. Existing explicit back behavior for `HISTORY_DETAIL → historyScreen()` remains.
-
-## 13. Sync-direction UI — Beta18
-
-Beta18 added a real sync-direction indicator.
-
-Symbols:
-
-- `↑` = outbound/upload mutation currently being sent from PDA;
-- `↓` = operational snapshot/revision data currently being downloaded to PDA;
-- `↕` = upload and download are active concurrently;
-- `✓` = no active transfer / ready.
-
-Implementation:
-
-- `SyncDirectionTracker.kt` is process-local runtime state;
-- `BetaApiClient` marks genuine outbound business/account mutations;
-- `OperationalSyncEngine` marks `sync_day` / `sync_bootstrap` downloads;
-- Sync screen renders live direction state and the header sync chip can reflect active direction.
-
-Do not make arrows decorative or infer direction merely from network connectivity.
-
-## 14. Logging / diagnostics
+## 12. Logging / diagnostics
 
 Categories remain:
 
@@ -361,13 +265,26 @@ Categories remain:
 - CRASH → `BÁO LỖI TỰ ĐỘNG`
 - DAILY → `NHẬT KÝ ANDROID`
 
-Manual report requires confirmation. Pending logs retry after valid session/connectivity. Local logs are deleted only after successful acknowledgement for their upload/event. Never expose secrets/private credentials in logs.
+Manual report requires confirmation. Pending logs retry after valid session/connectivity. Local logs are deleted only after successful acknowledgement. Never expose secrets/private credentials in logs.
 
-Crash logs were successfully used during S11 to identify the Beta15 SQLite lock incident; preserve remote diagnostic ability.
+## 13. Web/PWA — PRODUCTION READY
 
-## 15. OTA / signing / release infrastructure — OWNER LOCK
+Web/PWA is already live on the production Worker URL listed in section 1.
 
-OTA authority:
+Implemented behavior includes:
+
+- same-origin Worker hosting;
+- authentication compatible with the M2 credential model;
+- IndexedDB local state/outbox;
+- offline replay;
+- realtime WebSocket reconnect;
+- operational/admin UI.
+
+Do not treat Web as merely a mock/shadow site anymore. It is on the production Service path, but real owner/device acceptance of Web + Beta19 concurrent workflows is still pending final DoD.
+
+## 14. OTA / signing / release — OWNER LOCK
+
+OTA authority remains:
 
 `Android → GAS update_check → Google Drive channel folder`
 
@@ -377,170 +294,162 @@ Fixed signing certificate SHA-256:
 
 `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
 
-Never generate a replacement signer.
+Never generate or substitute a signer.
 
-Four permanent GitHub signing secrets are configured and healthy. Their **names** may be documented, but never their values:
+Permanent signing secret **names** may be documented; values must never be exposed:
 
 - `ANDROID_SIGNING_KEY_B64`
 - `ANDROID_SIGNING_STORE_PASSWORD`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 - `ANDROID_SIGNING_ALIAS`
 
-Permanent workflows:
+Latest published Beta:
 
-1. `App Fast Check`
-2. `Release Preflight - Beta and Stable`
-3. `Deploy Current GAS`
-4. `Verify Google Apps Script Credentials`
-5. `Verify OTA - Beta and Stable`
-
-Release path:
-
-Android-only:
-
-`source → Fast Check → Release Preflight → exact signed Beta artifact → Drive Beta upload → Verify OTA → RELEASED`
-
-GAS changed:
-
-`source → Fast Check → Deploy Current GAS → Release Preflight → exact signed Beta artifact → Drive Beta upload → Verify OTA → RELEASED`
-
-Do not rebuild/re-sign after successful Preflight before publishing that candidate. Signed Stable validation artifacts are validation-only and are **not** permission to publish Stable.
-
-## 16. Latest released Beta — 0.4.2-beta.18
-
-Authoritative current source metadata:
-
-- versionName: **`0.4.2-beta.18`**
-- versionCode: **24**
+- versionName: `0.4.2-beta.19`
+- versionCode: `25`
 - package: `vn.pickpack1291.app.beta.publicbeta`
-- APK name: `pick-pack-1291-public-beta-v0.4.2-beta.18.apk`
-- signed APK SHA-256: **`2b0ff097903c7d75cd8f5e9b84c003c07d0fbd5aaf82076d31b07e5aa8803911`**
+- exact signed candidate SHA-256: `6dc47edba684249af0655a30573824911ee4a96482f86acf7f3995d6842c3103`
 - fixed signer unchanged
-- main source head at release preparation: `660efe5483f1b245876255e1587cf407749c4ff9`
+- Beta18 → Beta19 OTA update check/download/package/version/SHA/signer verification: **PASS**
 
-Verification:
+Stable remains **UNPUBLISHED / UNTOUCHED**. A Stable validation artifact is not permission to publish Stable.
 
-- Beta18 App Fast Check run `32147412312`: PASS
-- Beta18 Release Preflight run `32147686567`: PASS
-- Beta17 → Beta18 OTA verification run `32148119037`: PASS
-- live discovery/download PASS
-- SHA PASS
-- package/version PASS
-- fixed signer PASS
-- self-update false PASS
-- opposite Stable-channel isolation PASS
+## 15. S12 Service migration implementation — completed milestones
 
-Stable remains **UNPUBLISHED / UNTOUCHED** by owner promotion.
+S12 completed these production milestones:
 
-Temporary observability PRs used for Beta18 CI/OTA verification were closed without merge.
+1. Google OAuth scope issue resolved and required Google APIs enabled.
+2. Cloudflare authentication verified.
+3. Production D1 created and migrations applied.
+4. Worker/PWA deployed and runtime health stabilized.
+5. Google production bootstrap converted from monolithic HTTP request to resumable/chunked, idempotent phases.
+6. Production bootstrap completed against real 45-day dataset.
+7. Resource mapping anomaly and one-to-many mapping issue fixed with migration/schema update.
+8. Final bootstrap completed with no `RUNNING` bootstrap state.
+9. D1 → Google staging outbox replication live test passed with replication health `HEALTHY` and pending `0`.
+10. Mutating/redeploying verifier workflows were retired/skipped before authority cutover to eliminate CI race conditions.
+11. Production Service authority promoted and GAS converged to `SERVICE_PRIMARY`.
+12. Web/PWA production observer passed.
+13. Beta19 signed candidate verified with fixed signer.
+14. OTA publisher path was repaired through several failed iterations; final V5 publisher succeeded.
+15. Final OTA observer passed complete Beta18 → Beta19 download/package/SHA/signer verification.
+16. Stable channel remained untouched.
 
-## 17. Release sequence during S11
+## 16. Verified CI/live gates at S12 close
 
-### Beta12/Beta13/Beta14
+On the S12 closing branch state, the following final relevant gates were verified successful:
 
-- S12 server report aggregation optimized current-day reporting.
-- S13 introduced shared MNV-session history and server audit projection.
-- S14 added screen-result cache/warming and corrected real-PDA scan/search sizing, but it remained screen-result caching rather than true local-first.
+- `Service M2 Cutover Observer`
+- `Service M2 Runtime Diagnostic`
+- `Service M2 Chaos Matrix`
+- `Service M2 Chaos Matrix V2`
+- `Service M2 Precutover`
+- `Release Preflight - Beta and Stable`
+- `App Fast Check`
+- `Service M2 Publisher V5 Run Observer`
+- `Service M2 OTA Observer`
 
-### Beta15/Beta16
+Historical publisher V1–V4 failures are debugging history only; V5 and final OTA observer are authoritative current release evidence.
 
-- introduced 45-day local-first SQLite/revision model;
-- Report date selector from cache;
-- compact/restyled scan fields;
-- Beta15/Beta16 exposed SQLite lock/reconcile risks on real PDA.
+Some bootstrap/replication/precutover workflows are intentionally retired/skipped after cutover to avoid unintended mutation/redeployment races. Do not interpret those intentional skips as production failure.
 
-### Beta17
+## 17. GitHub state — DO NOT MERGE YET
 
-Emergency/root crash recovery release:
+Repository: `tam95supra-source/pick-pack-1291`
 
-- fixed SQLite concurrency/locking architecture;
-- moved reconciliation off UI thread;
-- prevented local-cache failures from crashing app;
-- fixed reconciliation self-loop;
-- server compatibility gate allowed vulnerable clients to survive long enough for OTA.
+M2 branch: `agent/service-migration-m2`
 
-### Beta18
+PR #38:
 
-Light navigation/sync-status release:
+- state: open
+- draft: true
+- merged: false
+- base: `main`
+- S12 closing head observed: `6b23b69d5ed5e3c4dc1fca2bbc2193426a015418`
 
-- real `↑ / ↓ / ↕` sync direction;
-- dual-edge swipe back;
-- active parent-tab tap resets child screen to parent root.
+Always re-fetch PR state/head before modifying or merging because head is time-sensitive.
 
-## 18. Current source-transform chain / technical debt
+Do not merge PR #38 until full M2 Definition of Done passes.
 
-Android authenticated UI is still produced by assertion-based build-time transforms.
+## 18. Known process caveats / failures not to repeat
 
-Current chain includes:
-
-- `tools/apply_s10_ui_patch.py`
-- `tools/apply_s11_compact_report_patch.py`
-- `tools/apply_s12_real_pda_patch.py`
-- `tools/apply_s12_compile_hotfix.py`
-- `tools/apply_s13_shared_history_ui_patch.py`
-- `tools/apply_s14_device_cache_scan_patch.py`
-- `tools/apply_s15_local_first_ui_patch.py` + wrapper
-- `tools/apply_s17_sqlite_recovery_ui_patch.py`
-- `tools/apply_s18_sync_navigation_patch.py`
-
-`app/build.gradle.kts` registers these as generation inputs and current Beta metadata is 0.4.2-beta.18 / 24.
-
-Risks:
-
-- transform anchors can break after base Kotlin edits;
-- fix the first/root transform or compiler error, not cascading errors;
-- a deliberate future refactor may fold patches into canonical source, but only with identical behavior and full CI/device acceptance.
-
-GAS also uses transform-style deployment patches. Do not casually rewrite canonical GAS without respecting the deployment chain and live health gates.
-
-## 19. Known process caveats / failures not to repeat
-
-- Do not use `./gradlew`; workflow uses setup-gradle + `gradle`.
-- Do not ask owner to use local CLI.
-- Do not embed giant source patches in workflow YAML.
+- Do not ask owner to use CLI.
+- Do not publish Stable without explicit owner command.
 - Do not generate a new signer.
-- Do not rebuild between successful signed Preflight and publish.
-- Do not publish Stable because a Stable validation artifact exists.
-- Do not make local cache authoritative for resource/mutation decisions.
-- Do not return Report/History to screen-by-screen blocking network loads.
-- Do not remove SQLite failure guards/retry behavior.
-- Do not remove Beta15/Beta16 recovery compatibility without deliberate migration verification.
-- Do not create permanent per-release observer workflows; temporary observer PRs are acceptable and must be closed without merge.
-- Release Preflight reruns after a live-gate failure can unexpectedly rebuild/re-sign; future hardening may separate live gates from Android signing, but do not change release workflow casually.
-- Main `ops/beta-ota-verify-trigger.txt` can remain older because release verification has been performed on temporary observer branches; do not mistake an old main trigger file for the actual published OTA state. The Drive channel + live OTA verification is authoritative for published version.
+- Do not overwrite/delete production Google Sheet.
+- Do not re-enable retired mutating bootstrap/deploy workflows casually after cutover.
+- Do not use the original buggy `Service M2 Live Web and Beta OTA` workflow for cutover.
+- Do not embed huge code/publisher payloads directly inside workflow YAML; use source scripts.
+- GitHub artifact downloads should use native GitHub tooling rather than brittle direct redirect handling.
+- Google Apps Script deployments can propagate gradually; secured temporary publisher operations require readiness stabilization and idempotent chunk retry.
+- `wrangler d1 execute` remote mode should not be assumed to accept explicit `BEGIN TRANSACTION` wrappers in verification scripts.
+- Do not run monolithic full-Sheet bootstrap through one Worker HTTP request; use resumable/chunked bootstrap.
+- Preserve Beta18 compatibility until explicitly retired after owner acceptance.
+- Public repo handovers must remain public-safe: no plaintext secrets and no unnecessary private Drive identifiers.
 
-## 20. Immediate next-session acceptance priorities
+## 19. Remaining work before full M2 Definition of Done
 
-S12 should wait for owner command after reading handover. If owner continues Beta18 acceptance, prioritize real PDA checks:
+Web and OTA Beta19 are already live. Remaining items are acceptance/closure, not blockers to creating Web/OTA:
 
-1. Confirm Beta18 installs/launches without any recurrence of SQLite crash loop.
-2. Open Report repeatedly after local sync; it should render immediately from local data.
-3. Verify Report date selector contains exactly cached dates and defaults to N.
-4. Change N or N-1 from another account/PDA and confirm other foreground PDA converges quickly without full 45-day reload.
-5. Confirm expired oldest date disappears locally when retention window advances.
-6. Observe Sync screen during a mutation: `↑`; during snapshot fetch: `↓`; overlapping: `↕`; idle: `✓`.
-7. Verify left-edge and right-edge back gestures on real Newland PDA.
-8. `Lịch sử → Chi tiết → tap Lịch sử` must return to shared-history root.
-9. Verify explicit top/back gesture from history detail also returns to history root.
-10. Continue Vào/Ra, Công nhật, PICK/PACK and resource exclusivity business acceptance.
-11. Stable must remain untouched unless owner explicitly commands promotion.
+1. **Real PDA smoke** of Beta19 on an actual device:
+   - Beta18 detects/updates to Beta19;
+   - launch/login succeeds;
+   - Vào/Ra, Công nhật, PICK/PACK/resource change operate correctly;
+   - SQLite crash loop does not recur;
+   - offline → reconnect replay behaves correctly.
+2. **Real Web + Beta19 concurrent test** against production Service/realtime.
+3. **Controlled Service-down/flapping failover** to GAS fallback with split-brain fencing verified.
+4. **Controlled failback** with reconciliation and authority epoch validation.
+5. **DR both directions** in safe recovery/staging flow:
+   - Google → fresh Service rebuild;
+   - D1 → Google staging rebuild;
+   - exact visible-tab/schema integrity checks.
+6. Final Google replication/integrity verification after failover/failback/DR exercises.
+7. Update final production-complete handover when all DoD items pass.
+8. Merge PR #38 only after full DoD.
 
-## 21. Open decisions / backlog
+## 20. M2 Definition of Done — mandatory closure bar
 
-No owner decision is currently blocking Beta18 operation.
+Only call M2 complete when this production path is demonstrated:
 
-Possible later work, only on owner command:
+`ANDROID APP ↔ WEB/PWA ↔ SERVICE/D1 ↔ GOOGLE SHEETS`
 
-- controlled refactor to remove transform-anchor debt;
-- release-workflow hardening so a gate-only retry cannot rebuild Android candidates;
-- performance measurement of first bootstrap vs steady-state on multiple real PDAs;
-- eventual removal of vulnerable-client compatibility gate after migration is confirmed;
-- Stable promotion only after explicit owner acceptance.
+and all are true:
+
+- realtime PASS;
+- offline PASS;
+- failover PASS;
+- failback PASS;
+- DR both directions PASS;
+- Beta19 Service-first OTA verified on production path — **already PASS**;
+- real PDA smoke PASS — **pending owner/device validation**;
+- Google Sheet preserved/reconciled;
+- Stable unpublished unless separately commanded;
+- final file `HANDOVER_SERVICE_MIGRATION_M2_PRODUCTION_COMPLETE.md` produced;
+- `docs/HANDOVER_CURRENT.md` updated to completion state;
+- PR #38 merged only after above closure.
+
+## 21. S13 required start order
+
+When owner opens next chat:
+
+1. Read `docs/HANDOVER_CURRENT.md`.
+2. Read `docs/handovers/HANDOVER_S12_2026-08-19.md`.
+3. Read `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/ADMIN_ACCOUNT_RULES.md`, `docs/BUILD_RELEASE_PLAYBOOK.md`, `docs/SERVICE_MIGRATION_M2.md`, `docs/HANDOVER_POLICY.md`.
+4. Re-fetch PR #38 and current Service/OTA state only where temporal verification is needed.
+5. State that the project context is understood.
+6. **WAIT FOR OWNER COMMAND.** Do not automatically start tests, publish Stable, merge PR, change authority, or edit production data.
 
 ## 22. Session-close state
 
-No release job is intentionally left half-complete.
+S12 closes with:
 
-**Beta18 is the current published/OTA-verified Beta. Stable is not promoted.**
+- M2 production cutover: **DONE**
+- Web/PWA production: **LIVE / READY**
+- Beta19 OTA: **PUBLISHED / VERIFIED**
+- Google replication at final gate: **HEALTHY**
+- Stable: **UNPUBLISHED / UNTOUCHED**
+- PR #38: **DRAFT / UNMERGED**
+- Full M2 DoD: **NOT YET CLOSED** because real PDA acceptance, controlled failover/failback and DR exercises remain.
 
-S12 must read the required files, acknowledge project state, then wait for a new owner command.
+S13 must read the required files, acknowledge state, then wait for a new owner command.
