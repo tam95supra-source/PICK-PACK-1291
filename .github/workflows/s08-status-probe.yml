@@ -1,0 +1,29 @@
+name: S08 Status Probe
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/s08-status-trigger.txt'
+permissions:
+  actions: read
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read S08 run status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-apply-visual-beta8.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > ops/s08-status.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/s08-status.json
+          git commit -m 'ops: record temporary S08 status' || exit 0
+          git pull --rebase origin main
+          git push origin HEAD:main
