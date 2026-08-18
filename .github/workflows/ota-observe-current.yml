@@ -1,4 +1,4 @@
-name: Temporary Beta OTA Observer
+name: Temporary Beta OTA Finalizer
 
 on:
   push:
@@ -7,61 +7,29 @@ on:
       - 'ops/ota-beta-observe.txt'
 
 permissions:
-  actions: read
   contents: write
 
 jobs:
-  observe:
+  finalize:
     runs-on: ubuntu-latest
-    env:
-      LIVE_API: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
-      VERSION: 0.4.2-beta.5
-      EXPECTED_SHA: c910e5e1fd172d47ec13bde2e34dd3098e340af1445eaa12072583c0da4a7a7a
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Verify live Drive OTA end-to-end
+      - name: Finalize transport comment
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL -H 'content-type: application/json' "$LIVE_API" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.4"}' > /tmp/from-beta4.json
-          URL=$(python3 - "$VERSION" "$EXPECTED_SHA" <<'PY'
-          import json,sys
-          j=json.load(open('/tmp/from-beta4.json'))
-          assert j.get('ok') is True,j
-          assert j.get('available') is True,j
-          assert j.get('channel')=='BETA',j
-          assert j.get('source')=='GOOGLE_DRIVE',j
-          assert j.get('version_name')==sys.argv[1],j
-          assert j.get('sha256','').lower()==sys.argv[2].lower(),j
-          assert j.get('apk_url'),j
-          print(j['apk_url'])
-          PY
-          )
-          curl -fsSL --retry 3 "$URL" -o /tmp/ota-beta5.apk
-          DOWN_SHA=$(sha256sum /tmp/ota-beta5.apk | awk '{print $1}')
-          test "$DOWN_SHA" = "$EXPECTED_SHA"
-          curl -fsSL -H 'content-type: application/json' "$LIVE_API" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.5"}' > /tmp/self.json
           python3 - <<'PY'
-          import json
-          j=json.load(open('/tmp/self.json')); assert j.get('ok') is True,j; assert j.get('available') is False,j
+          from pathlib import Path
+          p=Path('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt')
+          s=p.read_text(encoding='utf-8')
+          old=' * the Android process: authentication uses PBKDF2 + challenge/HMAC proof.'
+          new=' * Password plaintext never leaves the Android process: authentication uses PBKDF2 + challenge/HMAC proof.'
+          assert old in s
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
           PY
-          curl -fsSL -H 'content-type: application/json' "$LIVE_API" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
-          python3 - "$VERSION" "$EXPECTED_SHA" <<'PY' > ops/beta5-ota-verify.json
-          import json,sys
-          beta=json.load(open('/tmp/from-beta4.json')); stable=json.load(open('/tmp/stable.json'))
-          assert stable.get('ok') is True,stable
-          assert stable.get('version_name')!=sys.argv[1],stable
-          print(json.dumps({'ok':True,'version':sys.argv[1],'sha256':sys.argv[2],'size':beta.get('size'),'source':beta.get('source'),'beta4_to_beta5':True,'self_update':False,'stable_isolated':True,'download_sha_match':True},separators=(',',':')))
-          PY
-      - name: Record proof
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/beta5-ota-verify.json
-          git commit -m 'chore: record beta5 OTA verification'
+          git add app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+          git commit -m 'chore: finalize approved transport wording'
           git pull --rebase origin main
           git push origin HEAD:main
