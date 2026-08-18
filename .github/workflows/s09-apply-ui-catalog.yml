@@ -27,14 +27,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+
       - name: Apply S09 patch
         run: |
           set -euo pipefail
           python3 ops/s09_fix_ui_catalog.py
+          python3 ops/s09_fix_admin_rule.py
           grep -q 'versionName = "0.4.2-beta.9"' app/build.gradle.kts
           grep -q 'catalog_fields:catalogFields' google-apps-script/PICK_PACK_API.gs
           grep -q 'private fun headerStatusChip' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'DANH SÁCH NHÂN SỰ_Vị trí chính' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'position=role.toLowerCase()' google-apps-script/PICK_PACK_API.gs
+          grep -q 'val allowedPositions=if(isSuper())arrayOf("USER","ADMIN")else arrayOf("USER")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'catalogValues("DANH SÁCH ADMIN_Vị trí")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           ! grep -q 'Mạng: Đang nối' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
 
       - name: Validate GAS syntax
@@ -47,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           for d in "$ANDROID_HOME" "$ANDROID_SDK_ROOT" /usr/local/lib/android/sdk; do
-            if [[ -n "${d:-}" && -d "$d/platforms/android-36" && -d "$d/build-tools/36.0.0" ]]; then
+            if [[ -n "${d:-}" && -f "$d/platforms/android-36/android.jar" && -x "$d/build-tools/36.0.0/aapt" ]]; then
               echo "ANDROID_HOME=$d" >> "$GITHUB_ENV"
               echo "ANDROID_SDK_ROOT=$d" >> "$GITHUB_ENV"
               exit 0
@@ -70,8 +78,7 @@ jobs:
           GRADLE_OPTS: -Dorg.gradle.parallel=true -Dorg.gradle.caching=true
         run: |
           set -euo pipefail
-          chmod +x gradlew
-          ./gradlew --no-daemon --parallel --build-cache assembleBetaDebug assembleStableDebug
+          gradle --no-daemon --parallel --build-cache :app:assembleBetaDebug :app:assembleStableDebug
 
       - name: Commit verified source only
         run: |
