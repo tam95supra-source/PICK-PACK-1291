@@ -1,6 +1,7 @@
 import base, { RealtimeHub } from "./index";
 import { authenticate, internalAuthorized } from "./auth";
 import { bootstrapGoogleStart, bootstrapGoogleStatus, bootstrapGoogleStep } from "./bootstrap_resumable";
+import { bootstrapResourceProjectionStep } from "./bootstrap_resources";
 import { compatBootstrap, compatDay, compatSyncStatus } from "./compat";
 import { currentAuthority } from "./core";
 import { rebuildGoogleStagingFromD1 } from "./dr";
@@ -41,7 +42,12 @@ async function resumableBootstrap(request:Request,env:Env,action:"start"|"step"|
   try{
     if(action==="start")return json(await bootstrapGoogleStart(env.DB,env));
     const body=await readJsonBody<{run_id?:string}>(request),runId=String(body.run_id||"").trim();
-    if(action==="step"){if(!runId)return apiError("BOOTSTRAP_RUN_ID_REQUIRED","VALIDATION",400);return json(await bootstrapGoogleStep(env.DB,env,runId));}
+    if(action==="step"){
+      if(!runId)return apiError("BOOTSTRAP_RUN_ID_REQUIRED","VALIDATION",400);
+      const status=await bootstrapGoogleStatus(env.DB,runId) as {state?:{phase?:string}};
+      if(status.state?.phase==="RESOURCES")return json(await bootstrapResourceProjectionStep(env.DB,runId));
+      return json(await bootstrapGoogleStep(env.DB,env,runId));
+    }
     return json(await bootstrapGoogleStatus(env.DB,runId||undefined));
   }catch(e){console.log(JSON.stringify({level:"error",kind:"resumable_bootstrap_failed",action,error:String(e)}));return apiError("BOOTSTRAP_RESUMABLE_FAILED","INTERNAL",500,true,String(e).slice(0,500));}
 }
