@@ -10,13 +10,13 @@ val gsheetApiUrl = providers.gradleProperty("GSHEET_API_URL")
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
-val s10GeneratedSource = layout.buildDirectory.dir("generated/s10")
 val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
-    outputs.file(s10GeneratedSource.map { it.file("vn/pickpack1291/app/beta/PatchedOperationsActivity.kt") })
+    inputs.file(rootProject.file("tools/apply_s10_ui_patch_in_place.py"))
+    outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
-    commandLine("python3", "tools/apply_s10_ui_patch.py")
+    commandLine("python3", "tools/apply_s10_ui_patch_in_place.py")
 }
 
 android {
@@ -50,13 +50,6 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            java.exclude("**/OperationsActivity.kt")
-            java.srcDir(s10GeneratedSource)
-        }
-    }
-
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -84,4 +77,4 @@ tasks.named("preBuild").configure {
 // The approved Apps Script /exec endpoint is public configuration, not a credential.
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
-// S10 generates the release OperationsActivity from a standalone, assertion-based source transform.
+// S10 applies an assertion-based source transform only inside the ephemeral build workspace.
