@@ -5,6 +5,8 @@ on:
     branches: [ main ]
     paths:
       - 'app/**'
+      - 'tools/apply_s10_ui_patch.py'
+      - 'tools/apply_s10_ui_patch_in_place.py'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -47,7 +49,7 @@ jobs:
           fi
           ANDROID=false
           GAS=false
-          if grep -Eq '^(app/|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
+          if grep -Eq '^(app/|tools/apply_s10_ui_patch(_in_place)?\.py$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
           if grep -Eq '^(google-apps-script/|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
           echo "gas=$GAS" >> "$GITHUB_OUTPUT"
@@ -87,11 +89,22 @@ jobs:
           ! grep -R -n 'overridePendingTransition(android.R.anim.fade_in' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
+          python3 -m py_compile tools/apply_s10_ui_patch.py tools/apply_s10_ui_patch_in_place.py
+          python3 tools/apply_s10_ui_patch.py
+          PATCHED=app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt
+          test -s "$PATCHED"
+          grep -q 'S10_GENERATED_UI_PATCH' "$PATCHED"
+          grep -q 'Chào buổi sáng' "$PATCHED"
+          grep -q 'normalizePhone' "$PATCHED"
+          grep -q 'Hoạt động gần đây' "$PATCHED"
+          grep -q 'LÀM MỚI TRẠNG THÁI' "$PATCHED"
+          ! grep -q 'addView(txt(position.ifBlank' "$PATCHED"
+          rm -rf app/build/generated/s10
           if [[ "${{ needs.changes.outputs.gas }}" == "true" ]]; then
             cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
             node --check /tmp/PICK_PACK_API.js
           fi
-          echo 'PASS - static guards.'
+          echo 'PASS - static guards and S10 generated UI checks.'
 
   android-debug:
     needs: [changes, static-guards]
