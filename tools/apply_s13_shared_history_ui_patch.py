@@ -97,7 +97,8 @@ block(
             if(items.length()==0){box.addView(info("Chưa có lịch sử nghiệp vụ trong ngày."));return@runOnUiThread}
             for(i in 0 until items.length()){
                 val x=items.optJSONObject(i)?:continue
-                val mnv=x.optString("mnv"),fullName=x.optString("full_name")
+                val mnv=x.optString("mnv")
+                val fullName=x.optString("full_name")
                 val ended=x.optString("state")=="ENDED"
                 val lastTime=x.optString("last_time").substringAfter(" ",x.optString("last_time"))
                 val actor=x.optString("last_actor").ifBlank{"—"}
