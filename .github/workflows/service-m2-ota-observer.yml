@@ -1,0 +1,80 @@
+name: Service M2 OTA Observer
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/service-m2-ota-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-ota-observer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  BETA_VERSION: 0.4.2-beta.19
+  BETA_VERSION_CODE: '25'
+  BETA_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  PREVIOUS_BETA_VERSION: 0.4.2-beta.18
+  STABLE_VERSION: 0.4.2-stable.0
+  EXPECTED_BETA_SHA256: 6dc47edba684249af0655a30573824911ee4a96482f86acf7f3995d6842c3103
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+
+jobs:
+  observe:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wait for Beta18 to see Beta19 OTA while production remains healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 160); do
+            curl -fsS --connect-timeout 5 --max-time 15 "$SERVICE_URL/health" >/tmp/service.json || true
+            curl -fsSL --connect-timeout 5 --max-time 20 -H 'content-type: application/json' "$GSHEET_API_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$PREVIOUS_BETA_VERSION\"}" >/tmp/beta18.json || true
+            curl -fsSL --connect-timeout 5 --max-time 20 -H 'content-type: application/json' "$GSHEET_API_URL" -d "{\"action\":\"update_check\",\"channel\":\"STABLE\",\"current_version\":\"$STABLE_VERSION\"}" >/tmp/stable.json || true
+            if node -e 'const fs=require("fs");try{const s=JSON.parse(fs.readFileSync("/tmp/service.json")),b=JSON.parse(fs.readFileSync("/tmp/beta18.json")),t=JSON.parse(fs.readFileSync("/tmp/stable.json"));process.exit(s.ok&&s.environment==="production"&&s.authority?.scope==="PRODUCTION"&&s.authority?.mode==="SERVICE_PRIMARY"&&s.replication?.state==="HEALTHY"&&b.ok&&b.available===true&&b.version_name===process.env.BETA_VERSION&&String(b.sha256||"").toLowerCase()===process.env.EXPECTED_BETA_SHA256&&!!b.apk_url&&t.ok&&t.available===false?0:1)}catch(e){process.exit(1)}'; then OK=true; break; fi
+            if (( i % 10 == 0 )); then echo "OTA_OBSERVER attempt=$i"; cat /tmp/beta18.json 2>/dev/null || true; fi
+            sleep 5
+          done
+          [[ "$OK" == true ]] || { echo OTA_NOT_VISIBLE >&2; cat /tmp/service.json 2>/dev/null || true; cat /tmp/beta18.json 2>/dev/null || true; cat /tmp/stable.json 2>/dev/null || true; exit 1; }
+      - name: Download OTA and verify package version SHA and signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(node -e 'const j=require("/tmp/beta18.json");process.stdout.write(j.apk_url)')
+          curl -fL --connect-timeout 10 --max-time 180 --retry 5 --retry-delay 2 --retry-all-errors "$URL" -o /tmp/beta19.apk
+          [[ "$(sha256sum /tmp/beta19.apk | awk '{print $1}')" == "$EXPECTED_BETA_SHA256" ]]
+          BT="$ANDROID_HOME/build-tools/36.0.0"; test -x "$BT/aapt"; test -x "$BT/apksigner"
+          "$BT/aapt" dump badging /tmp/beta19.apk >/tmp/badge.txt
+          grep -q "package: name='$BETA_PACKAGE'" /tmp/badge.txt
+          grep -q "versionCode='$BETA_VERSION_CODE'" /tmp/badge.txt
+          grep -q "versionName='$BETA_VERSION'" /tmp/badge.txt
+          "$BT/apksigner" verify --verbose --print-certs /tmp/beta19.apk >/tmp/cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$BETA_VERSION\"}" >/tmp/self.json
+          node -e 'const j=require("/tmp/self.json");if(!j.ok||j.available!==false||j.version_name!==process.env.BETA_VERSION)throw new Error(JSON.stringify(j))'
+      - name: Emit observer evidence
+        shell: bash
+        run: |
+          mkdir -p m2-ota-observer-evidence
+          cp /tmp/service.json m2-ota-observer-evidence/service.json
+          cp /tmp/beta18.json m2-ota-observer-evidence/beta18.json
+          cp /tmp/self.json m2-ota-observer-evidence/beta19-self.json
+          cp /tmp/stable.json m2-ota-observer-evidence/stable.json
+          cp /tmp/badge.txt m2-ota-observer-evidence/badge.txt
+          cp /tmp/cert.txt m2-ota-observer-evidence/cert.txt
+          sha256sum /tmp/beta19.apk > m2-ota-observer-evidence/sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m2-ota-observer-evidence-${{ github.run_id }}
+          path: m2-ota-observer-evidence/
+          retention-days: 30
