@@ -29,9 +29,10 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch_wrapper.py"))
     inputs.file(rootProject.file("tools/apply_s17_sqlite_recovery_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s18_sync_navigation_patch.py"))
+    inputs.file(rootProject.file("tools/apply_m2_android_transport_patch.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
-    commandLine("python3", "tools/apply_s10_ui_patch_in_place.py")
+    commandLine("python3", "tools/apply_m2_android_transport_patch.py")
 }
 
 android {
@@ -66,17 +67,11 @@ android {
     }
 
     buildTypes {
-        debug {
-            isMinifyEnabled = false
-        }
-        release {
-            isMinifyEnabled = false
-        }
+        debug { isMinifyEnabled = false }
+        release { isMinifyEnabled = false }
     }
 
-    buildFeatures {
-        buildConfig = true
-    }
+    buildFeatures { buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -84,12 +79,13 @@ android {
     }
 }
 
-tasks.named("preBuild").configure {
-    dependsOn(generateS10Operations)
+dependencies {
+    implementation("androidx.work:work-runtime:2.11.2")
 }
 
-// Operational architecture: Android App <-> Google Apps Script <-> Google Sheets.
-// The approved Apps Script /exec endpoint is public configuration, not a credential.
-// GSHEET_API_URL may be overridden only for controlled builds/tests.
-// Signing material must remain outside this public repository.
-// S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 apply assertion-based source transforms only inside the ephemeral build workspace.
+tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
+
+// M2 target: Android/PWA <-> Service <-> D1, with GAS as controlled fallback/legacy bridge.
+// GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
+// Signing material remains outside this repository and the Android signer is owner-locked.
+// The M2 source transform composes after S10..S18 transforms in the ephemeral build workspace.
