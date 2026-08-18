@@ -6,10 +6,12 @@ path = ROOT / "google-apps-script/PICK_PACK_API.gs"
 text = path.read_text(encoding="utf-8")
 start_marker = "// === v0.4.2 FINAL CACHE / REPORT OVERRIDES ==="
 end_marker = "function ppStaffSearch_(body) {"
-if text.count(start_marker) != 1 or text.count(end_marker) != 1:
-    raise SystemExit("S12 GAS patch anchors changed")
+if text.count(start_marker) != 1:
+    raise SystemExit("S12 GAS start anchor changed")
 start = text.index(start_marker)
-end = text.index(end_marker, start)
+end = text.find(end_marker, start)
+if end < 0:
+    raise SystemExit("S12 GAS end anchor changed")
 
 replacement = r'''// === v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES ===
 // Read only matching business-date row spans instead of materializing every historical cell.
