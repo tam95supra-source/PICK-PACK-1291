@@ -67,14 +67,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # The Actions token has contents:write but no workflows permission.
-          # Keep every workflow file exactly as checked out; workflow cleanup is done later via GitHub connector.
+          # CI may only publish application/backend source. Workflow/observer cleanup is done by the GitHub connector.
           git restore .github/workflows
-          rm -f ops/s04-trigger.txt ops/s04-direct-trigger.txt ops/s04-finalize-trigger.txt ops/s04-dispatch-receipt.txt ops/s04-observer.json ops/s04_repair.py
-          rmdir ops 2>/dev/null || true
+          git restore ops
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A -- ':!.github/workflows'
+          git add app google-apps-script
           git commit -m 'feat: apply S04 layout 2 navigation and account mail'
           git fetch origin main
           git rebase origin/main
