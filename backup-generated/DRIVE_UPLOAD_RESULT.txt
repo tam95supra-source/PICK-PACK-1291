@@ -1,0 +1,4 @@
+status=FAILED
+snapshot_sha=76db60dd10f49c24b0e17f3c1561e3409537b28d
+stage=DRIVE_CREATE
+reason=http_403_PERMISSION_DENIED

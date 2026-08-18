@@ -4,5 +4,5 @@ snapshot_sha=76db60dd10f49c24b0e17f3c1561e3409537b28d
 source_branch=main
 pristine_backup_branch=backup/pre-service-migration-2026-08-18-2318
 backup_purpose=pre-Service-first-migration rollback point
-created_utc=2026-08-18T16:25:12Z
+created_utc=2026-08-18T16:32:48Z
 restore_note=Source ZIP restores the tree. Git bundle restores reachable Git history through the snapshot commit.
