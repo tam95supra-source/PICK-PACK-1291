@@ -46,14 +46,15 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('wrangler.jsonc')
-          Path('/tmp/wrangler.m2.jsonc').write_text(p.read_text().replace('__M1_D1_DATABASE_ID__','00000000-0000-0000-0000-000000000001'))
+          Path('wrangler.m2.local.jsonc').write_text(p.read_text().replace('__M1_D1_DATABASE_ID__','00000000-0000-0000-0000-000000000001'))
           PY
           rm -rf /tmp/pick-pack-m2-local
-          npx wrangler d1 migrations apply pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-local --config /tmp/wrangler.m2.jsonc
-          npx wrangler d1 execute pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-local --config /tmp/wrangler.m2.jsonc --command "SELECT version,checksum FROM schema_migrations ORDER BY version; SELECT mode,scope,authority_epoch,authority_seq FROM authority_state;" --json | tee /tmp/m2-db.json
+          npx wrangler d1 migrations apply pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-local --config wrangler.m2.local.jsonc
+          npx wrangler d1 execute pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-local --config wrangler.m2.local.jsonc --command "SELECT version,checksum FROM schema_migrations ORDER BY version; SELECT mode,scope,authority_epoch,authority_seq FROM authority_state;" --json | tee /tmp/m2-db.json
           node - <<'NODE'
           const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/m2-db.json','utf8'));const text=JSON.stringify(x);if(!text.includes('0001_m1_foundation')||!text.includes('0002_m2_authority_recovery'))throw new Error('migration markers missing');
           NODE
+          rm -f wrangler.m2.local.jsonc
       - name: Architecture safety guards
         shell: bash
         run: |
