@@ -1,3 +1,4 @@
 from_version=0.4.2-beta.12
 target_version=0.4.2-beta.13
 expected_sha256=01d7e9f78f3d8b3dd6e2ff87cfca770c910c9cf6312209e6ef2a57d4bce90a4d
+observe=beta13-s13
