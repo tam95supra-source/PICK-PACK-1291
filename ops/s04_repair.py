@@ -104,6 +104,111 @@ replace_between(
 
 replace_between(
     ops,
+    "    private fun staffEditor(existing:JSONObject?){",
+    "    private fun listsScreen(){",
+    '''    private fun staffEditor(existing:JSONObject?){
+        if(!isAdmin()) return
+        val box=column(surface).apply { setPadding(dp(6),0,dp(6),0) }
+        val mnv=input("Mã nhân viên",false).apply {
+            setText(existing?.optString("mnv").orEmpty())
+            isEnabled=existing==null
+        }
+        val full=input("Họ và tên",false).apply { setText(existing?.optString("full_name").orEmpty()) }
+        val phone=input("Số điện thoại",false).apply { setText(existing?.optString("phone").orEmpty()) }
+        val pos=input("Vị trí chính",false).apply { setText(existing?.optString("main_position").orEmpty()) }
+        val supplier=input("Nhà cung cấp",false).apply { setText(existing?.optString("supplier").orEmpty()) }
+        val department=input("Bộ phận",false).apply { setText(existing?.optString("department").orEmpty()) }
+        val site=input("Site",false).apply { setText(existing?.optString("site").orEmpty()) }
+        val warehouse=input("Kho",false).apply { setText(existing?.optString("warehouse").orEmpty()) }
+        val startDate=input("Ngày bắt đầu dd/MM/yyyy",false).apply { setText(existing?.optString("start_date").orEmpty()) }
+        val note=input("Ghi chú",false).apply { setText(existing?.optString("note").orEmpty()) }
+        listOf(mnv,full,phone,pos,supplier,department,site,warehouse,startDate,note).forEach { field ->
+            box.addView(field,matchWrap())
+            box.addView(gap(5))
+        }
+        val scroller=ScrollView(this).apply { addView(box) }
+        AlertDialog.Builder(this)
+            .setTitle(if(existing==null) "Thêm nhân sự" else "Sửa nhân sự")
+            .setView(scroller)
+            .setNegativeButton("Hủy",null)
+            .setPositiveButton("LƯU") { _,_ ->
+                val id=mnv.text.toString().trim()
+                val nm=full.text.toString().trim()
+                if(id.isBlank() || nm.isBlank()){
+                    TopNotice.show(this,"MNV và họ tên là bắt buộc.",TopNotice.Kind.ERROR)
+                } else {
+                    val payload=JSONObject()
+                        .put("event_id",UUID.randomUUID().toString())
+                        .put("mnv",id)
+                        .put("full_name",nm)
+                        .put("phone",phone.text.toString())
+                        .put("main_position",pos.text.toString())
+                        .put("supplier",supplier.text.toString())
+                        .put("department",department.text.toString())
+                        .put("site",site.text.toString())
+                        .put("warehouse",warehouse.text.toString())
+                        .put("start_date",startDate.text.toString())
+                        .put("note",note.text.toString())
+                    api.call("staff_upsert",payload) { result ->
+                        runOnUiThread {
+                            if(handleAuth(result)) {
+                                Unit
+                            } else if(!result.ok) {
+                                showError(result.error ?: "Không lưu được nhân sự")
+                            } else {
+                                reloadMaster {
+                                    TopNotice.show(this,"Đã lưu nhân sự.",TopNotice.Kind.SUCCESS)
+                                    staffScreen()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun confirmDeleteStaff(employee:JSONObject){
+        AlertDialog.Builder(this)
+            .setTitle("Xóa nhân sự?")
+            .setMessage("Xóa ${employee.optString("mnv")} • ${employee.optString("full_name")}? Lịch sử nghiệp vụ đã phát sinh vẫn được giữ.")
+            .setNegativeButton("KHÔNG",null)
+            .setPositiveButton("CÓ") { _,_ ->
+                val payload=JSONObject()
+                    .put("event_id",UUID.randomUUID().toString())
+                    .put("mnv",employee.optString("mnv"))
+                api.call("staff_delete",payload) { result ->
+                    runOnUiThread {
+                        if(handleAuth(result)) {
+                            Unit
+                        } else if(!result.ok) {
+                            showError(result.error ?: "Không xóa được nhân sự")
+                        } else {
+                            reloadMaster {
+                                TopNotice.show(this,"Đã xóa nhân sự.",TopNotice.Kind.SUCCESS)
+                                staffScreen()
+                            }
+                        }
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun reloadMaster(done:()->Unit){
+        cacheApi.call("master_snapshot") { result ->
+            runOnUiThread {
+                if(result.ok && result.json!=null) MasterDataCache.save(this,result.json)
+                done()
+            }
+        }
+    }
+
+'''
+)
+
+replace_between(
+    ops,
     "    private fun bottomNav()=",
     "    private fun navigateTab(",
     '''    private fun bottomNav(): LinearLayout = row(surface).apply {
