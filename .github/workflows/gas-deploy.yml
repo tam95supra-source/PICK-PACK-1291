@@ -46,12 +46,12 @@ jobs:
           grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
           grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
           ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
-          python3 -m py_compile tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s13_shared_history_gas_patch.py
+          python3 -m py_compile tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s13_shared_history_gas_patch.py tools/apply_s15_local_first_gas_patch.py
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
           node --check /tmp/PICK_PACK_API.js
           echo 'Current GAS source gates: PASS'
 
-      - name: Apply S12 report and S13 shared history transforms
+      - name: Apply S12 report, S13 shared history and S15 local-first transforms
         shell: bash
         run: |
           set -euo pipefail
@@ -70,6 +70,11 @@ jobs:
           else
             python3 tools/apply_s13_shared_history_gas_patch.py
           fi
+          if grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then
+            echo 'S15 local-first transform already present; skip.'
+          else
+            python3 tools/apply_s15_local_first_gas_patch.py
+          fi
           grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
           grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
           grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
@@ -78,9 +83,15 @@ jobs:
           grep -q "action === 'history_shared'" google-apps-script/PICK_PACK_API.gs
           grep -q "LỊCH SỬ NGHIỆP VỤ" google-apps-script/PICK_PACK_API.gs
           grep -q "Shared operational history only" google-apps-script/PICK_PACK_API.gs
-          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S13.js
-          node --check /tmp/PICK_PACK_API_S13.js
-          echo 'S12 + S13 GAS transform + syntax: PASS'
+          grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'sync_day'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'sync_bootstrap'" google-apps-script/PICK_PACK_API.gs
+          grep -q "sync_engine:'S15_LOCAL_FIRST_45D'" google-apps-script/PICK_PACK_API.gs
+          grep -q "retention_days:45" google-apps-script/PICK_PACK_API.gs
+          grep -q "editable_days:2" google-apps-script/PICK_PACK_API.gs
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S15.js
+          node --check /tmp/PICK_PACK_API_S15.js
+          echo 'S12 + S13 + S15 GAS transform + syntax: PASS'
 
       - name: Exchange OAuth and normalize IDs
         id: auth
@@ -158,7 +169,7 @@ jobs:
           PY
           URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Verify live health, account reset route and OTA isolation
+      - name: Verify live S15 health, account reset route and OTA isolation
         shell: bash
         env:
           WEB_URL: ${{ steps.webapp.outputs.url }}
@@ -167,7 +178,7 @@ jobs:
           OK=false
           for i in $(seq 1 15); do
             curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"health"}' > /tmp/h.json || true
-            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json && grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/h.json && grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/h.json; then OK=true; break; fi
+            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json && grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/h.json && grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/h.json && grep -q '"sync_engine":"S15_LOCAL_FIRST_45D"' /tmp/h.json && grep -q '"retention_days":45' /tmp/h.json && grep -q '"editable_days":2' /tmp/h.json; then OK=true; break; fi
             sleep 4
           done
           [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
@@ -178,4 +189,4 @@ jobs:
           curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
           grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta.json; grep -q '"channel":"BETA"' /tmp/beta.json
           grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable.json; grep -q '"channel":"STABLE"' /tmp/stable.json
-          echo 'Live S13 health + reset route + OTA channel isolation: PASS'
+          echo 'Live S15 local-first health + reset route + OTA channel isolation: PASS'
