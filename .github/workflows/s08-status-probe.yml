@@ -21,17 +21,12 @@ jobs:
         run: |
           set -euo pipefail
           gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-apply-visual-beta8.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/s08.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow app-fast-check.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/fast.json
           gh run list --repo "$GITHUB_REPOSITORY" --workflow release-preflight.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/preflight.json
           gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-release-beta8-recovery.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/release.json
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-release-beta8-recovery-v2.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/releasev2.json
           python3 - <<'PY'
           import json
-          out={
-            's08':json.load(open('/tmp/s08.json')),
-            'fast':json.load(open('/tmp/fast.json')),
-            'preflight':json.load(open('/tmp/preflight.json')),
-            'release':json.load(open('/tmp/release.json')),
-          }
+          out={'s08':json.load(open('/tmp/s08.json')),'preflight':json.load(open('/tmp/preflight.json')),'release':json.load(open('/tmp/release.json')),'release_v2':json.load(open('/tmp/releasev2.json'))}
           open('ops/s08-status.json','w').write(json.dumps(out,separators=(',',':'))+'\n')
           PY
           git config user.name 'github-actions[bot]'
