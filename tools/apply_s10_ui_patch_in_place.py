@@ -12,6 +12,9 @@ runpy.run_path(str(ROOT / "tools/apply_s10_ui_patch.py"), run_name="__main__")
 if not generated.is_file():
     raise SystemExit("S10 generated OperationsActivity was not created")
 shutil.copyfile(generated, source)
-# S11 applies the owner-requested compact inner-screen and report composition on top.
+# S11 applies the compact inner-screen/report baseline used by Beta11.
 runpy.run_path(str(ROOT / "tools/apply_s11_compact_report_patch.py"), run_name="__main__")
-print(f"Applied S10 + S11 OperationsActivity patches in build workspace: {source}")
+# S12 incorporates real-PDA acceptance feedback: wrapped scanner fields, compact density,
+# server-composed report rendering, ping and tappable history detail.
+runpy.run_path(str(ROOT / "tools/apply_s12_real_pda_patch.py"), run_name="__main__")
+print(f"Applied S10 + S11 + S12 runtime patches in build workspace: {source}")
