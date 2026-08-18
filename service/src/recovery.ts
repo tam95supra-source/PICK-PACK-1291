@@ -7,7 +7,7 @@ interface InboxRow { event_id:string;authority_epoch:number;authority_seq:number
 interface FallbackEnvelope { action:LegacyMutationInput["action"];business_date:string;actor:string;role:"SUPERADMIN"|"ADMIN"|"USER";device_id:string;occurred_at:string;payload_json:string; }
 
 export async function reconciliationLocked(db:D1Database):Promise<boolean>{
-  const r=await db.prepare("SELECT meta_value FROM system_meta WHERE meta_key='m2_reconciling'").first<{meta_value:string}>();return r?.meta_value==="1";
+  const r=await db.prepare("SELECT value FROM system_meta WHERE key='m2_reconciling'").first<{value:string}>();return r?.value==="1";
 }
 
 function parseEnvelope(raw:string):FallbackEnvelope{const x=JSON.parse(raw) as Partial<FallbackEnvelope>;if(!x.action||!x.business_date||!x.actor||!x.role||!x.payload_json)throw new Error("FALLBACK_EVENT_SHAPE_INVALID");if(!["enter","exit","resource_change","labor_start","labor_finish"].includes(x.action))throw new Error("FALLBACK_ACTION_INVALID");if(!["SUPERADMIN","ADMIN","USER"].includes(x.role))throw new Error("FALLBACK_ROLE_INVALID");return x as FallbackEnvelope;}
@@ -16,7 +16,7 @@ async function verifyRow(row:InboxRow,e:FallbackEnvelope):Promise<void>{
   const raw=[row.event_id,row.authority_epoch,row.authority_seq,row.service_generation,e.action,e.business_date,e.actor,e.role,e.device_id||"",e.occurred_at||"",e.payload_json].join("|");const digest=await sha256Hex(raw);if(digest!==row.checksum)throw new Error(`FALLBACK_CHECKSUM_MISMATCH:${row.event_id}`);
 }
 
-async function setLock(db:D1Database,value:boolean):Promise<void>{await db.prepare("INSERT INTO system_meta(meta_key,meta_value) VALUES('m2_reconciling',?1) ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value").bind(value?"1":"0").run();}
+async function setLock(db:D1Database,value:boolean):Promise<void>{await db.prepare("INSERT INTO system_meta(key,value,updated_at) VALUES('m2_reconciling',?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").bind(value?"1":"0",nowIso()).run();}
 
 export async function failbackFromFallbackInbox(db:D1Database,env:Env,input:{fallback_epoch:number;expected_service_epoch:number;confirmation:string;initiated_by?:string}):Promise<Record<string,unknown>>{
   if(input.confirmation!=="OWNER_LOCKED_M2_FAILBACK")throw new Error("FAILBACK_CONFIRMATION_REQUIRED");
