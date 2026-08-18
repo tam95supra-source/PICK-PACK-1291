@@ -15,48 +15,26 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BUNDLE_FILE_ID: 1g7eZu7Vahp_pUyvrxYoIEmM_78tRwTRs
   BUNDLE_SHA256: 8082900892389b11333caa08b50cd37a02b2864391ff64d40d36e7d750f0e176
 
 jobs:
   sync-source:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/service-foundation-m1
           fetch-depth: 0
 
-      - name: Verify Google credentials
+      - name: Reconstruct and verify exact M1 source bundle
         shell: bash
         run: |
           set -euo pipefail
-          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do
-            if [[ -z "${!v:-}" ]]; then echo "Missing required secret: $v" >&2; exit 1; fi
-          done
-
-      - name: Download and verify exact M1 source bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
-            -H 'Content-Type: application/x-www-form-urlencoded' \
-            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
-            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
-            --data-urlencode 'grant_type=refresh_token')
-          TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token", ""))' <<<"$RESP")
-          test -n "$TOKEN"
-          echo "::add-mask::$TOKEN"
-          curl -fsSL -H "Authorization: Bearer $TOKEN" \
-            "https://www.googleapis.com/drive/v3/files/$BUNDLE_FILE_ID?alt=media" \
-            -o /tmp/m1-source.zip
+          cat .m1-source/chunk-00.b64 .m1-source/chunk-01.b64 .m1-source/chunk-02.b64 .m1-source/chunk-03.b64 \
+            | base64 -d > /tmp/m1-source.zip
           echo "$BUNDLE_SHA256  /tmp/m1-source.zip" | sha256sum -c -
+          unzip -t /tmp/m1-source.zip >/dev/null
 
       - name: Expand source without enabling deployment workflow yet
         shell: bash
