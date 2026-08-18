@@ -26,11 +26,16 @@ jobs:
           from pathlib import Path
           p=Path('ops/s08_apply_visual_beta8.py')
           s=p.read_text()
-          old="ops=between(ops,'    private fun appBar(title:String)=','    private fun navigateTab(target:String){\\n',header_nav+'    private fun navigateTab(target:String){\\n','header nav')"
-          new="ops=between(ops,'    private fun appBar(title:String)=','    private fun navigateTab(target:String)',header_nav,'header nav')"
-          if old not in s:
-              raise SystemExit('S08 header marker patch target not found')
-          p.write_text(s.replace(old,new,1))
+          fixes=[
+            ("ops=between(ops,'    private fun appBar(title:String)=','    private fun navigateTab(target:String){\\n',header_nav+'    private fun navigateTab(target:String){\\n','header nav')", "ops=between(ops,'    private fun appBar(title:String)=','    private fun navigateTab(target:String)',header_nav,'header nav')"),
+            ("business_helpers+'    private fun employeeCard(e:JSONObject)='", "business_helpers"),
+            ("new_host+'    private fun jsonStrings(a:JSONArray?)'", "new_host"),
+          ]
+          for old,new in fixes:
+              if old not in s:
+                  raise SystemExit('S08 mechanical fix target not found: '+old[:60])
+              s=s.replace(old,new,1)
+          p.write_text(s)
           PY
           python3 ops/s08_apply_visual_beta8.py
           grep -q 'versionCode = 14' app/build.gradle.kts
@@ -38,6 +43,12 @@ jobs:
           grep -q 'businessCard(R.drawable.ic_pp_scan' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_task,"Nghiệp vụ","BUSINESS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           test -f app/src/main/res/drawable/ic_pp_settings.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text()
+          assert s.count('private fun employeeCard(e:JSONObject)=') == 1
+          assert s.count('private fun jsonStrings(a:JSONArray?)') == 1
+          PY
 
       - uses: actions/setup-java@v4
         with:
