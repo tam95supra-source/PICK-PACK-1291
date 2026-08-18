@@ -56,7 +56,8 @@ class M2ServiceTransport(context: Context) {
         if (circuitOpen()) return TransportResult(false, false, 0, null, "CIRCUIT_OPEN")
         val discovery = discover() ?: return TransportResult(false, false, 0, null, "DISCOVERY_UNAVAILABLE")
         if (discovery.optString("authority_mode") != "SERVICE_PRIMARY") return TransportResult(false, false, 0, null, null)
-        val base = discovery.optString("service_url").trimEnd('/'), token = prefs.getString(KEY_SERVICE_TOKEN, null)
+        val base = discovery.optString("service_url").trimEnd('/')
+        val token = prefs.getString(KEY_SERVICE_TOKEN, null)
         if (!validServiceUrl(base) || token.isNullOrBlank()) return TransportResult(false, false, 0, null, "SERVICE_SESSION_UNAVAILABLE")
         val eventId = payload.optString("event_id").ifBlank { java.util.UUID.randomUUID().toString() }
         val request = JSONObject()
@@ -84,7 +85,8 @@ class M2ServiceTransport(context: Context) {
         if (!hasNetwork() || circuitOpen()) return false
         val discovery = discover(force = true) ?: return false
         if (discovery.optString("authority_mode") != "SERVICE_PRIMARY") return false
-        val base = discovery.optString("service_url").trimEnd('/'), token = prefs.getString(KEY_SERVICE_TOKEN, null)
+        val base = discovery.optString("service_url").trimEnd('/')
+        val token = prefs.getString(KEY_SERVICE_TOKEN, null)
         if (!validServiceUrl(base) || token.isNullOrBlank()) return false
         var retryNeeded = false
         for (item in store.pendingMutations(100)) {
