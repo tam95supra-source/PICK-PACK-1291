@@ -1,0 +1,69 @@
+name: Polish S04 Report Layout
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/s04-report-polish.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove report table wrapper outlines
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          path=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt')
+          t=path.read_text(encoding='utf-8')
+          for name,next_name in [('reportGrid','supportGrid'),('supportGrid','historyScreen')]:
+              start=t.index('    private fun '+name)
+              end=t.index('    private fun '+next_name,start)
+              seg=t[start:end]
+              old='background=outlineBg(surface,6)'
+              if old not in seg:
+                  raise SystemExit('Missing report outline in '+name)
+              seg=seg.replace(old,'setBackgroundColor(surface)',1)
+              t=t[:start]+seg+t[end:]
+          path.write_text(t,encoding='utf-8')
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Bootstrap Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/tools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/cmd"; mv "$RUNNER_TEMP/cmd/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Compile Beta and Stable
+        run: gradle --no-daemon :app:assembleBetaDebug :app:assembleStableDebug
+      - name: Commit verified report polish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          git commit -m 'fix: simplify report table layout'
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
