@@ -10,6 +10,15 @@ val gsheetApiUrl = providers.gradleProperty("GSHEET_API_URL")
     .replace("\\", "\\\\")
     .replace("\"", "\\\"")
 
+val s10GeneratedSource = layout.buildDirectory.dir("generated/s10")
+val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt"))
+    inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
+    outputs.file(s10GeneratedSource.map { it.file("vn/pickpack1291/app/beta/PatchedOperationsActivity.kt") })
+    workingDir(rootProject.projectDir)
+    commandLine("python3", "tools/apply_s10_ui_patch.py")
+}
+
 android {
     namespace = "vn.pickpack1291.app.beta"
     compileSdk = 36
@@ -41,6 +50,13 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main") {
+            java.exclude("**/OperationsActivity.kt")
+            java.srcDir(s10GeneratedSource)
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -60,8 +76,12 @@ android {
     }
 }
 
+tasks.named("preBuild").configure {
+    dependsOn(generateS10Operations)
+}
+
 // Operational architecture: Android App <-> Google Apps Script <-> Google Sheets.
 // The approved Apps Script /exec endpoint is public configuration, not a credential.
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
-// v0.4.2 OTA-enabled beta build marker.
+// S10 generates the release OperationsActivity from a standalone, assertion-based source transform.
