@@ -3,6 +3,7 @@ package vn.pickpack1291.app.beta
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import org.json.JSONObject
 
 /**
@@ -34,6 +35,7 @@ class ForegroundSyncCoordinator(
         val changed: Boolean,
         val masterRevision: Long,
         val masterChanged: Boolean,
+        val latencyMs: Long? = null,
         val error: String? = null,
     )
 
@@ -77,7 +79,9 @@ class ForegroundSyncCoordinator(
         if (state != State.ACTIVE || inFlight || api.token == null) return
         inFlight = true
         val requestGeneration = generation
+        val startedAt = SystemClock.elapsedRealtime()
         api.call("sync_status", JSONObject()) { result ->
+            val latencyMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
             main.post {
                 inFlight = false
 
@@ -119,6 +123,7 @@ class ForegroundSyncCoordinator(
                                 changed = changed,
                                 masterRevision = masterRevision,
                                 masterChanged = masterChanged,
+                                latencyMs = latencyMs,
                             )
                         )
                     }
@@ -132,6 +137,7 @@ class ForegroundSyncCoordinator(
                             changed = false,
                             masterRevision = lastMasterRevision,
                             masterChanged = false,
+                            latencyMs = latencyMs,
                             error = result.error ?: "SYNC_FAILED",
                         )
                     )
