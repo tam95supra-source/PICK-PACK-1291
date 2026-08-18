@@ -21,7 +21,7 @@ import java.util.UUID
  * Pick Pack transport for the approved architecture:
  * Android App <-> Google Apps Script <-> Google Sheets.
  *
- * No Supabase/database endpoint is used here. Password plaintext never leaves
+ * Google Apps Script is the only API endpoint used by this transport.
  * the Android process: authentication uses PBKDF2 + challenge/HMAC proof.
  */
 class BetaApiClient(context: Context) {
