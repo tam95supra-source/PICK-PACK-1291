@@ -17,6 +17,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalViewCache.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalSyncEngine.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/SyncDirectionTracker.kt"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch_in_place.py"))
     inputs.file(rootProject.file("tools/apply_s11_compact_report_patch.py"))
@@ -27,6 +28,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch_wrapper.py"))
     inputs.file(rootProject.file("tools/apply_s17_sqlite_recovery_ui_patch.py"))
+    inputs.file(rootProject.file("tools/apply_s18_sync_navigation_patch.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_s10_ui_patch_in_place.py")
@@ -48,8 +50,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 23
-            versionName = "0.4.2-beta.17"
+            versionCode = 24
+            versionName = "0.4.2-beta.18"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -90,4 +92,4 @@ tasks.named("preBuild").configure {
 // The approved Apps Script /exec endpoint is public configuration, not a credential.
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
-// S10 + S11 + S12 + S13 + S14 + S15 + S17 apply assertion-based source transforms only inside the ephemeral build workspace.
+// S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 apply assertion-based source transforms only inside the ephemeral build workspace.
