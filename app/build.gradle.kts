@@ -26,6 +26,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s14_device_cache_scan_patch.py"))
     inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch_wrapper.py"))
+    inputs.file(rootProject.file("tools/apply_s17_sqlite_recovery_ui_patch.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_s10_ui_patch_in_place.py")
@@ -47,8 +48,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 22
-            versionName = "0.4.2-beta.16"
+            versionCode = 23
+            versionName = "0.4.2-beta.17"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -89,4 +90,4 @@ tasks.named("preBuild").configure {
 // The approved Apps Script /exec endpoint is public configuration, not a credential.
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
-// S10 + S11 + S12 + S13 + S14 + S15 apply assertion-based source transforms only inside the ephemeral build workspace.
+// S10 + S11 + S12 + S13 + S14 + S15 + S17 apply assertion-based source transforms only inside the ephemeral build workspace.
