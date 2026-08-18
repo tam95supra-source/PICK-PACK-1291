@@ -1,0 +1,323 @@
+name: S08 Release Beta8 From Official Recovery
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/s08-release-trigger.txt'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      ARTIFACT_ID: '9309679507'
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+      VERSION: 0.4.2-beta.8
+      VERSION_CODE: '14'
+      APK_NAME: pick-pack-1291-public-beta-v0.4.2-beta.8.apk
+      LIVE_API: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve approved recovery references without exposing material
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re,subprocess,os
+          hist=subprocess.check_output(['git','show','1e556230adcfa06bedd15512c44d957a1dbab3d3:.github/workflows/release-beta3-recovery.yml'],text=True)
+          gas=open('google-apps-script/PICK_PACK_API.gs',encoding='utf-8').read()
+          vals={}
+          for key in ('SIGNING_BACKUP_FILE_ID','SIGNING_PRIVATE_DOC_ID'):
+              m=re.search(r'^\s*'+key+r':\s*([^\s]+)',hist,re.M)
+              assert m,key
+              vals[key]=m.group(1).strip()
+          m=re.search(r"OTA_BETA_FOLDER_ID:\s*'([^']+)'",gas)
+          assert m,'OTA_BETA_FOLDER_ID'
+          vals['BETA_FOLDER_ID']=m.group(1)
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              for k,v in vals.items():
+                  print('::add-mask::'+v)
+                  f.write(k+'='+v+'\n')
+          PY
+
+      - name: Exchange Google OAuth
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          [[ -n "$SCRIPT_ID" && -n "$TOKEN" ]]
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$TOKEN"
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Create isolated recovery and upload bridge
+        id: bridge
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+        run: |
+          set -euo pipefail
+          NONCE=$(python3 -c 'import secrets;print(secrets.token_urlsafe(40))'); export NONCE; echo "::add-mask::$NONCE"
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')):
+              files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/original-content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          src=(b/'PICK_PACK_API.gs').read_text(); needle="    if (action === 'login') return ppJson_(ppLogin_(body));"; assert needle in src
+          n=os.environ['NONCE']; backup=os.environ['SIGNING_BACKUP_FILE_ID']; doc=os.environ['SIGNING_PRIVATE_DOC_ID']; folder=os.environ['BETA_FOLDER_ID']
+          x=f'''\n    if (action === '__ci_signing_material' && String(body._ci_nonce||'') === '{n}') {{\n      const z=DriveApp.getFileById('{backup}').getBlob().getBytes();\n      const u='https://www.googleapis.com/drive/v3/files/{doc}/export?mimeType=text%2Fplain';\n      const r=UrlFetchApp.fetch(u,{{headers:{{Authorization:'Bearer '+ScriptApp.getOAuthToken()}},muteHttpExceptions:false}});\n      return ppJson_({{ok:true,backup_b64:Utilities.base64Encode(z),private_pem:r.getContentText()}});\n    }}\n    if (action === '__ci_beta_upload' && String(body._ci_nonce||'') === '{n}') {{\n      const name=String(body.name||''), want=String(body.sha256||'').toLowerCase(), raw=Utilities.base64Decode(String(body.data_b64||''));\n      if(!/^pick-pack-1291-public-beta-v0\\.4\\.2-beta\\.8\\.apk$/.test(name)) return ppJson_({{ok:false,error:'NAME_REJECTED'}});\n      const got=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,raw).map(function(b){{return ('0'+((b+256)%256).toString(16)).slice(-2);}}).join('');\n      if(got!==want) return ppJson_({{ok:false,error:'SHA_MISMATCH',sha256:got}});\n      const fldr=DriveApp.getFolderById('{folder}'), old=fldr.getFilesByName(name); while(old.hasNext()) old.next().setTrashed(true);\n      const f=fldr.createFile(Utilities.newBlob(raw,'application/vnd.android.package-archive',name));\n      f.setDescription('Beta 0.4.2-beta.8 | approved UI system | SHA-256 '+got);\n      return ppJson_({{ok:true,file_id:f.getId(),name:name,sha256:got,size:f.getSize()}});\n    }}\n    if (action === '__ci_beta_delete' && String(body._ci_nonce||'') === '{n}') {{\n      const id=String(body.file_id||''); if(!id) return ppJson_({{ok:false,error:'ID_REQUIRED'}});\n      const f=DriveApp.getFileById(id); if(f.getName()!=='pick-pack-1291-public-beta-v0.4.2-beta.8.apk') return ppJson_({{ok:false,error:'NAME_REJECTED'}});\n      f.setTrashed(true); return ppJson_({{ok:true}});\n    }}'''
+          temp=src.replace(needle,needle+x,1); out=[]
+          for q in files: out.append(dict(q,source=temp) if q['name']=='PICK_PACK_API' else q)
+          Path('/tmp/temp-content.json').write_text(json.dumps({'files':out},ensure_ascii=False))
+          PY
+          curl -fsS -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/temp-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" >/dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"temporary isolated beta8 recovery bridge"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions" > /tmp/v.json
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/v.json"))["versionNumber"])')
+          python3 - "$V" <<'PY'
+          import json,sys
+          open('/tmp/d.json','w').write(json.dumps({'versionNumber':int(sys.argv[1]),'manifestFileName':'appsscript','description':'temporary isolated beta8 recovery bridge'}))
+          PY
+          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/d.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments" > /tmp/dep.json
+          DEP=$(python3 -c 'import json;print(json.load(open("/tmp/dep.json"))["deploymentId"])'); echo "::add-mask::$DEP"
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEP" > /tmp/get.json
+          URL=$(python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/get.json')); w=[e['webApp']['url'] for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']; assert w; print(w[0])
+          PY
+          )
+          echo "::add-mask::$URL"
+          echo "nonce=$NONCE" >> "$GITHUB_OUTPUT"
+          echo "deployment=$DEP" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Retrieve and decrypt official fixed signing bundle
+        id: signing
+        shell: bash
+        env:
+          BRIDGE_URL: ${{ steps.bridge.outputs.url }}
+          NONCE: ${{ steps.bridge.outputs.nonce }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p /tmp/secret /tmp/recovery /tmp/signing
+          OK=false
+          for i in $(seq 1 15); do
+            curl -fsSL -H 'content-type: application/json' "$BRIDGE_URL" -d "{\"action\":\"__ci_signing_material\",\"_ci_nonce\":\"$NONCE\"}" > /tmp/material.json || true
+            if python3 -c 'import json;assert json.load(open("/tmp/material.json")).get("ok") is True' 2>/dev/null; then OK=true; break; fi
+            sleep 4
+          done
+          [[ "$OK" == true ]]
+          python3 - <<'PY'
+          import json,base64
+          j=json.load(open('/tmp/material.json'))
+          open('/tmp/secret/backup.zip','wb').write(base64.b64decode(j['backup_b64']))
+          open('/tmp/secret/recovery-private.pem','w').write(j['private_pem'])
+          PY
+          rm -f /tmp/material.json
+          unzip -q /tmp/secret/backup.zip -d /tmp/recovery
+          ROOT=$(find /tmp/recovery -type f -name aes-key.enc -printf '%h\n' | head -1); [[ -n "$ROOT" ]]
+          openssl pkeyutl -decrypt -inkey /tmp/secret/recovery-private.pem -in "$ROOT/aes-key.enc" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -out /tmp/secret/aes-key.bin
+          [[ $(stat -c %s /tmp/secret/aes-key.bin) -eq 32 ]]
+          KEYHEX=$(od -An -tx1 /tmp/secret/aes-key.bin | tr -d ' \n')
+          IVHEX=$(base64 -d "$ROOT/iv.b64" | od -An -tx1 | tr -d ' \n')
+          openssl enc -d -aes-256-cbc -K "$KEYHEX" -iv "$IVHEX" -in "$ROOT/signing-bundle.enc" -out /tmp/secret/signing-bundle.tar.gz
+          tar -xzf /tmp/secret/signing-bundle.tar.gz -C /tmp/signing
+          BUNDLE=$(find /tmp/signing -type f -name release.jks -printf '%h\n' | head -1); [[ -n "$BUNDLE" ]]
+          test -s "$BUNDLE/key.alias"; test -s "$BUNDLE/store.pass"; test -s "$BUNDLE/key.pass"
+          echo "bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact Release Preflight Beta8 artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" -o /tmp/candidate.zip
+          mkdir -p /tmp/candidate; unzip -q /tmp/candidate.zip -d /tmp/candidate
+          UNSIGNED=$(find /tmp/candidate -type f -name 'app-beta-release-unsigned.apk' | head -1); [[ -s "$UNSIGNED" ]]
+          echo "UNSIGNED=$UNSIGNED" >> "$GITHUB_ENV"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Resolve Android build tools 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" && -x "$ANDROID_HOME/build-tools/36.0.0/zipalign" ]]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"; exit 0
+          fi
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Sign and verify fixed identity
+        id: signed
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.signing.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/aapt" dump badging "$UNSIGNED" > /tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionCode='$VERSION_CODE'" /tmp/badge.txt
+          grep -q "versionName='$VERSION'" /tmp/badge.txt
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" /tmp/aligned.apk
+          "$BT/apksigner" sign --ks "$BUNDLE/release.jks" --ks-key-alias "$(cat "$BUNDLE/key.alias")" --ks-pass "file:$BUNDLE/store.pass" --key-pass "file:$BUNDLE/key.pass" --out "/tmp/$APK_NAME" /tmp/aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs "/tmp/$APK_NAME" > /tmp/verify.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/verify.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          SHA=$(sha256sum "/tmp/$APK_NAME" | awk '{print $1}')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Fixed signer verified; signed Beta8 SHA-256: $SHA"
+
+      - name: Upload signed Beta8 to official Beta Drive folder
+        id: upload
+        shell: bash
+        env:
+          BRIDGE_URL: ${{ steps.bridge.outputs.url }}
+          NONCE: ${{ steps.bridge.outputs.nonce }}
+          APK_SHA: ${{ steps.signed.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,base64,os
+          p='/tmp/'+os.environ['APK_NAME']
+          body={'action':'__ci_beta_upload','_ci_nonce':os.environ['NONCE'],'name':os.environ['APK_NAME'],'sha256':os.environ['APK_SHA'],'data_b64':base64.b64encode(open(p,'rb').read()).decode()}
+          json.dump(body,open('/tmp/upload.json','w'),separators=(',',':'))
+          PY
+          curl -fsSL -H 'content-type: application/json' --data-binary @/tmp/upload.json "$BRIDGE_URL" > /tmp/upload-result.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json,os
+          j=json.load(open('/tmp/upload-result.json')); assert j.get('ok') is True,j; assert j.get('sha256')==os.environ['APK_SHA'],j
+          print('file_id='+j['file_id']); print('size='+str(j['size']))
+          PY
+          echo "Signed Beta8 uploaded to official Beta folder."
+          rm -f /tmp/upload.json /tmp/upload-result.json
+
+      - name: Verify live Beta6 to Beta8 OTA end-to-end
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ steps.signed.outputs.sha }}
+        run: |
+          set -euo pipefail
+          post(){ curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$LIVE_API" -d "$1"; }
+          OK=false
+          for i in $(seq 1 12); do
+            post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.6"}' > /tmp/from6.json || true
+            if python3 - <<'PY' 2>/dev/null
+          import json,os
+          j=json.load(open('/tmp/from6.json'))
+          assert j.get('ok') is True and j.get('source')=='GOOGLE_DRIVE' and j.get('channel')=='BETA'
+          assert j.get('available') is True and j.get('version_name')==os.environ['VERSION'] and j.get('sha256')==os.environ['EXPECTED_SHA'] and j.get('apk_url')
+          PY
+            then OK=true; break; fi
+            sleep 5
+          done
+          [[ "$OK" == true ]] || { cat /tmp/from6.json; exit 1; }
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/from6.json')); open('/tmp/url.txt','w').write(j['apk_url'])
+          PY
+          URL=$(cat /tmp/url.txt)
+          curl -fL --retry 4 --retry-delay 2 "$URL" -o /tmp/ota-beta8.apk
+          GOT=$(sha256sum /tmp/ota-beta8.apk | awk '{print $1}')
+          [[ "$GOT" == "$EXPECTED_SHA" ]]
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs /tmp/ota-beta8.apk > /tmp/ota-cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/ota-cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging /tmp/ota-beta8.apk > /tmp/ota-badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/ota-badge.txt
+          grep -q "versionCode='$VERSION_CODE'" /tmp/ota-badge.txt
+          grep -q "versionName='$VERSION'" /tmp/ota-badge.txt
+          post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.8"}' > /tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json,os
+          selfj=json.load(open('/tmp/self.json')); stable=json.load(open('/tmp/stable.json'))
+          assert selfj.get('ok') is True and selfj.get('channel')=='BETA',selfj
+          assert selfj.get('version_name')==os.environ['VERSION'] and selfj.get('available') is False,selfj
+          assert stable.get('ok') is True and stable.get('channel')=='STABLE',stable
+          assert stable.get('version_name')!=os.environ['VERSION'],stable
+          PY
+          echo "OTA E2E PASS: beta6 -> beta8, download SHA, signer, self-update, Stable isolation."
+
+      - name: Create release verification artifact
+        shell: bash
+        env:
+          APK_SHA: ${{ steps.signed.outputs.sha }}
+          DRIVE_FILE_ID: ${{ steps.upload.outputs.file_id }}
+          DRIVE_SIZE: ${{ steps.upload.outputs.size }}
+        run: |
+          python3 - <<'PY'
+          import json,os
+          j={'ok':True,'version':os.environ['VERSION'],'version_code':int(os.environ['VERSION_CODE']),'sha256':os.environ['APK_SHA'],'drive_file_id':os.environ['DRIVE_FILE_ID'],'size':int(os.environ['DRIVE_SIZE']),'signer_sha256':os.environ['EXPECTED_SIGNER_SHA256'],'beta6_to_beta8':True,'download_sha_match':True,'download_signer_match':True,'self_update':False,'stable_isolated':True,'source':'GOOGLE_DRIVE'}
+          json.dump(j,open('/tmp/beta8-release-result.json','w'),separators=(',',':'))
+          PY
+
+      - name: Upload release verification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta8-ota-release-result
+          path: /tmp/beta8-release-result.json
+          retention-days: 14
+
+      - name: Roll back uploaded Beta8 if release gate fails
+        if: failure() && steps.upload.outputs.file_id != ''
+        shell: bash
+        env:
+          BRIDGE_URL: ${{ steps.bridge.outputs.url }}
+          NONCE: ${{ steps.bridge.outputs.nonce }}
+          FILE_ID: ${{ steps.upload.outputs.file_id }}
+        run: |
+          set +e
+          curl -fsSL -H 'content-type: application/json' "$BRIDGE_URL" -d "{\"action\":\"__ci_beta_delete\",\"_ci_nonce\":\"$NONCE\",\"file_id\":\"$FILE_ID\"}" >/tmp/rollback.json
+          python3 -c 'import json; assert json.load(open("/tmp/rollback.json")).get("ok") is True'
+          echo 'Failed candidate rolled back from Beta Drive.'
+
+      - name: Cleanup isolated deployment and signing material
+        if: always()
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
+          TEMP_DEPLOYMENT: ${{ steps.bridge.outputs.deployment }}
+        run: |
+          set +e
+          if [[ -n "$TEMP_DEPLOYMENT" && -n "$ACCESS_TOKEN" ]]; then curl -sS -o /dev/null -X DELETE -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$TEMP_DEPLOYMENT"; fi
+          if [[ -f /tmp/original-content.json && -n "$ACCESS_TOKEN" ]]; then curl -sS -o /dev/null -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/original-content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content"; fi
+          find /tmp/secret /tmp/signing -type f -exec shred -u {} + 2>/dev/null || true
+          rm -rf /tmp/secret /tmp/signing /tmp/recovery /tmp/candidate /tmp/candidate.zip /tmp/aligned.apk /tmp/ota-beta8.apk
+          echo 'Temporary bridge removed and signing material cleaned.'
