@@ -54,10 +54,10 @@ class FullBetaActivity : Activity() {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
                 UpdateManager.check(this@FullBetaActivity)
                 if (status.connected) {
-                    syncText?.text = "✓ Online • R${status.serverSeq}"
+                    syncText?.text = "✓ Kết nối tốt"
                     syncText?.setTextColor(green)
                 } else {
-                    syncText?.text = "! Offline"
+                    syncText?.text = "! Mất kết nối"
                     syncText?.setTextColor(red)
                 }
                 if (status.masterChanged || status.masterRevision != MasterDataCache.revision(this@FullBetaActivity)) refreshMasterCache()
@@ -100,8 +100,7 @@ class FullBetaActivity : Activity() {
         accountPosition = saved.optString("position", "")
         accountEmail = saved.optString("email", "")
         LocalLogManager.uploadAutomaticPending(this, api)
-        dashboard()
-        foregroundSync.start()
+        openMainShell()
     }
 
     private fun login() {
@@ -146,8 +145,7 @@ class FullBetaActivity : Activity() {
                 pass.setText("")
                 if (MasterDataCache.revision(this@FullBetaActivity) == 0L) refreshMasterCache()
                 LocalLogManager.uploadAutomaticPending(this@FullBetaActivity, api)
-                dashboard()
-                foregroundSync.start()
+                openMainShell()
             } }
         }
         button.setOnClickListener { submit() }
@@ -181,6 +179,20 @@ class FullBetaActivity : Activity() {
             addView(card, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         }
         setScreen(ScrollView(this).apply { isFillViewport = true; addView(holder) })
+    }
+
+    private fun openMainShell() {
+        startActivity(Intent(this, OperationsActivity::class.java).apply {
+            putExtra("module", "BUSINESS")
+            putExtra("login", accountLogin)
+            putExtra("name", accountName)
+            putExtra("role", accountRole)
+            putExtra("position", accountPosition)
+            putExtra("email", accountEmail)
+        })
+        finish()
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0,0)
     }
 
     private fun dashboard() {
@@ -243,7 +255,6 @@ class FullBetaActivity : Activity() {
         body.addView(gap(8))
         body.addView(cardRow(cards[2],cards[3]))
         body.addView(gap(10))
-        body.addView(txt("Màu giao diện được đổi trong tab Cài đặt • 7 màu đồng bộ toàn ứng dụng",9.2f,muted,false).apply{gravity=Gravity.CENTER})
 
         root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f))
         setScreen(root);refreshStatus()
@@ -354,7 +365,7 @@ class FullBetaActivity : Activity() {
         body.addView(enter,matchWrap())
     }
 
-    private fun refreshStatus(){syncApi.call("sync_status"){r->runOnUiThread{if(r.code==401){sessionExpired();return@runOnUiThread};val j=r.json;if(r.ok&&j!=null){syncText?.text="✓ Online • R${j.optLong("server_seq",0)}";syncText?.setTextColor(Color.WHITE)}else{syncText?.text="! Offline";syncText?.setTextColor(Color.WHITE)}}}}
+    private fun refreshStatus(){syncApi.call("sync_status"){r->runOnUiThread{if(r.code==401){sessionExpired();return@runOnUiThread};val j=r.json;if(r.ok&&j!=null){syncText?.text="✓ Kết nối tốt";syncText?.setTextColor(Color.WHITE)}else{syncText?.text="! Mất kết nối";syncText?.setTextColor(Color.WHITE)}}}}
 
     private fun employeeCard(e: JSONObject)=column(surface).apply{setPadding(dp(14),dp(12),dp(14),dp(12));background=outlineBg(surface,9);addView(txt("${e.optString("mnv")} • ${e.optString("full_name")}",15.5f,navy,true));addView(gap(3));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}",10.5f,ink,false));addView(txt("${dash(e.optString("department"))} • Site ${dash(e.optString("site"))} • Kho ${dash(e.optString("warehouse"))}",10f,muted,false))}
     private fun details(items:List<Pair<String,String>>)=column(surface).apply{setPadding(dp(13),dp(9),dp(13),dp(9));background=outlineBg(surface,9);items.forEach{(k,v)->addView(row(surface).apply{addView(txt(k,10.5f,muted,false),LinearLayout.LayoutParams(0,-2,.45f));addView(txt(if(v.isBlank())"—" else v,10.7f,ink,true).apply{gravity=Gravity.END},LinearLayout.LayoutParams(0,-2,.55f));setPadding(0,dp(4),0,dp(4))})}}
