@@ -10,6 +10,7 @@ on:
     branches: [ main ]
     paths:
       - 'ops/m2-external-live-verify-trigger.txt'
+      - '.github/workflows/service-m2-external-live-verify.yml'
 
 permissions:
   contents: read
@@ -31,7 +32,7 @@ jobs:
   verify:
     if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -52,9 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID SIGNING_STORE_PASSWORD; do [[ -n "${!v:-}" ]] || { echo "MISSING_REQUIRED_SECRET:$v" >&2; exit 1; }; done
-          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
           ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
-          echo "::add-mask::$BRIDGE"; echo "::add-mask::$ADMIN"; echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
+          echo "::add-mask::$ADMIN"; echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
           RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP"); test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
           H=$(curl -sS -o /tmp/source-meta.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID?fields=spreadsheetId,properties.title"); [[ "$H" == 200 ]] || { cat /tmp/source-meta.json; exit 1; }
@@ -70,17 +70,33 @@ jobs:
           curl -fsS "$SERVICE_URL/" | grep -qi '<html'
           curl -fsS "$SERVICE_URL/manifest.webmanifest" | grep -q 'Pick Pack 1291'
           echo "ROLLBACK_FOLDER_VERIFIED_BY_DRIVE_CONNECTOR:$ROLLBACK_FOLDER_ID"
-      - name: Bootstrap production workbook twice and prove stable reconciliation
+      - name: Bootstrap production workbook twice with bounded resumable steps
         shell: bash
         run: |
           set -euo pipefail
-          for n in a b; do
-            curl -fsS --connect-timeout 5 --max-time 180 --retry 2 --retry-delay 3 -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" "$SERVICE_URL/internal/bootstrap-google" > "/tmp/bootstrap-$n.json"
-            node -e 'const j=require(process.argv[1]);if(!j.ok)throw new Error(JSON.stringify(j))' "/tmp/bootstrap-$n.json"
-          done
+          run_bootstrap() {
+            local label="$1" start run body step phase
+            start=$(curl -fsS --connect-timeout 5 --max-time 30 --retry 3 --retry-delay 2 --retry-all-errors -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" "$SERVICE_URL/internal/bootstrap-google/start")
+            run=$(node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||!j.run_id)process.exit(2);process.stdout.write(j.run_id)' "$start")
+            body=$(node -e 'process.stdout.write(JSON.stringify({run_id:process.argv[1]}))' "$run")
+            for i in $(seq 1 700); do
+              curl -fsS --connect-timeout 5 --max-time 30 --retry 3 --retry-delay 2 --retry-all-errors -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" -H 'content-type: application/json' -d "$body" "$SERVICE_URL/internal/bootstrap-google/step" > "/tmp/bootstrap-step-$label.json"
+              if node -e 'const j=require(process.argv[1]);process.exit(j.ok&&j.done===true?0:1)' "/tmp/bootstrap-step-$label.json"; then
+                cp "/tmp/bootstrap-step-$label.json" "/tmp/bootstrap-$label.json"
+                echo "BOOTSTRAP_${label}_COMPLETE steps=$i run_id=$run"
+                return 0
+              fi
+              phase=$(node -e 'const j=require(process.argv[1]);process.stdout.write(String(j.phase||j.state?.phase||"UNKNOWN"))' "/tmp/bootstrap-step-$label.json")
+              echo "BOOTSTRAP_${label}_STEP=$i phase=$phase"
+            done
+            echo "BOOTSTRAP_${label}_STEP_LIMIT_EXCEEDED" >&2
+            return 1
+          }
+          run_bootstrap a
+          run_bootstrap b
           node - <<'NODE'
           const fs=require('fs'),a=JSON.parse(fs.readFileSync('/tmp/bootstrap-a.json')),b=JSON.parse(fs.readFileSync('/tmp/bootstrap-b.json'));
-          const stable=x=>JSON.stringify({source:x.source||x.source_identity,sheets:x.sheets||x.report?.sheets||x.sheet_report,projections:x.projection_counts||x.report?.projection_counts,business_dates:x.business_dates||x.report?.business_dates});
+          const stable=x=>JSON.stringify({source_sheet_id:x.source_sheet_id||x.report?.source_sheet_id,sheets:x.sheets||x.report?.sheets,projections:x.projection_counts||x.report?.projection_counts,business_date_min:x.business_date_min||x.report?.business_date_min,business_date_max:x.business_date_max||x.report?.business_date_max,business_date_count:x.business_date_count||x.report?.business_date_count});
           if(stable(a)!==stable(b))throw new Error('REBOOTSTRAP_RECONCILIATION_CHANGED');
           NODE
       - name: Prove D1 outbox to Google staging with harmless shadow probe
@@ -119,7 +135,7 @@ jobs:
           cp /tmp/bootstrap-b.json m2-external-live-evidence/bootstrap-b.json
           cp /tmp/replicate.json m2-external-live-evidence/replication.json
           node - <<'NODE'
-          const fs=require('fs');fs.writeFileSync('m2-external-live-evidence/state.json',JSON.stringify({source_commit:process.env.GITHUB_SHA,service_url:process.env.SERVICE_URL,generation:process.env.SERVICE_GENERATION,source_sheet_id:process.env.SOURCE_SHEET_ID,staging_sheet_id:process.env.STAGING_SHEET_ID,rollback_folder_id:process.env.ROLLBACK_FOLDER_ID,authority_scope:'STAGING_SHADOW',production_cutover:false,external_live_verify:true},null,2));
+          const fs=require('fs');fs.writeFileSync('m2-external-live-evidence/state.json',JSON.stringify({source_commit:process.env.GITHUB_SHA,service_url:process.env.SERVICE_URL,generation:process.env.SERVICE_GENERATION,source_sheet_id:process.env.SOURCE_SHEET_ID,staging_sheet_id:process.env.STAGING_SHEET_ID,rollback_folder_id:process.env.ROLLBACK_FOLDER_ID,authority_scope:'STAGING_SHADOW',production_cutover:false,external_live_verify:true,resumable_bootstrap:true},null,2));
           NODE
       - uses: actions/upload-artifact@v4
         with:
