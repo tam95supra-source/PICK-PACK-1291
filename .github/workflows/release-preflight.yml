@@ -6,6 +6,10 @@ on:
     branches: [ main ]
     paths:
       - 'ops/release-preflight-trigger.txt'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/release-preflight-trigger.txt'
 
 concurrency:
   group: release-preflight-${{ github.ref }}
