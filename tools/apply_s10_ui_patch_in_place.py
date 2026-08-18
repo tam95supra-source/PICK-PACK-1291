@@ -30,4 +30,6 @@ runpy.run_path(str(ROOT / "tools/apply_s15_local_first_ui_patch_wrapper.py"), ru
 # S17 recovery lets fixed clients derive the 45-day floor while the live server deliberately leaves
 # retention_floor blank to stop Beta15/Beta16 crash loops before OTA.
 runpy.run_path(str(ROOT / "tools/apply_s17_sqlite_recovery_ui_patch.py"), run_name="__main__")
-print(f"Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 runtime patches in build workspace: {source}")
+# S18 adds real upload/download/bidirectional sync state and fixes parent-tab + dual-edge navigation.
+runpy.run_path(str(ROOT / "tools/apply_s18_sync_navigation_patch.py"), run_name="__main__")
+print(f"Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 runtime patches in build workspace: {source}")
