@@ -147,7 +147,7 @@ jobs:
           grep -q "versionName='$STABLE_NAME'" /tmp/stable.txt
           printf 'commit=%s\nbeta_name=%s\nbeta_code=%s\nstable_name=%s\nstable_code=%s\n' \
             "$GITHUB_SHA" "$BETA_NAME" "$BETA_CODE" "$STABLE_NAME" "$STABLE_CODE" > app/build/outputs/apk/release-metadata.txt
-          sha256sum "$BETA" >> app/build/outputs/apk/release-metadata.txt
+          sha256sum "$BETA" "$STABLE" >> app/build/outputs/apk/release-metadata.txt
 
       - name: Upload authoritative unsigned Beta candidate
         uses: actions/upload-artifact@v4
@@ -155,6 +155,15 @@ jobs:
           name: pick-pack-1291-${{ steps.meta.outputs.beta_name }}-unsigned
           path: |
             app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+            app/build/outputs/apk/release-metadata.txt
+          retention-days: 7
+
+      - name: Upload authoritative unsigned Stable candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-${{ steps.meta.outputs.stable_name }}-stable-unsigned
+          path: |
+            app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
             app/build/outputs/apk/release-metadata.txt
           retention-days: 7
 
@@ -169,30 +178,45 @@ jobs:
           echo "ready=$READY" >> "$GITHUB_OUTPUT"
           echo "Signing secrets ready: $READY"
 
-      - name: Sign same validated artifact and verify fixed identity
+      - name: Sign both validated artifacts and verify fixed identity
         if: steps.signing.outputs.ready == 'true'
         shell: bash
         env:
           BETA_NAME: ${{ steps.meta.outputs.beta_name }}
+          STABLE_NAME: ${{ steps.meta.outputs.stable_name }}
         run: |
           set -euo pipefail
           KS="$RUNNER_TEMP/release.jks"
           printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
           printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"
           printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
-          mkdir -p dist
-          OUT="dist/pick-pack-1291-public-beta-${BETA_NAME}.apk"
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$OUT" | tee /tmp/cert.txt
-          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
-          sha256sum "$OUT" > dist/SHA256SUMS.txt
+          mkdir -p dist/beta dist/stable
+          BETA_OUT="dist/beta/pick-pack-1291-public-beta-${BETA_NAME}.apk"
+          STABLE_OUT="dist/stable/pick-pack-1291-stable-${STABLE_NAME}.apk"
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$BETA_OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$STABLE_OUT" app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          "$BT/apksigner" verify --verbose --print-certs "$BETA_OUT" > /tmp/beta-cert.txt
+          "$BT/apksigner" verify --verbose --print-certs "$STABLE_OUT" > /tmp/stable-cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/beta-cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/stable-cert.txt
+          sha256sum "$BETA_OUT" > dist/beta/SHA256SUMS.txt
+          sha256sum "$STABLE_OUT" > dist/stable/SHA256SUMS.txt
 
-      - name: Upload signed validation artifact
+      - name: Upload signed Beta validation artifact
         if: steps.signing.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: pick-pack-1291-${{ steps.meta.outputs.beta_name }}-signed-validation
-          path: dist/*
+          path: dist/beta/*
+          retention-days: 7
+
+      - name: Upload signed Stable validation artifact
+        if: steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-${{ steps.meta.outputs.stable_name }}-stable-signed-validation
+          path: dist/stable/*
           retention-days: 7
 
       - name: Cleanup signing material
@@ -207,5 +231,5 @@ jobs:
     steps:
       - run: |
           echo 'PASS - live gates and Android release validation completed in parallel.'
-          echo 'Reuse the uploaded Beta artifact; do not rebuild before signing/publish.'
+          echo 'Reuse the uploaded Beta/Stable artifacts; do not rebuild before signing/publish.'
           echo 'No Google Drive OTA publish is performed by this workflow.'
