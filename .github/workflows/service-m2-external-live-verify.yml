@@ -1,0 +1,128 @@
+name: Service M2 External Live Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/m2-external-live-verify-trigger.txt'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/m2-external-live-verify-trigger.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-external-live-verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  D1_NAME: pick-pack-1291-service-prod
+  WORKER_NAME: pick-pack-1291-service
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
+  ROLLBACK_FOLDER_ID: 1P7KM5b5D_P69OkyKdmLx0HbL3wRpg0yG
+
+jobs:
+  verify:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify secrets Google scopes and live shadow health without redeploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID SIGNING_STORE_PASSWORD; do [[ -n "${!v:-}" ]] || { echo "MISSING_REQUIRED_SECRET:$v" >&2; exit 1; }; done
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"; echo "::add-mask::$ADMIN"; echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP"); test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          H=$(curl -sS -o /tmp/source-meta.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID?fields=spreadsheetId,properties.title"); [[ "$H" == 200 ]] || { cat /tmp/source-meta.json; exit 1; }
+          SCRIPT=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t '); H=$(curl -sS -o /tmp/gas-project.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT/content"); [[ "$H" == 200 ]] || { cat /tmp/gas-project.json; exit 1; }
+          OK=false
+          for i in $(seq 1 30); do
+            if curl -fsS --connect-timeout 5 --max-time 15 "$SERVICE_URL/health" >/tmp/health.json 2>/tmp/health.err; then
+              if node -e 'const j=require("/tmp/health.json");process.exit(j.ok&&j.environment==="staging-shadow"&&j.authority?.scope==="STAGING_SHADOW"&&j.authority?.mode==="SERVICE_PRIMARY"&&j.generation===process.env.SERVICE_GENERATION?0:1)'; then OK=true; break; fi
+            fi
+            sleep 10
+          done
+          [[ "$OK" == true ]] || { cat /tmp/health.err || true; cat /tmp/health.json || true; exit 1; }
+          curl -fsS "$SERVICE_URL/" | grep -qi '<html'
+          curl -fsS "$SERVICE_URL/manifest.webmanifest" | grep -q 'Pick Pack 1291'
+          echo "ROLLBACK_FOLDER_VERIFIED_BY_DRIVE_CONNECTOR:$ROLLBACK_FOLDER_ID"
+      - name: Bootstrap production workbook twice and prove stable reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in a b; do
+            curl -fsS --connect-timeout 5 --max-time 180 --retry 2 --retry-delay 3 -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" "$SERVICE_URL/internal/bootstrap-google" > "/tmp/bootstrap-$n.json"
+            node -e 'const j=require(process.argv[1]);if(!j.ok)throw new Error(JSON.stringify(j))' "/tmp/bootstrap-$n.json"
+          done
+          node - <<'NODE'
+          const fs=require('fs'),a=JSON.parse(fs.readFileSync('/tmp/bootstrap-a.json')),b=JSON.parse(fs.readFileSync('/tmp/bootstrap-b.json'));
+          const stable=x=>JSON.stringify({source:x.source||x.source_identity,sheets:x.sheets||x.report?.sheets||x.sheet_report,projections:x.projection_counts||x.report?.projection_counts,business_dates:x.business_dates||x.report?.business_dates});
+          if(stable(a)!==stable(b))throw new Error('REBOOTSTRAP_RECONCILIATION_CHANGED');
+          NODE
+      - name: Prove D1 outbox to Google staging with harmless shadow probe
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          LIST=$(npx wrangler d1 list --json)
+          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST"); test -n "$ID"; export PROD_D1_ID="$ID"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          s=Path('wrangler.jsonc').read_text().replace('"name": "pick-pack-1291-service-m1-staging"','"name": "'+os.environ['WORKER_NAME']+'"').replace('"SERVICE_GENERATION": "m2-precutover-20260819-001"','"SERVICE_GENERATION": "'+os.environ['SERVICE_GENERATION']+'"').replace('"database_name": "pick-pack-1291-m1-staging"','"database_name": "'+os.environ['D1_NAME']+'"').replace('__M1_D1_DATABASE_ID__',os.environ['PROD_D1_ID'])
+          Path('/tmp/wrangler.liveverify.jsonc').write_text(s)
+          PY
+          TS=$(date -u +%Y-%m-%dT%H:%M:%S.000Z); EVENT="m2-liveverify-shadow-${GITHUB_RUN_ID}"; export EVENT
+          SQL="BEGIN; UPDATE authority_state SET authority_seq=authority_seq+1,updated_at='$TS' WHERE singleton_id=1 AND scope='STAGING_SHADOW'; INSERT INTO events(event_id,event_type,entity_type,entity_id,business_date,authority_epoch,authority_seq,service_generation,base_version,new_version,actor_id,actor_role,device_id,occurred_at,committed_at,payload_json,idempotency_key,origin,schema_version,checksum) SELECT '$EVENT','M1_SHADOW_PROBE','TEST','$EVENT',(SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 1),authority_epoch,authority_seq,service_generation,0,1,'M2_PREFLIGHT','SUPERADMIN','github-actions','$TS','$TS','{}','idem:$EVENT','SERVICE',1,'preflight' FROM authority_state WHERE singleton_id=1; INSERT INTO sheet_replication_outbox(event_id,status,next_attempt_at) VALUES('$EVENT','PENDING','$TS'); COMMIT;"
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.liveverify.jsonc --command "$SQL" >/tmp/probe-sql.txt
+          curl -fsS --connect-timeout 5 --max-time 180 -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" "$SERVICE_URL/internal/replicate" >/tmp/replicate.json
+          node -e 'const j=require("/tmp/replicate.json");if(!j.ok||j.processed<1||j.pending!==0)throw new Error(JSON.stringify(j))'
+          RANGE=$(python3 - <<'PY'
+          import urllib.parse
+          print(urllib.parse.quote("'__M1_SERVICE_REPLICA'!A2:A"))
+          PY
+          )
+          curl -fsS -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$STAGING_SHEET_ID/values/$RANGE" >/tmp/replica-ids.json
+          node -e 'const j=require("/tmp/replica-ids.json"),e=process.env.EVENT;if(!(j.values||[]).some(r=>r[0]===e))throw new Error("STAGING_PROBE_NOT_REPLICATED")'
+      - name: Emit evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p m2-external-live-evidence
+          cp /tmp/health.json m2-external-live-evidence/service-health.json
+          cp /tmp/bootstrap-a.json m2-external-live-evidence/bootstrap-a.json
+          cp /tmp/bootstrap-b.json m2-external-live-evidence/bootstrap-b.json
+          cp /tmp/replicate.json m2-external-live-evidence/replication.json
+          node - <<'NODE'
+          const fs=require('fs');fs.writeFileSync('m2-external-live-evidence/state.json',JSON.stringify({source_commit:process.env.GITHUB_SHA,service_url:process.env.SERVICE_URL,generation:process.env.SERVICE_GENERATION,source_sheet_id:process.env.SOURCE_SHEET_ID,staging_sheet_id:process.env.STAGING_SHEET_ID,rollback_folder_id:process.env.ROLLBACK_FOLDER_ID,authority_scope:'STAGING_SHADOW',production_cutover:false,external_live_verify:true},null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m2-external-live-evidence-${{ github.run_id }}
+          path: m2-external-live-evidence/
+          retention-days: 30
