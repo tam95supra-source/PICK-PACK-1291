@@ -28,6 +28,11 @@ on:
     paths:
       - 'ops/beta-ota-verify-trigger.txt'
       - 'ops/stable-ota-verify-trigger.txt'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/beta-ota-verify-trigger.txt'
+      - 'ops/stable-ota-verify-trigger.txt'
 
 concurrency:
   group: ota-verify
