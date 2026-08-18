@@ -14,26 +14,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Read beta8 pipeline status
+      - name: Read direct beta8 OTA verification status
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-apply-visual-beta8.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/s08.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow release-preflight.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/preflight.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-release-beta8-recovery.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/release.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-release-beta8-recovery-v2.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/releasev2.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-cancel-stuck-release.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/cancel.json
-          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-finalize-direct-beta8.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/final.json
-          python3 - <<'PY'
-          import json
-          out={'s08':json.load(open('/tmp/s08.json')),'preflight':json.load(open('/tmp/preflight.json')),'release':json.load(open('/tmp/release.json')),'release_v2':json.load(open('/tmp/releasev2.json')),'cancel':json.load(open('/tmp/cancel.json')),'final':json.load(open('/tmp/final.json'))}
-          open('ops/s08-status.json','w').write(json.dumps(out,separators=(',',':'))+'\n')
-          PY
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-verify-direct-ota.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > ops/s08-status.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ops/s08-status.json
-          git commit -m 'ops: record temporary beta8 pipeline status' || exit 0
+          git commit -m 'ops: record temporary beta8 direct OTA status' || exit 0
           git pull --rebase origin main
           git push origin HEAD:main
