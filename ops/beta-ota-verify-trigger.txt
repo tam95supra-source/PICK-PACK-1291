@@ -1,3 +1,4 @@
 from_version=0.4.2-beta.11
 target_version=0.4.2-beta.12
 expected_sha256=43093f37e64ee1c9581da1a07cfa88628d95ad63dda130c960e2b1d4b80f2891
+observer=s11-beta12-ota
