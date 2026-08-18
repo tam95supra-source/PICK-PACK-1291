@@ -36,6 +36,15 @@ jobs:
           python3 /tmp/apply_s04.py
           python3 ops/s04_repair.py
 
+      - name: Inspect generated Kotlin slices
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '--- OperationsActivity 195-235 ---'
+          nl -ba app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt | sed -n '195,235p'
+          echo '--- OperationsActivity 270-345 ---'
+          nl -ba app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt | sed -n '270,345p'
+
       - name: Check Apps Script syntax
         run: cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js && node --check /tmp/PICK_PACK_API.js
 
