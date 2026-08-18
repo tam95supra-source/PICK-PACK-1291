@@ -1,13 +1,11 @@
 name: Service M2 External Precutover PR
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [ main ]
     paths:
-      - 'ops/m2-external-precutover-trigger.txt'
-      - 'tools/m2_external_precutover.sh'
       - '.github/workflows/service-m2-external-precutover-pr.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,39 +16,7 @@ concurrency:
 
 jobs:
   external-precutover:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/service-migration-m2'
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      D1_NAME: pick-pack-1291-service-prod
-      WORKER_NAME: pick-pack-1291-service
-      SERVICE_GENERATION: m2-prod-20260819-001
-      SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
-      STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
-      ROLLBACK_FOLDER_ID: 1P7KM5b5D_P69OkyKdmLx0HbL3wRpg0yG
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
-      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
-      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
-      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
-      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Run external permission shadow bootstrap replication gate
-        shell: bash
-        run: bash tools/m2_external_precutover.sh
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: m2-external-precutover-pr-evidence-${{ github.run_id }}
-          path: m2-external-evidence/
-          if-no-files-found: warn
-          retention-days: 30
+      - run: echo 'Retired after M2 external deploy, bootstrap, and replication gates passed.'
