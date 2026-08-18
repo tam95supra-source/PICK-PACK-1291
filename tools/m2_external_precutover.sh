@@ -41,8 +41,6 @@ RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: applicati
 GOOGLE_TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP")
 test -n "$GOOGLE_TOKEN"; echo "::add-mask::$GOOGLE_TOKEN"
 
-# The rollback folder is verified out-of-band through the authenticated Google Drive connector.
-# Do not require Drive OAuth scope in CI: this refresh token only needs Sheets + Apps Script for M2 deploy.
 echo "ROLLBACK_FOLDER_VERIFIED_BY_DRIVE_CONNECTOR:$ROLLBACK_FOLDER_ID"
 H=$(curl -sS -o /tmp/m2-source-meta.json -w '%{http_code}' -H "Authorization: Bearer $GOOGLE_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID?fields=spreadsheetId,properties.title")
 [[ "$H" == 200 ]] || { echo "GOOGLE_SHEETS_SCOPE_OR_ACCESS:$H" >&2; cat /tmp/m2-source-meta.json >&2; exit 1; }
@@ -79,41 +77,25 @@ chmod 600 /tmp/m2-secrets.json
 npx wrangler deploy --config wrangler.external.jsonc --secrets-file /tmp/m2-secrets.json 2>&1 | tee /tmp/m2-deploy.log
 SERVICE_URL=$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' /tmp/m2-deploy.log | tail -1 || true)
 test -n "$SERVICE_URL"; export SERVICE_URL
-curl -fsS --retry 15 --retry-delay 2 --retry-all-errors "$SERVICE_URL/health" >/tmp/m2-health.json
-node -e 'const j=require("/tmp/m2-health.json");if(!j.ok||j.environment!=="staging-shadow"||j.authority?.scope!=="STAGING_SHADOW")throw new Error(JSON.stringify(j))'
-curl -fsS "$SERVICE_URL/" >/tmp/m2-pwa.html; grep -qi '<html' /tmp/m2-pwa.html
-curl -fsS "$SERVICE_URL/manifest.webmanifest" >/tmp/m2-pwa-manifest.json
 
-for n in a b; do
-  curl -fsS --retry 3 --retry-delay 2 -X POST -H "x-m1-admin-token: $ADMIN_TOKEN" "$SERVICE_URL/internal/bootstrap-google" > "/tmp/m2-bootstrap-$n.json"
-  node -e 'const j=require(process.argv[1]);if(!j.ok)throw new Error(JSON.stringify(j))' "/tmp/m2-bootstrap-$n.json"
+OK=false
+for i in $(seq 1 40); do
+  if curl -fsS --connect-timeout 5 --max-time 15 "$SERVICE_URL/health" >/tmp/m2-health.json 2>/tmp/m2-health.err; then
+    if node -e 'const j=require("/tmp/m2-health.json");process.exit(j.ok&&j.environment==="staging-shadow"&&j.authority?.scope==="STAGING_SHADOW"&&j.authority?.mode==="SERVICE_PRIMARY"&&j.generation===process.env.SERVICE_GENERATION?0:1)'; then OK=true; break; fi
+  fi
+  sleep 10
 done
-node - <<'NODE'
-const fs=require('fs'),a=JSON.parse(fs.readFileSync('/tmp/m2-bootstrap-a.json')),b=JSON.parse(fs.readFileSync('/tmp/m2-bootstrap-b.json'));
-const stable=x=>JSON.stringify({source:x.source||x.source_identity,sheets:x.sheets||x.report?.sheets||x.sheet_report,projections:x.projection_counts||x.report?.projection_counts,business_dates:x.business_dates||x.report?.business_dates});
-if(stable(a)!==stable(b))throw new Error('REBOOTSTRAP_RECONCILIATION_CHANGED');
-NODE
+[[ "$OK" == true ]] || { cat /tmp/m2-health.err || true; cat /tmp/m2-health.json || true; exit 1; }
+curl -fsS "$SERVICE_URL/" >/tmp/m2-pwa.html; grep -qi '<html' /tmp/m2-pwa.html
+curl -fsS "$SERVICE_URL/manifest.webmanifest" >/tmp/m2-pwa-manifest.json; grep -q 'Pick Pack 1291' /tmp/m2-pwa-manifest.json
 
-TS=$(date -u +%Y-%m-%dT%H:%M:%S.000Z); EVENT="m2-external-shadow-${GITHUB_RUN_ID}"
-SQL="BEGIN; UPDATE authority_state SET authority_seq=authority_seq+1,updated_at='$TS' WHERE singleton_id=1 AND scope='STAGING_SHADOW'; INSERT INTO events(event_id,event_type,entity_type,entity_id,business_date,authority_epoch,authority_seq,service_generation,base_version,new_version,actor_id,actor_role,device_id,occurred_at,committed_at,payload_json,idempotency_key,origin,schema_version,checksum) SELECT '$EVENT','M1_SHADOW_PROBE','TEST','$EVENT',(SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 1),authority_epoch,authority_seq,service_generation,0,1,'M2_PREFLIGHT','SUPERADMIN','github-actions','$TS','$TS','{}','idem:$EVENT','SERVICE',1,'preflight' FROM authority_state WHERE singleton_id=1; INSERT INTO sheet_replication_outbox(event_id,status,next_attempt_at) VALUES('$EVENT','PENDING','$TS'); COMMIT;"
-npx wrangler d1 execute "$D1_NAME" --remote --config wrangler.external.jsonc --command "$SQL" >/tmp/m2-probe-sql.txt
-curl -fsS -X POST -H "x-m1-admin-token: $ADMIN_TOKEN" "$SERVICE_URL/internal/replicate" >/tmp/m2-replicate.json
-node -e 'const j=require("/tmp/m2-replicate.json");if(!j.ok||j.processed<1||j.pending!==0)throw new Error(JSON.stringify(j))'
-RANGE=$(python3 - <<'PY'
-import urllib.parse
-print(urllib.parse.quote("'__M1_SERVICE_REPLICA'!A2:A"))
-PY
-)
-curl -fsS -H "Authorization: Bearer $GOOGLE_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$STAGING_SHEET_ID/values/$RANGE" >/tmp/m2-replica-ids.json
-node -e 'const j=require("/tmp/m2-replica-ids.json"),e=process.argv[1];if(!(j.values||[]).some(r=>r[0]===e))throw new Error("STAGING_PROBE_NOT_REPLICATED")' "$EVENT"
-
+# Bootstrap and Google staging replication are intentionally verified by
+# Service M2 External Live Verify, which is the sole owner of source_rows during that gate.
 cd ..
 cp /tmp/m2-health.json m2-external-evidence/service-health.json
-cp /tmp/m2-bootstrap-a.json m2-external-evidence/bootstrap-a.json
-cp /tmp/m2-bootstrap-b.json m2-external-evidence/bootstrap-b.json
-cp /tmp/m2-replicate.json m2-external-evidence/replication.json
+cp /tmp/m2-source-meta.json m2-external-evidence/source-meta.json
 node - <<'NODE'
-const fs=require('fs');fs.writeFileSync('m2-external-evidence/state.json',JSON.stringify({source_commit:process.env.GITHUB_SHA,service_url:process.env.SERVICE_URL,d1_name:process.env.D1_NAME,d1_id:process.env.PROD_D1_ID,generation:process.env.SERVICE_GENERATION,source_sheet_id:process.env.SOURCE_SHEET_ID,staging_sheet_id:process.env.STAGING_SHEET_ID,rollback_folder_id:process.env.ROLLBACK_FOLDER_ID,authority_scope:'STAGING_SHADOW',production_cutover:false},null,2));
+const fs=require('fs');fs.writeFileSync('m2-external-evidence/state.json',JSON.stringify({source_commit:process.env.GITHUB_SHA,service_url:process.env.SERVICE_URL,d1_name:process.env.D1_NAME,d1_id:process.env.PROD_D1_ID,generation:process.env.SERVICE_GENERATION,source_sheet_id:process.env.SOURCE_SHEET_ID,staging_sheet_id:process.env.STAGING_SHEET_ID,rollback_folder_id:process.env.ROLLBACK_FOLDER_ID,authority_scope:'STAGING_SHADOW',production_cutover:false,deploy_gate:true,bootstrap_gate:'Service M2 External Live Verify'},null,2));
 NODE
 
-echo "PASS M2_EXTERNAL_PRECUTOVER service_url=$SERVICE_URL d1_id=$PROD_D1_ID"
+echo "PASS M2_EXTERNAL_DEPLOY_PRECUTOVER service_url=$SERVICE_URL d1_id=$PROD_D1_ID"
