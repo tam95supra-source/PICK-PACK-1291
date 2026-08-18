@@ -111,6 +111,7 @@ class OperationalSyncEngine(
     ) {
         if (dates.isEmpty()) { done(changed); return }
         val date = dates.first()
+        SyncDirectionTracker.beginDownload()
         api.call("sync_day", JSONObject().put("business_date", date)) { result ->
             try {
                 if (result.ok && result.json != null) {
@@ -121,10 +122,15 @@ class OperationalSyncEngine(
                         listener(setOf(date))
                     }
                 }
+                // Start the next download before ending this one so the direction indicator does
+                // not flicker between sequential changed-day requests.
+                syncDayQueue(dates.drop(1), changed, done)
             } catch (_: Throwable) {
                 // Keep stale revision; next poll retries this date.
+                syncDayQueue(dates.drop(1), changed, done)
+            } finally {
+                SyncDirectionTracker.endDownload()
             }
-            syncDayQueue(dates.drop(1), changed, done)
         }
     }
 
@@ -134,6 +140,7 @@ class OperationalSyncEngine(
     ) {
         if (dates.isEmpty()) { finish(); return }
         val payload = JSONObject().put("dates", JSONArray().apply { dates.take(45).forEach { put(it) } })
+        SyncDirectionTracker.beginDownload()
         api.call("sync_bootstrap", payload) { result ->
             try {
                 if (result.ok && result.json != null) {
@@ -149,10 +156,13 @@ class OperationalSyncEngine(
                     changed += synced
                     if (synced.isNotEmpty()) listener(synced)
                 }
+                finish()
             } catch (_: Throwable) {
                 // Keep stale revisions; next poll retries the bootstrap.
+                finish()
+            } finally {
+                SyncDirectionTracker.endDownload()
             }
-            finish()
         }
     }
 
