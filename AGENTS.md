@@ -42,8 +42,8 @@ Before a material implementation change, verify that it directly serves the late
 - Beta must exercise the real business functions needed for testing.
 - Preserve Android signing identity for in-place updates.
 - Starting with the OTA-enabled Android 0.4.2 build (`0.4.2-beta.2` for Beta), runtime update discovery must call the approved Google Apps Script `update_check` route.
-- `BETA` must read release APKs only from Google Drive folder `BẢN THỬ NGHIỆM` (`1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg`).
-- `STABLE` must read release APKs only from Google Drive folder `BẢN ỔN ĐỊNH` (`1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4`).
+- `BETA` must read release APKs only from Google Drive folder `BẢN THỬ NGHIỆM`.
+- `STABLE` must read release APKs only from Google Drive folder `BẢN ỔN ĐỊNH`.
 - Do not restore GitHub Releases as the steady-state OTA authority for 0.4.2+ unless the owner explicitly changes this requirement.
 - GitHub prerelease `v0.4.2-beta.2-publicbeta` is only a one-time compatibility bridge so legacy Beta clients that still check GitHub can migrate to the Drive-OTA build.
 - OTA APK downloads must be SHA-256 verified before the Android installer is launched.
@@ -53,7 +53,7 @@ Before a material implementation change, verify that it directly serves the late
 
 ## 6. Architecture enforcement
 
-Read and obey `ARCHITECTURE_GUARDRAILS.md` and `README.md` before changing runtime architecture. CI architecture gates are intentional and must not be bypassed to make a build pass.
+Read and obey `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `README.md` before material runtime/release changes. CI architecture/UX/release gates are intentional and must not be bypassed to make a build pass.
 
 ## 7. Owner workstation constraint — no local command line
 
@@ -62,9 +62,47 @@ Read and obey `ARCHITECTURE_GUARDRAILS.md` and `README.md` before changing runti
 - Owner-facing setup and administration must preferentially use browser/UI workflows such as GitHub web UI, Google Workspace/Apps Script UI, Drive UI, or repository-hosted CI/automation.
 - If a required task normally needs a local CLI, redesign it so CI/automation performs the command-line portion and the owner only performs browser-based authorization, secret entry, or explicit approval.
 - If a browser-only path is genuinely impossible, state the blocker explicitly instead of giving unusable local terminal instructions.
-## UI / UX lock — Beta 0.4.2-beta.4+
-- Official visual system: **Minimal Teal Corporate (Mẫu 2)** — white/light surface, teal primary, restrained enterprise styling, compact PDA-friendly spacing.
-- Login card stays visually centered; do not show beta/version marketing text on the login screen.
-- Routine success toasts/notifications should be minimized; reserve intrusive notifications for errors, session replacement, security events, or OTA updates.
+
+## 8. UI / UX lock — current owner-approved system
+
+This section **SUPERSEDES** the old fixed `Minimal Teal Corporate / Mẫu 2` lock.
+
+Authoritative detail is in `docs/UI_UX_SYSTEM.md`.
+
+Mandatory rules:
+
+- Official design family is the owner-approved modern enterprise blue/indigo/violet system with centralized 7-color theming.
+- The 7 theme choices stay on one row, equal-width, without color-name labels.
+- Work cards use one equal component; do not mix hero-card and unrelated card geometries.
+- The authenticated app uses one persistent five-tab shell in this order: `Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`.
+- Switching those five tabs must not start/finish another Activity and must not add an artificial fade/cross-fade delay.
+- The top authenticated header shows user name, position and account on separate constrained lines; do not use `PICK PACK 1291` as the normal tab title.
+- Reserve the compact header status area for user-facing Mạng / Đồng bộ / Service status.
+- Use semantic icons appropriate to each tab/card/title/action; production UI should prefer stable Android vector/icon resources over arbitrary font glyphs.
+- Settings must not duplicate a `Đồng bộ dữ liệu` section because synchronization has its own tab.
+- UI copy is for ordinary users only. Do not expose implementation commentary such as server/API revision, ACK, request/cache architecture, AI/designer notes or instructions explaining implementation decisions.
+- Routine notices use the project top-notification queue: about 3 seconds, maximum 3 visible/queued items; avoid blocking OK dialogs for routine state/not-found/success messages.
+- Manual diagnostic-log sending and consequential/destructive actions may use explicit confirmation dialogs according to project rules.
+- MNV/PDA scanner flows trigger on hardware/keyboard Enter/OK; do not add redundant `Kiểm tra` buttons merely to trigger the same operation.
+- The approved visual language applies to inner workflows (QR, Công nhật, Tài nguyên, Báo cáo, Nhân sự, Lịch sử, Đồng bộ, Settings/admin), not only the dashboard.
+- Login remains centered, without beta/version marketing text, and includes `QUÊN MẬT KHẨU?`.
 - PICK requires PDA; User Pick is optional. PDA selection uses the last 5 serial digits with validated suggestions.
-- Reports keep operational matrices but suppress the redundant section-title rows; support table is hidden when deducted support count is zero; Phúc Long precedes Kéo hàng.
+- Reports keep operational matrices but suppress redundant section-title rows; support table is hidden when deducted support count is zero; Phúc Long precedes Kéo hàng; avoid heavy rounded borders around every table.
+
+## 9. Build / release operating rules
+
+Authoritative detail is in `docs/BUILD_RELEASE_PLAYBOOK.md`.
+
+Mandatory rules:
+
+- Ordinary app/source changes use a fast Beta+Stable debug validation pipeline with static guards; do not run live GAS/Drive release probes for every small edit.
+- Full Beta+Stable release assemble, live API/Drive probes, package metadata and signing validation run only in an explicit Release Preflight before OTA/release work.
+- VersionCode/versionName are read from source; do not hardcode an old Beta version in CI.
+- Use the exact preinstalled Android SDK when it contains the required platform/build-tools; use the pinned verified SDK bootstrap only as fallback.
+- Permanent CI validates but does not commit source/status/observer receipt files back to `main`.
+- Do not create observer workflows that write run status into `main`.
+- Do not make CI self-edit `.github/workflows`.
+- Complex source transformations belong in standalone scripts with exact unique markers; do not embed large multiline Kotlin/Python transformations directly in workflow YAML.
+- Preserve the fixed Android signer. Never generate a replacement signing identity to make a release pass.
+- Release Preflight does not itself publish to Google Drive. OTA publish is a separate deliberate step with signer, SHA-256, channel isolation and E2E update checks.
+- Stable requires owner-approved Beta soak/business acceptance; successful compilation alone is not permission to promote Stable.
