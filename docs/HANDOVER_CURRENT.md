@@ -1,8 +1,8 @@
 # HANDOVER CURRENT — Pick Pack 1291
 
 Status: **ACTIVE / cumulative / authoritative**  
-Last updated: **2026-08-18 09:58 +07:00 (Asia/Bangkok)**  
-Latest implementation checkpoint: **S07 — persistent tab shell, global copy rules, CI/release optimization**
+Last updated: **2026-08-18 11:08 +07:00 (Asia/Bangkok)**  
+Latest implementation checkpoint: **S08 — approved visual system implemented and Beta 0.4.2-beta.8 released by Drive OTA**
 
 > **NEW-CHAT RULE:** Read this file together with `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. Do not infer a new architecture or resurrect superseded UI/release decisions. On a new chat, after reading authoritative state, wait for a new owner command before mutation/release work.
 
@@ -173,9 +173,19 @@ Technical details belong in diagnostics/docs/logs, not routine UI.
 
 Settings no longer duplicates a `Đồng bộ / dữ liệu` section because `Đồng bộ` has its own tab.
 
-### Current visual implementation caveat
+### S08 visual implementation — RELEASED IN BETA8
 
-The owner-approved multi-screen mockup family is the **visual target/spec**. S07 implemented the global shell/navigation/copy behavior and equal work-card structure, but future visual work must continue to align every inner screen pixel/layout component with `docs/UI_UX_SYSTEM.md`; do not falsely assume every mockup detail is already implemented just because the behavioral shell is complete.
+S08 applied the owner-approved visual system to the working Android UI and released it in Beta `0.4.2-beta.8`:
+
+- authenticated identity/status header follows the approved structure
+- equal 2x2 Nghiệp vụ cards use semantic Android vector icons
+- bottom navigation uses stable vector icons and persistent in-place switching
+- shared cards/inputs/buttons/sections use the approved rounded enterprise component language
+- Settings keeps 7 equal theme swatches on one horizontal row
+- Login was aligned to the same visual family
+- inner workflows inherit the same shared surface/control system
+
+This is the implemented Beta baseline. Real-PDA acceptance may still identify spacing/fit defects that require targeted fixes, but future work must refine this approved system rather than redesigning it without owner instruction.
 
 ## 8. Notifications / interaction — CHỐT
 
@@ -269,28 +279,41 @@ Steady-state:
 
 ## 14. Current release state
 
-### Published Beta — `0.4.2-beta.6`
+### Published Beta — `0.4.2-beta.8`
 
 - Package: `vn.pickpack1291.app.beta.publicbeta`
-- VersionCode: `12`
-- SHA-256: `ac6c537d3d0e6a85574233ad9031544befd3a282349e47c605e5cd05b0701860`
-- Fixed signer SHA-256:
+- VersionCode: `14`
+- APK: `pick-pack-1291-public-beta-v0.4.2-beta.8.apk`
+- SHA-256: `dbb86e8d3edcadc4ce4138410427f97d93279cb047cce45fb7e41d68578a7d5e`
+- Fixed signer SHA-256 remains:
   `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
+- OTA authority/source: `GOOGLE_DRIVE`, Beta channel only.
 
-beta.6 OTA E2E passed:
+Beta8 release gates passed:
 
-- beta.5 -> beta.6 update found
-- actual OTA download SHA matched
-- beta.6 does not update to itself
-- Stable does not see Beta build
+- S08 visual source applied and Beta Debug + Stable Debug compile PASS
+- Release Preflight PASS: architecture/UX guards, live GAS health, BETA/STABLE Drive isolation, Beta Release + Stable Release, package/version metadata
+- APK signed with the existing official signing identity; no replacement key was created
+- Beta6 -> Beta8 live `update_check` returns the new Beta
+- actual OTA APK download SHA-256 matches the published SHA
+- downloaded APK signer matches the fixed signer
+- downloaded package/version metadata matches package + VersionCode 14 + `0.4.2-beta.8`
+- Beta8 does not offer an update to itself
+- Stable does not see the Beta8 build
 
-### Source candidate — `0.4.2-beta.7`
+The first recovery bridge upload attempt was abandoned because large APK transfer through the temporary Apps Script bridge stalled. The obsolete run was cancelled and cleanup passed. Final APK upload used the approved Google Drive connector directly, then independent read-only OTA gates verified the live bytes. This does not change steady-state OTA authority: Android still discovers updates only through GAS `update_check` -> the official Drive channel folder.
+
+### Superseded unpublished candidate — `0.4.2-beta.7`
 
 - VersionCode: `13`
-- Source contains S07 persistent-shell/copy-rule refactor.
-- Beta Release + Stable Release compilation passed before source commit.
-- **NOT published to Google Drive OTA.**
-- Do not tell owner beta.7 is released unless a later OTA publish and E2E verification actually completes.
+- Contained the S07 persistent-shell/copy-rule refactor.
+- It was **never published to Google Drive OTA**.
+- Beta8 supersedes it and includes the S07 behavior plus the approved S08 visual implementation.
+
+### Previous published Beta — `0.4.2-beta.6`
+
+- VersionCode: `12`
+- Remains the verified source version for the live Beta6 -> Beta8 upgrade acceptance path.
 
 ### Stable
 
@@ -371,6 +394,8 @@ Do not expose values.
 
 Until confirmed, use only the official existing signing recovery path and verify the fixed signer. Never create a replacement signing identity.
 
+Beta8 confirmed that the official recovery material still produces the fixed signer. The standard four-secret path remains preferred because it removes temporary recovery handling from future releases.
+
 ## 17. Scanner / performance
 
 - MNV numeric input supports hardware/IME Enter suffix.
@@ -380,7 +405,7 @@ Until confirmed, use only the official existing signing recovery path and verify
 
 ## 18. P0 acceptance / backlog
 
-On real PDA after next OTA candidate:
+On real PDA with published Beta `0.4.2-beta.8`:
 
 - verify five-tab switching is perceptually immediate with no Activity flash/delay
 - verify approved header/layout on actual screen dimensions
