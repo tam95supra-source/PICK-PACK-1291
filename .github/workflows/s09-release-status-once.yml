@@ -19,7 +19,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, subprocess, os
-          workflows=['gas-deploy.yml','app-fast-check.yml','release-preflight.yml','s09-verify-ota.yml']
+          workflows=['gas-deploy.yml','app-fast-check.yml','release-preflight.yml','s09-verify-ota.yml','s09-finalize-docs.yml']
           out={}
           for wf in workflows:
               p=subprocess.run(['gh','run','list','--repo',os.environ['GITHUB_REPOSITORY'],'--workflow',wf,'--limit','3','--json','databaseId,status,conclusion,headSha,displayTitle,createdAt'],capture_output=True,text=True)
