@@ -3,7 +3,6 @@ from pathlib import Path
 import runpy
 
 ROOT = Path(__file__).resolve().parents[1]
-# Preserve every approved UI/runtime transform before adding M2 transport behavior.
 runpy.run_path(str(ROOT / "tools/apply_s10_ui_patch_in_place.py"), run_name="__main__")
 
 path = ROOT / "app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt"
@@ -26,7 +25,7 @@ s = s.replace(anchor, "    init {\n        synchronized(sessionLock) {\n        
 anchor = "                    if (newToken != null) persistSession(newToken, result.json.optJSONObject(\"account\"))\n"
 if s.count(anchor) != 1:
     raise SystemExit(f"M2 patch login anchor mismatch: {s.count(anchor)}")
-s = s.replace(anchor, anchor + "                    // Establish a parallel Service session only when dynamic discovery says Service is primary.\n                    m2Transport.loginFromPassword(login, password)\n", 1)
+s = s.replace(anchor, anchor + "                    m2Transport.loginFromPassword(login, password)\n", 1)
 
 old = '''      val result = when (action) {
           "change_password" -> changePassword(payload)
@@ -34,8 +33,17 @@ old = '''      val result = when (action) {
           else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
       }
 '''
+# BetaApiClient intentionally has two leading spaces before try but six before this block.
 if s.count(old) != 1:
-    raise SystemExit(f"M2 patch call anchor mismatch: {s.count(old)}")
+    start = s.find('      val result = when (action) {')
+    end = s.find('      if (result.ok) {', start)
+    if start < 0 or end < 0:
+        raise SystemExit("M2 patch call structural anchors missing")
+    candidate = s[start:end]
+    required = ['"change_password" -> changePassword(payload)', '"account_upsert" -> accountUpsert(payload)', 'else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)']
+    if not all(x in candidate for x in required):
+        raise SystemExit("M2 patch call structural contract mismatch")
+    old = candidate
 new = '''      val m2 = if (action in M2ServiceTransport.OPERATIONAL) m2Transport.operational(action, payload) else null
       val result = if (m2?.handled == true) {
           Result(m2.ok, m2.code, m2.json, m2.error)
