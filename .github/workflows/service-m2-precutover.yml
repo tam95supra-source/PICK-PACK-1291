@@ -3,13 +3,15 @@ name: Service M2 Precutover
 on:
   push:
     branches: [ agent/service-migration-m2 ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: service-m2-precutover
+  group: service-m2-precutover-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
