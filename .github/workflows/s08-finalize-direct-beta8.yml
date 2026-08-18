@@ -1,0 +1,81 @@
+name: S08 Finalize Direct Beta8 OTA
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/s08-finalize-direct-trigger.txt'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LIVE_API: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      VERSION: 0.4.2-beta.8
+      EXPECTED_SHA: dbb86e8d3edcadc4ce4138410427f97d93279cb047cce45fb7e41d68578a7d5e
+      STUCK_RUN_ID: '32095965015'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cancel obsolete bridge upload run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS -o /tmp/cancel.out -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$STUCK_RUN_ID/cancel" > /tmp/cancel.code || true
+          CODE=$(cat /tmp/cancel.code 2>/dev/null || true)
+          [[ "$CODE" == 202 || "$CODE" == 409 ]] || { cat /tmp/cancel.out || true; echo "Cancel HTTP $CODE"; }
+          sleep 6
+
+      - name: Verify live Beta OTA end-to-end
+        shell: bash
+        run: |
+          set -euo pipefail
+          post(){ curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$LIVE_API" -d "$1"; }
+          post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.6"}' > /tmp/from6.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/from6.json'))
+          assert j.get('ok') is True,j
+          assert j.get('source')=='GOOGLE_DRIVE',j
+          assert j.get('channel')=='BETA',j
+          assert j.get('available') is True,j
+          assert j.get('version_name')==os.environ['VERSION'],j
+          assert j.get('sha256')==os.environ['EXPECTED_SHA'],j
+          assert j.get('apk_url'),j
+          open('/tmp/url.txt','w').write(j['apk_url'])
+          print('BETA_UPDATE_CHECK_PASS')
+          PY
+          curl -fL --retry 4 --retry-delay 2 "$(cat /tmp/url.txt)" -o /tmp/beta8.apk
+          GOT=$(sha256sum /tmp/beta8.apk | awk '{print $1}')
+          [[ "$GOT" == "$EXPECTED_SHA" ]]
+          post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.8"}' > /tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json,os
+          s=json.load(open('/tmp/self.json')); t=json.load(open('/tmp/stable.json'))
+          assert s.get('ok') is True and s.get('channel')=='BETA',s
+          assert s.get('version_name')==os.environ['VERSION'],s
+          assert s.get('available') is False,s
+          assert t.get('ok') is True and t.get('channel')=='STABLE',t
+          assert t.get('version_name')!=os.environ['VERSION'],t
+          out={'ok':True,'version':os.environ['VERSION'],'sha256':os.environ['EXPECTED_SHA'],'from_beta6_available':True,'download_sha_match':True,'self_update':False,'stable_isolated':True,'source':'GOOGLE_DRIVE'}
+          open('/tmp/beta8-ota-final.json','w').write(json.dumps(out,separators=(',',':'))+'\n')
+          print(json.dumps(out,separators=(',',':')))
+          PY
+
+      - name: Upload final OTA receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-beta8-ota-final-receipt
+          path: /tmp/beta8-ota-final.json
+          retention-days: 14
