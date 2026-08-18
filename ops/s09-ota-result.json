@@ -1,0 +1,9 @@
+{
+  "ok": true,
+  "version": "0.4.2-beta.9",
+  "sha256": "6c96a9415299bd11f73ed21e314fb354c530c093f30ae1e23bfa7332d0ff3b6b",
+  "beta8_to_beta9": true,
+  "download_sha_match": true,
+  "self_update": false,
+  "stable_isolated": true
+}
