@@ -7,6 +7,25 @@ on:
       - 'app/**'
       - 'tools/apply_s10_ui_patch.py'
       - 'tools/apply_s10_ui_patch_in_place.py'
+      - 'tools/apply_s11_compact_report_patch.py'
+      - 'tools/apply_s12_real_pda_patch.py'
+      - 'tools/apply_s12_gas_patch.py'
+      - 'tools/apply_s12_gas_health_patch.py'
+      - 'google-apps-script/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/app-fast-check.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'tools/apply_s10_ui_patch.py'
+      - 'tools/apply_s10_ui_patch_in_place.py'
+      - 'tools/apply_s11_compact_report_patch.py'
+      - 'tools/apply_s12_real_pda_patch.py'
+      - 'tools/apply_s12_gas_patch.py'
+      - 'tools/apply_s12_gas_health_patch.py'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -42,6 +61,9 @@ jobs:
             exit 0
           fi
           BEFORE='${{ github.event.before }}'
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BEFORE='${{ github.event.pull_request.base.sha }}'
+          fi
           if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then
             FILES=$(git ls-files)
           else
@@ -49,8 +71,8 @@ jobs:
           fi
           ANDROID=false
           GAS=false
-          if grep -Eq '^(app/|tools/apply_s10_ui_patch(_in_place)?\.py$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
-          if grep -Eq '^(google-apps-script/|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
+          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch)\.py$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
+          if grep -Eq '^(google-apps-script/|tools/apply_s12_gas(_health)?_patch\.py$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
           echo "gas=$GAS" >> "$GITHUB_OUTPUT"
           printf 'Changed files:\n%s\nAndroid build: %s | GAS syntax: %s\n' "$FILES" "$ANDROID" "$GAS"
@@ -89,7 +111,7 @@ jobs:
           ! grep -R -n 'overridePendingTransition(android.R.anim.fade_in' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
-          python3 -m py_compile tools/apply_s10_ui_patch.py tools/apply_s10_ui_patch_in_place.py
+          python3 -m py_compile tools/apply_s10_ui_patch.py tools/apply_s10_ui_patch_in_place.py tools/apply_s11_compact_report_patch.py tools/apply_s12_real_pda_patch.py tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py
           python3 tools/apply_s10_ui_patch.py
           PATCHED=app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt
           test -s "$PATCHED"
