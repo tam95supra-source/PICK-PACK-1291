@@ -17,8 +17,8 @@ import org.json.JSONObject
  *   request finish, persists the cursor, then becomes SUSPENDED;
  * - never starts a new request while DRAINING/SUSPENDED.
  *
- * server_seq is the Apps Script / Google Sheet revision change detector. Callers still reload authoritative state
- * through the existing business endpoints instead of trusting cached deltas.
+ * S15 also carries the tiny per-day revision manifest. Android uses that manifest to update its
+ * 45-day SQLite snapshot store; screen rendering itself never waits for this network request.
  */
 class ForegroundSyncCoordinator(
     context: Context,
@@ -37,6 +37,10 @@ class ForegroundSyncCoordinator(
         val masterChanged: Boolean,
         val latencyMs: Long? = null,
         val error: String? = null,
+        val businessDate: String = "",
+        val retentionFloor: String = "",
+        val retentionEpoch: Long = 0L,
+        val dayRevisions: JSONObject = JSONObject(),
     )
 
     interface Listener {
@@ -111,8 +115,6 @@ class ForegroundSyncCoordinator(
                         idlePolls = (idlePolls + 1).coerceAtMost(1000)
                     }
 
-                    // A response that began while ACTIVE is allowed to finish during DRAINING,
-                    // but UI callbacks/rescheduling are foreground-only.
                     if (state == State.ACTIVE && requestGeneration == generation) {
                         listener.onStatus(
                             Status(
@@ -124,6 +126,10 @@ class ForegroundSyncCoordinator(
                                 masterRevision = masterRevision,
                                 masterChanged = masterChanged,
                                 latencyMs = latencyMs,
+                                businessDate = body.optString("business_date"),
+                                retentionFloor = body.optString("retention_floor"),
+                                retentionEpoch = body.optLong("retention_epoch", 0L),
+                                dayRevisions = body.optJSONObject("day_revisions") ?: JSONObject(),
                             )
                         )
                     }
