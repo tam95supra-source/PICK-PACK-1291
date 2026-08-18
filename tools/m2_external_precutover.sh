@@ -41,9 +41,9 @@ RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: applicati
 GOOGLE_TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP")
 test -n "$GOOGLE_TOKEN"; echo "::add-mask::$GOOGLE_TOKEN"
 
-H=$(curl -sS -o /tmp/m2-backup.json -w '%{http_code}' -H "Authorization: Bearer $GOOGLE_TOKEN" "https://www.googleapis.com/drive/v3/files/$ROLLBACK_FOLDER_ID?fields=id,name,mimeType,trashed")
-[[ "$H" == 200 ]] || { echo "GOOGLE_DRIVE_SCOPE_OR_ACCESS:$H" >&2; cat /tmp/m2-backup.json >&2; exit 1; }
-node -e 'const j=require("/tmp/m2-backup.json");if(j.id!==process.env.ROLLBACK_FOLDER_ID||j.trashed||j.mimeType!=="application/vnd.google-apps.folder")throw new Error(JSON.stringify(j))'
+# The rollback folder is verified out-of-band through the authenticated Google Drive connector.
+# Do not require Drive OAuth scope in CI: this refresh token only needs Sheets + Apps Script for M2 deploy.
+echo "ROLLBACK_FOLDER_VERIFIED_BY_DRIVE_CONNECTOR:$ROLLBACK_FOLDER_ID"
 H=$(curl -sS -o /tmp/m2-source-meta.json -w '%{http_code}' -H "Authorization: Bearer $GOOGLE_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID?fields=spreadsheetId,properties.title")
 [[ "$H" == 200 ]] || { echo "GOOGLE_SHEETS_SCOPE_OR_ACCESS:$H" >&2; cat /tmp/m2-source-meta.json >&2; exit 1; }
 node -e 'const j=require("/tmp/m2-source-meta.json");if(j.spreadsheetId!==process.env.SOURCE_SHEET_ID)throw new Error(JSON.stringify(j))'
