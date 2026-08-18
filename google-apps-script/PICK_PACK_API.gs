@@ -71,6 +71,11 @@ function doPost(e) {
     if (action === 'account_status') return ppJson_(ppWithLock_(function(){ return ppAccountStatus_(auth, body); }));
     if (action === 'sync_day') return ppJson_(ppSyncDayS15_(auth, body));
     if (action === 'sync_bootstrap') return ppJson_(ppSyncBootstrapS15_(auth, body));
+    // M2_SERVICE_AUTHORITY_CONTROL_ROUTES
+    if (action === 'm2_authority_status') return ppJson_(ppM2Discovery_(body));
+    if (action === 'm2_reconcile_begin') return ppJson_(ppM2BeginReconcile_(auth, body));
+    if (action === 'm2_fallback_flush') return ppJson_(String(auth.role)==='SUPERADMIN'?ppM2FlushFallbackInbox_():{ok:false,error:'SUPERADMIN_REQUIRED'});
+    if (action === 'm2_failback_complete') return ppJson_(ppM2CompleteFailback_(auth, body));
     if (action === 'sync_status') return ppJson_(ppSyncStatus_());
 
     return ppJson_({ok:false,error:'UNKNOWN_ACTION'}, 404);
