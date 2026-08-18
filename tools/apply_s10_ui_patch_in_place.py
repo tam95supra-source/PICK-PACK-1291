@@ -17,4 +17,6 @@ runpy.run_path(str(ROOT / "tools/apply_s11_compact_report_patch.py"), run_name="
 # S12 incorporates real-PDA acceptance feedback: wrapped scanner fields, compact density,
 # server-composed report rendering, ping and tappable history detail.
 runpy.run_path(str(ROOT / "tools/apply_s12_real_pda_patch.py"), run_name="__main__")
+# Compile-only hotfix preserves helper functions that the S12 density block intentionally reuses.
+runpy.run_path(str(ROOT / "tools/apply_s12_compile_hotfix.py"), run_name="__main__")
 print(f"Applied S10 + S11 + S12 runtime patches in build workspace: {source}")
