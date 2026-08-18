@@ -53,7 +53,7 @@ Before a material implementation change, verify that it directly serves the late
 
 ## 6. Architecture enforcement
 
-Read and obey `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `README.md` before material runtime/release changes. CI architecture/UX/release gates are intentional and must not be bypassed to make a build pass.
+Read and obey `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md`, `docs/ADMIN_ACCOUNT_RULES.md` and `README.md` before material runtime/release changes. CI architecture/UX/release gates are intentional and must not be bypassed to make a build pass.
 
 ## 7. Owner workstation constraint — no local command line
 
@@ -106,3 +106,15 @@ Mandatory rules:
 - Preserve the fixed Android signer. Never generate a replacement signing identity to make a release pass.
 - Release Preflight does not itself publish to Google Drive. OTA publish is a separate deliberate step with signer, SHA-256, channel isolation and E2E update checks.
 - Stable requires owner-approved Beta soak/business acceptance; successful compilation alone is not permission to promote Stable.
+
+## 10. Admin account namespace — OWNER LOCK
+
+Authoritative detail is in `docs/ADMIN_ACCOUNT_RULES.md`.
+
+- `Danh sách Admin` is a specialized account namespace, not an employee-position catalog.
+- The `Vị trí` field in `Danh sách Admin` is fixed system-wide to exactly: `superadmin`, `admin`, `user`.
+- Do **not** populate or infer Admin `Vị trí` from `Danh mục`, `DANH SÁCH NHÂN SỰ_Vị trí chính`, or any other sheet/catalog.
+- Similar field names across sheets do not authorize cross-sheet fallback.
+- Android and GAS must derive/validate Admin position from the Admin role; arbitrary client-supplied values are invalid.
+- Normal app account creation must not create a new `SUPERADMIN` unless the owner explicitly authorizes that capability later.
+- This allowed set and its role-position mapping may change **only after an explicit owner instruction**. No developer, agent, migration, UI redesign, or implementation convenience may alter it autonomously.
