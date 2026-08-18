@@ -8,41 +8,65 @@ on:
       - '.github/workflows/pre-service-migration-backup.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       SNAPSHOT_SHA: 76db60dd10f49c24b0e17f3c1561e3409537b28d
+      AUTOMATION_BRANCH: backup-automation/pre-service-migration-2026-08-18-2318
     steps:
-      - name: Checkout exact pre-migration snapshot
+      - name: Checkout automation branch with full history
         uses: actions/checkout@v4
         with:
-          ref: 76db60dd10f49c24b0e17f3c1561e3409537b28d
+          ref: backup-automation/pre-service-migration-2026-08-18-2318
           fetch-depth: 0
 
-      - name: Package source and Git history
+      - name: Package exact pre-migration source and reachable Git history
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SNAPSHOT_SHA"
-          mkdir -p backup-dist
+          git cat-file -e "$SNAPSHOT_SHA^{commit}"
+          mkdir -p backup-dist backup-generated
           git archive --format=zip --output=backup-dist/pick-pack-1291-source-${SNAPSHOT_SHA}.zip "$SNAPSHOT_SHA"
-          git bundle create backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle HEAD
+          git branch -f pre-migration-snapshot "$SNAPSHOT_SHA"
+          git bundle create backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle pre-migration-snapshot
           git bundle verify backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle
           cat > backup-dist/BACKUP_METADATA.txt <<EOF
           project=PICK PACK 1291
           repository=tam95supra-source/pick-pack-1291
           snapshot_sha=$SNAPSHOT_SHA
           source_branch=main
+          pristine_backup_branch=backup/pre-service-migration-2026-08-18-2318
           backup_purpose=pre-Service-first-migration rollback point
           created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          restore_note=Source ZIP restores the tree; git bundle restores reachable Git history through the snapshot commit.
+          restore_note=Source ZIP restores the tree. Git bundle restores reachable Git history through the snapshot commit.
           EOF
           (cd backup-dist && sha256sum pick-pack-1291-source-${SNAPSHOT_SHA}.zip pick-pack-1291-history-${SNAPSHOT_SHA}.bundle BACKUP_METADATA.txt > SHA256SUMS.txt)
-          ls -lh backup-dist
+          cp backup-dist/BACKUP_METADATA.txt backup-dist/SHA256SUMS.txt backup-generated/
+          base64 -w 76 backup-dist/pick-pack-1291-source-${SNAPSHOT_SHA}.zip > backup-generated/pick-pack-1291-source-${SNAPSHOT_SHA}.zip.b64.txt
+          base64 -w 76 backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle > backup-generated/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle.b64.txt
+          cat > backup-generated/RECOVERY_README.txt <<'EOF'
+          These *.b64.txt files are Base64 recovery payloads created because the ChatGPT GitHub connector cannot directly transfer arbitrary repository binary archives to Google Drive.
+          To restore with ChatGPT: provide this backup folder and ask ChatGPT to decode the source ZIP or Git bundle, verify SHA256SUMS.txt, and restore the repository at the recorded snapshot SHA. The owner does not need to run local CLI.
+          EOF
+          ls -lh backup-dist backup-generated
+
+      - name: Persist connector-readable recovery payloads on automation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backup-generated/
+          if git diff --cached --quiet; then
+            echo 'Recovery payloads already committed.'
+          else
+            git commit -m 'backup: persist pre-service migration recovery payloads'
+            git push origin "HEAD:$AUTOMATION_BRANCH"
+          fi
 
       - name: Upload immutable backup package
         uses: actions/upload-artifact@v4
