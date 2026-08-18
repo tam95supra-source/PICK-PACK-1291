@@ -92,5 +92,6 @@ jobs:
             app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt \
             app/src/main/res/drawable
           git commit -m 'feat: apply approved visual system for beta8'
+          git restore ops/s08_apply_visual_beta8.py
           git pull --rebase origin main
           git push origin HEAD:main
