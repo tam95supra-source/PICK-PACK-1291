@@ -1,347 +1,367 @@
 # BUILD / RELEASE PLAYBOOK — PICK PACK 1291
 
 Status: **CHỐT / authoritative operating procedure**  
-Effective from: 2026-08-18
+Updated: 2026-08-18 12:42 +07:00
 
-Purpose: make normal code validation fast, make Beta/Stable release validation deterministic, and prevent recurring CI/release failures without weakening correctness.
+Purpose: minimize wall-clock time from source change to verified OTA **without weakening correctness, channel isolation, signer identity or business gates**.
 
-## 1. Release architecture
+## 1. Fixed architecture
 
-Operational architecture remains:
+Operational:
 
 `Android App ↔ Google Apps Script ↔ Google Sheets`
 
-Release/update architecture remains:
+OTA:
 
 `Android -> GAS update_check -> Google Drive channel folder`
 
-- Beta OTA reads only `BẢN THỬ NGHIỆM`.
-- Stable OTA reads only `BẢN ỔN ĐỊNH`.
+- Beta reads only `BẢN THỬ NGHIỆM`.
+- Stable reads only `BẢN ỔN ĐỊNH`.
 - GitHub Releases are not steady-state OTA authority.
-- Preserve the fixed Android signing identity for in-place upgrades.
-- Never introduce a new backend/signing/storage authority just to make a build easier.
+- Preserve the fixed Android signing identity.
+- Do not introduce another backend/signing/storage authority for convenience.
 
-## 2. Two-tier CI model
+## 2. Permanent workflow set
 
-### Tier A — App Fast Check
+Only these workflows are intended to remain permanent:
 
-Runs on ordinary app/GAS source changes.
+1. `App Fast Check`
+2. `Release Preflight - Beta and Stable`
+3. `Deploy Current GAS`
+4. `Verify Google Apps Script Credentials`
+5. `Verify Beta OTA`
 
-Purpose:
+Do **not** create observer/status/finalizer/OTA workflows per release. Do not write workflow status receipts to `main`.
 
-- fail quickly on source/UX/architecture regressions
-- validate both Android channel variants without running external live probes
-- validate GAS source syntax/required routes without deploying it
-- provide routine feedback in minutes, not a full release cycle
+Permanent trigger files may be updated by automation when browser `workflow_dispatch` is not available. A trigger update is not a release artifact and must not contain secrets.
 
-Required gates:
+## 3. Tier A — App Fast Check
+
+### Scope detection
+
+`App Fast Check` first detects what actually changed.
+
+- App/Gradle change -> static guards + Beta Debug + Stable Debug.
+- GAS-only change -> static guards + GAS syntax only; **skip Android SDK/Gradle build**.
+- Documentation/handover-only changes do not trigger Android Fast Check.
+- Workflow self-change may validate both paths.
+
+This prevents a docs/GAS-only edit from paying the Android build cost.
+
+### Required app gates
 
 - architecture/static invariants
-- launcher artwork hash
-- five-tab shell and tab order
-- no artificial tab transition implementation
-- no banned developer-facing user copy
+- exact owner launcher hash
+- five-tab shell/order
+- Admin namespace owner lock
+- no artificial tab transition code
+- no banned developer-facing UI copy
 - no unauthorized backend endpoints
-- GAS syntax/route guards
 - Beta Debug assemble
 - Stable Debug assemble
 
-The fast pipeline must **not**:
+### Required GAS gates
 
-- call live GAS/Drive just because a small UI/source edit was pushed
-- deploy GAS live
-- sign a production APK
+- route/static invariants
+- JavaScript syntax check
+- no automatic live deploy
+
+Fast Check must not:
+
+- call live GAS/Drive for every edit
+- deploy GAS
+- sign APK
 - publish OTA
-- create GitHub Releases
-- commit source, receipts, observers or status files back to `main`
+- commit source/status/receipt files
 
-Use workflow concurrency with stale fast checks cancelled when a newer commit arrives.
+Concurrency cancels an older Fast Check when a newer source commit arrives.
 
-### Tier B — Release Preflight
+## 4. GAS deployment — explicit only
 
-Runs only when explicitly requested before release, via browser `workflow_dispatch` or the permanent preflight trigger file used by automation.
+If a release contains a GAS change:
 
-Required gates:
+`Fast Check PASS -> Deploy Current GAS -> live post-deploy gates PASS -> Release Preflight`
 
-- all architecture/UX/static invariants
-- source-derived version metadata
+If the release is Android-only, **skip GAS deployment entirely**.
+
+Deploy Current GAS must preserve the approved Apps Script project/deployment and verify:
+
+- live health / Sheet read
+- `SINGLE_ACTIVE_DEVICE_V1`
+- account-email reset route
+- Beta/Stable Drive OTA isolation
+
+Source edits under `google-apps-script/**` never deploy live automatically.
+
+## 5. Tier B — Release Preflight
+
+Run only when an OTA/release is actually intended.
+
+### Parallel execution
+
+Release Preflight has two independent jobs running **in parallel**:
+
+**Live gates**
 - live GAS health
-- live BETA and STABLE Drive-channel separation
-- Beta Release assemble
-- Stable Release assemble
-- APK package/version metadata validation
-- unsigned Beta candidate artifact
-- fixed signing identity validation when the four signing secrets are available
+- Beta/Stable OTA channel isolation
 
-Release Preflight is validation only. It does not upload an OTA APK to Drive and does not publish a GitHub Release.
+**Android release job**
+- release invariants
+- source-derived version metadata
+- exact SDK fast path
+- Beta Release + Stable Release assemble
+- package/version validation
+- upload authoritative unsigned Beta artifact
+- optional fixed-signer validation when all signing secrets are ready
 
-### GAS live deployment — explicit only
+A final pass job succeeds only when both parallel branches pass.
 
-Editing `google-apps-script/**` does **not** deploy live automatically.
+### Build exactly once
 
-Normal GAS edits are checked by `App Fast Check`. Live deployment uses the permanent `Deploy Current GAS` workflow only after an explicit browser `workflow_dispatch` or the dedicated permanent GAS deploy trigger used by automation.
+The unsigned Beta APK produced by successful Release Preflight is the **authoritative release candidate for that commit**.
 
-The GAS deploy workflow must:
+After Preflight:
 
-- validate current source first
-- update the existing approved Apps Script project/deployment
-- preserve the current WEB_APP access/execute-as contract
-- verify live health after propagation
-- verify account-email reset routing
-- verify BETA/STABLE Drive OTA channel isolation
+- do not rebuild the APK before signing
+- do not run another release assemble merely to publish
+- download/reuse the exact artifact from the successful Preflight run
+- artifact includes release metadata tying it to commit/version
 
-This separation prevents a source-edit commit from changing production GAS before validation/owner intent.
+This removes duplicate release builds from the OTA path.
 
-## 3. OTA publish sequence
+## 6. Android SDK / Gradle fast path
 
-A Beta or Stable OTA publish is a separate deliberate action after Release Preflight passes.
+Both Android pipelines:
 
-Sequence:
+1. Check whether the hosted runner already has exact Android platform/build-tools 36.0.0.
+2. Use the preinstalled SDK immediately when exact requirements are present.
+3. Only otherwise download the pinned command-line tools archive, verify its SHA-256 and install exact tools.
 
-1. Confirm target channel and source version/code.
-2. Use the already-validated release artifact or rebuild from the exact validated commit.
-3. Sign with the official existing signing identity only.
-4. Verify signer certificate SHA-256 against the fixed expected identity.
-5. Compute APK SHA-256.
-6. Put checksum and APK in the correct Google Drive channel folder.
-7. Ensure OTA download permission is available through the approved Drive/GAS flow.
-8. Call live `update_check` from the previous version and confirm it returns the new version.
-9. Download the actual OTA bytes and confirm SHA-256 matches.
-10. Confirm the new version does not offer an update to itself.
-11. Confirm the other release channel does not see this build.
-
-Do not call a build “released” until all applicable OTA E2E gates pass.
-
-Stable additionally requires owner-approved Beta soak/business testing. A successful build alone is not permission to promote Stable.
-
-## 4. Android SDK fast path
-
-Hosted runners often already contain an Android SDK.
-
-Both permanent Android pipelines must first check for the **exact required** platform/build-tools version. If present, use it directly.
-
-Only if the exact SDK is absent:
-
-- download the pinned Android command-line tools archive
-- verify its known SHA-256
-- install the exact required platform/build-tools
-
-This avoids repeatedly downloading/installing the SDK while preserving deterministic tool versions.
-
-## 5. Gradle policy
-
-Current project already enables:
+Gradle policy:
 
 - `org.gradle.parallel=true`
 - `org.gradle.caching=true`
+- GitHub `gradle/actions/setup-gradle` cache reuse
+- use `gradle ...`, not `./gradlew`; this repo does not rely on a checked-in wrapper
+- release/debug commands explicitly use `--build-cache --parallel`
 
-GitHub uses `gradle/actions/setup-gradle`, so dependency/build cache reuse remains enabled.
+Do not enable configuration-cache or other aggressive flags until a controlled Beta+Stable compatibility test proves them safe.
 
-Do not add build-speed flags that weaken correctness or skip required channel validation. Configuration-cache or toolchain changes may be added only after a controlled Beta+Stable compile test.
+## 7. Signing — current bottleneck and target state
 
-## 6. Version policy
-
-Never hardcode a release version inside CI logic when the source already defines it.
-
-- `versionCode` and `versionName` are read dynamically from `app/build.gradle.kts`.
-- Once an APK version is published to OTA, do not change source behavior under the same version identity.
-- New releasable behavior gets a new versionCode/versionName before validation.
-- CI must compare packaged APK metadata to source metadata.
-
-## 7. Signing policy
-
-Fixed signer certificate identity must never change accidentally.
-
-Expected signer SHA-256:
+Fixed signer SHA-256:
 
 `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
 
-Signing secrets/material must never be printed, committed or written into public handovers.
+Never generate a replacement signer.
 
-Preferred long-term one-click release path uses these four GitHub Secrets once they are confirmed/configured correctly:
+### Target one-click state
+
+The long-term fastest path requires these four GitHub Secrets to be confirmed/configured:
 
 - `ANDROID_SIGNING_KEY_B64`
 - `ANDROID_SIGNING_STORE_PASSWORD`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 - `ANDROID_SIGNING_ALIAS`
 
-Until that configuration is confirmed, use only the existing official signing recovery process. Do not create a replacement key and do not route signing through an unrelated external service.
+When all four are ready, Release Preflight can sign the **same validated artifact** and verify the fixed signer in-run.
 
-## 8. Recurring failure catalogue and prevention
+### Current state until secrets are configured
 
-### A. Fragile one-line Kotlin patching
+The four signing secrets are not yet confirmed complete. Therefore:
 
-Observed failure:
+1. Download the exact unsigned artifact from the successful Preflight run.
+2. Use only the official encrypted signing recovery material already stored in the approved project Drive tree.
+3. Decrypt/sign in temporary assistant-controlled runtime; never print or commit material.
+4. Verify fixed signer SHA before upload.
+5. Delete decrypted material immediately.
 
-- patches targeted compressed one-line Kotlin
-- whitespace/brace differences caused exact-anchor failure
-- malformed long expressions caused one parser error to cascade into many fake compiler errors
+Do not build a temporary Apps Script signing bridge and do not create a temporary signing workflow for each release.
 
-Prevention:
+Signing recovery is the only remaining material source until owner-approved one-time secret configuration is completed.
 
-- write/replace complete multiline functions or components
-- require unique marker count before mutation
-- fail the patch before Gradle if marker count is not exactly expected
-- inspect the first/root compiler error, not every cascade error
+## 8. OTA publish — Beta fast path
 
-### B. Multiline source embedded directly in workflow YAML
+After Preflight PASS and signing:
 
-Observed failure:
+1. Compute signed APK SHA-256.
+2. Upload checksum and APK directly to `BẢN THỬ NGHIỆM` through the approved Google Drive connector/path.
+3. Do not rebuild.
+4. Update permanent `ops/beta-ota-verify-trigger.txt` with:
+   - previous Beta version
+   - target Beta version
+   - expected signed APK SHA-256
+5. Permanent `Verify Beta OTA` performs the E2E gates.
 
-- long Kotlin/Python blocks embedded inside `run: |` broke YAML indentation/parsing
+`Verify Beta OTA` must check:
 
-Prevention:
+- previous Beta discovers target Beta
+- GAS reports `source=GOOGLE_DRIVE`, `channel=BETA`
+- live downloaded bytes match expected SHA-256
+- package is `vn.pickpack1291.app.beta.publicbeta`
+- target version matches
+- signer matches fixed certificate
+- target Beta does not update to itself
+- Stable channel does not expose the Beta target
 
-- keep complex transformations in standalone repository scripts
-- workflow YAML should invoke the script, not contain the source transformation itself
+Do not call the release complete before this workflow passes.
 
-### C. Dispatching a newly created workflow immediately
+No one-shot OTA verifier or status observer is needed.
 
-Observed failure:
+## 9. Stable release
 
-- GitHub returned 422 because the new workflow had not yet been registered for `workflow_dispatch`
+Stable uses the same safety principles but is never promoted merely because builds pass.
 
-Prevention:
+Required before Stable publish:
 
-- permanent workflows are preferred
-- if a temporary workflow is unavoidable, commit the workflow first and trigger it only from a later commit/event
+- owner-approved Beta soak/business acceptance
+- explicit owner instruction to promote Stable
+- Stable-specific Drive folder only
+- fixed signer and SHA verification
+- Stable OTA E2E
+- Beta channel remains isolated
 
-### D. Observer/status workflows writing to `main`
+## 10. Critical-path rule
 
-Observed failure:
+For an Android-only Beta release:
 
-- observer receipts advanced `main` while the build job was preparing a source commit
-- caused rebase/push races
+`source -> Fast Check -> Release Preflight -> reuse artifact -> sign -> Drive upload -> Verify Beta OTA -> RELEASED`
 
-Prevention:
+For Android + GAS:
 
-- permanent CI does not write status/receipt files to `main`
-- read status through GitHub Actions APIs/UI, job summaries and artifacts
-- build jobs do not commit verified source as part of normal CI
+`source -> Fast Check -> Deploy Current GAS -> Release Preflight -> reuse artifact -> sign -> Drive upload -> Verify Beta OTA -> RELEASED`
 
-### E. CI commit touching `.github/workflows`
+The following are **after-release housekeeping**, never blockers before the owner can receive the OTA:
 
-Observed failure:
+- handover update
+- documentation update
+- cleanup notes
+- historical receipts
+- release summary prose
 
-- `GITHUB_TOKEN` could not push a commit that changed workflow files due workflow permission restrictions
+Temporary signing plaintext must still be deleted immediately after signing; that security cleanup is not deferred.
 
-Prevention:
+## 11. Version policy
 
-- workflows are edited explicitly through GitHub/browser/connector
-- CI jobs never self-modify workflow definitions
+- Read `versionCode`/`versionName` from `app/build.gradle.kts`.
+- CI must not hardcode an old Beta version.
+- Published behavior is immutable under the same version identity.
+- New releasable behavior requires a new versionCode/versionName.
+- APK metadata must match source metadata before publish.
 
-### F. `ops/*` conflicts during source commit
+## 12. Recurring failure catalogue — mandatory prevention
 
-Observed failure:
+### Fragile Kotlin patch anchors
 
-- build and observer jobs both changed temporary `ops/*` files, causing rebase conflicts
+Observed: one-line/compressed replacements broke on whitespace/braces and produced cascaded compiler errors.
 
-Prevention:
+Prevent:
+- replace coherent multiline functions/components
+- assert unique marker count before mutation
+- fix the first/root compiler error, not cascades
 
-- permanent pipelines perform validation only and never commit generated status files
-- temporary operational files are not part of a production release commit
+### Multiline source embedded in workflow YAML
 
-### G. Stale hardcoded version metadata
+Observed: indentation/parser failures.
 
-Observed failure:
+Prevent:
+- complex transformations live in standalone scripts or direct source edits
+- workflow YAML orchestrates; it does not carry giant patch bodies
 
-- an old Beta pipeline still targeted beta.3 while source had advanced
+### New workflow dispatched immediately
 
-Prevention:
+Observed: GitHub 422 before workflow registration.
 
-- read versions dynamically from source
-- verify APK badging against those values
-- never duplicate version constants in normal workflow code
+Prevent:
+- use permanent workflows
+- do not create per-release workflow dispatch machinery
 
-### H. Full release + live probes on every small edit
+### Observer/status commits racing build commits
 
-Observed problem:
+Observed: `main` advanced and caused rebase/push conflicts.
 
-- even one/two-line changes incurred full Beta+Stable release builds, network probes and release-level setup
+Prevent:
+- no observer/status workflows writing `main`
+- read Actions state directly
 
-Prevention:
+### CI self-editing workflow files
 
-- ordinary changes use Tier A fast check
-- full live/release validation runs only in Tier B before a release
+Observed: workflow permission failure.
 
-### I. Android SDK bootstrapped on every run
+Prevent:
+- workflow definitions are edited explicitly through GitHub/connector, never by CI itself
 
-Observed problem:
+### Temporary `ops/*` conflicts
 
-- command-line tools and SDK platform/build-tools were repeatedly downloaded/installed
+Observed: competing jobs changed receipts/markers.
 
-Prevention:
+Prevent:
+- only small permanent trigger files are allowed
+- no generated status JSON is required for normal release flow
 
-- exact preinstalled-SDK fast path first
-- verified pinned bootstrap only as fallback
+### Stale hardcoded versions
 
-### J. Wrong external signing/backend assumption
+Observed: old Beta workflow targeted beta.3 after source advanced.
 
-Observed failure:
+Prevent:
+- dynamic source metadata everywhere
 
-- a release investigation incorrectly explored an unrelated external service even though the project architecture no longer used it
+### Full release/live probes on small edits
 
-Prevention:
+Observed: one/two-line changes paid full release cost.
 
-- read `AGENTS.md`, architecture guardrails and cumulative handover before release troubleshooting
-- signing/storage stays within approved project mechanisms
-- an inherited or historical service is not authority unless the owner explicitly re-approves it
+Prevent:
+- Fast Check for normal edits
+- Preflight only when release intended
 
-### K. OAuth scope mismatch for Drive upload
+### SDK bootstrap every run
 
-Observed failure:
+Observed: unnecessary tool download/install.
 
-- the CI Google OAuth token used for Apps Script did not have the required Drive upload scope
+Prevent:
+- exact preinstalled SDK first; pinned fallback only
 
-Prevention:
+### Wrong external signing/backend assumption
 
-- do not assume Apps Script deployment credentials can mutate Drive
-- use the approved Drive release path/connector
-- only add a browser-authorized Drive scope if the owner later explicitly chooses full automated Drive upload
+Observed: troubleshooting wandered toward an unrelated service no longer in project architecture.
 
-## 9. Source-change discipline
+Prevent:
+- read AGENTS/guardrails/handover first
+- stay inside approved architecture/recovery
 
-For a normal implementation change:
+### OAuth scope mismatch for Drive
 
-1. Make the smallest coherent source change.
-2. Run static guards.
-3. Run fast Beta+Stable debug build.
-4. Fix the first root failure.
-5. Do not create a release merely because fast CI passed.
+Observed: Apps Script OAuth credentials did not have Drive upload scope.
 
-Before OTA:
+Prevent:
+- do not assume GAS deployment OAuth can upload APKs
+- current publish uses approved Drive connector
 
-1. Bump source version identity.
-2. Run Release Preflight.
-3. Sign with fixed identity.
-4. Publish only to requested channel.
-5. Run OTA E2E.
-6. Clean temporary release material.
+### Missing `gradlew`
 
-For GAS:
+Observed in S09: a temporary job assumed `./gradlew` and failed before compiling.
 
-1. Edit source.
-2. Pass Fast Check syntax/route guards.
-3. Deploy only with explicit `Deploy Current GAS` execution.
-4. Verify live health/reset/OTA isolation after deployment.
+Prevent:
+- permanent workflows use `gradle/actions/setup-gradle` + `gradle`
+- never create a job that assumes a wrapper exists
 
-## 10. Owner workstation rule
+### Release housekeeping on critical path
 
-The owner is not asked to run local CLI commands. Git/Gradle/Android signing/verification work must be moved to GitHub Actions or other approved automation. Owner-facing steps use browser/UI only.
+Observed in S09: probes/status/finalizer/docs work extended elapsed time after the useful release gates.
 
-## 11. Cleanup rule
+Prevent:
+- release first through the permanent gate
+- handover/docs after OTA PASS
+- no status receipts required
 
-Temporary one-shot workflows, trigger markers, observer receipts and decrypted signing material must be removed after their purpose is complete.
+## 13. Owner workstation rule
 
-Current permanent workflow set is intentionally small:
+The owner is never asked to run local CLI. Git/Gradle/signing/verification CLI work is performed by CI or assistant-controlled tooling. Owner-facing setup remains browser/UI based.
 
-- `App Fast Check`
-- `Release Preflight - Beta and Stable`
-- `Deploy Current GAS`
-- `Verify Google Apps Script Credentials`
+## 14. Cleanup rule
 
-Do not accumulate a new one-shot workflow for every ordinary edit.
-
-## S09 build rule
-
-- This repository does not rely on a checked-in `gradlew` wrapper. CI must use `gradle/actions/setup-gradle` and invoke `gradle ...`; do not add one-shot jobs that assume `./gradlew` exists.
+- No per-release one-shot workflows.
+- No status/observer receipts committed to `main`.
+- Keep only permanent workflows listed in section 2.
+- Decrypted signing material is ephemeral and deleted immediately.
+- Release artifacts may remain for their configured short retention to support exact artifact reuse/debugging.
