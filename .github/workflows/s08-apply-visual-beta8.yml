@@ -22,6 +22,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('ops/s08_apply_visual_beta8.py')
+          s=p.read_text()
+          old="ops=between(ops,'    private fun appBar(title:String)=','    private fun navigateTab(target:String){\\n',header_nav+'    private fun navigateTab(target:String){\\n','header nav')"
+          new="ops=between(ops,'    private fun appBar(title:String)=','    private fun navigateTab(target:String)',header_nav,'header nav')"
+          if old not in s:
+              raise SystemExit('S08 header marker patch target not found')
+          p.write_text(s.replace(old,new,1))
+          PY
           python3 ops/s08_apply_visual_beta8.py
           grep -q 'versionCode = 14' app/build.gradle.kts
           grep -q 'versionName = "0.4.2-beta.8"' app/build.gradle.kts
