@@ -8,11 +8,19 @@ import { apiError, constantTimeEqual, json, nowIso, readJsonBody, sha256Hex } fr
 
 export { RealtimeHub };
 
+async function m2ClientSyncStatus(db:D1Database):Promise<Record<string,unknown>>{
+  const status=await compatSyncStatus(db) as Record<string,unknown>;
+  const dates=(await db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 2").all<{business_date:string}>()).results??[];
+  const all=(status.day_revisions&&typeof status.day_revisions==="object"?status.day_revisions:{}) as Record<string,unknown>;
+  const recent:Record<string,unknown>={};for(const d of dates)recent[d.business_date]=all[d.business_date]??1;
+  return{...status,sync_engine:"M2_SERVICE_RECENT_N_N_MINUS_1",retention_floor:dates[dates.length-1]?.business_date??"",day_revisions:recent,server_retention_floor:status.server_retention_floor};
+}
+
 async function legacySync(request:Request,env:Env):Promise<Response>{
   const auth=await authenticate(env.DB,env,request);if(!auth)return apiError("UNAUTHORIZED","AUTH",401);
   const body=await readJsonBody<{action:string;business_date?:string;dates?:unknown[]}>(request),action=String(body.action||"");
-  if(action==="sync_status")return json(await compatSyncStatus(env.DB));
-  if(action==="sync_day")return json({ok:true,sync_engine:"S15_LOCAL_FIRST_45D_SERVICE",day:await compatDay(env.DB,String(body.business_date||""))});
+  if(action==="sync_status")return json(await m2ClientSyncStatus(env.DB));
+  if(action==="sync_day")return json({ok:true,sync_engine:"M2_SERVICE_RECENT_N_N_MINUS_1",day:await compatDay(env.DB,String(body.business_date||""))});
   if(action==="sync_bootstrap")return json(await compatBootstrap(env.DB,body.dates));
   return apiError("LEGACY_SYNC_ACTION_UNSUPPORTED","VALIDATION",400);
 }
