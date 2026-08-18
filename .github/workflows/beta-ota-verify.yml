@@ -1,0 +1,148 @@
+name: Verify Beta OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: Previous Beta version
+        required: true
+        type: string
+      target_version:
+        description: Published Beta version
+        required: true
+        type: string
+      expected_sha256:
+        description: Published APK SHA-256
+        required: true
+        type: string
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/beta-ota-verify-trigger.txt'
+
+concurrency:
+  group: beta-ota-verify
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            FROM='${{ inputs.from_version }}'
+            VERSION='${{ inputs.target_version }}'
+            SHA='${{ inputs.expected_sha256 }}'
+          else
+            test -f ops/beta-ota-verify-trigger.txt
+            FROM=$(sed -n 's/^from_version=//p' ops/beta-ota-verify-trigger.txt | tail -1)
+            VERSION=$(sed -n 's/^target_version=//p' ops/beta-ota-verify-trigger.txt | tail -1)
+            SHA=$(sed -n 's/^expected_sha256=//p' ops/beta-ota-verify-trigger.txt | tail -1)
+          fi
+          [[ -n "$FROM" && -n "$VERSION" && "$SHA" =~ ^[0-9a-fA-F]{64}$ ]]
+          echo "from=$FROM" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(tr 'A-F' 'a-f' <<<"$SHA")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify live update discovery and download
+        shell: bash
+        env:
+          FROM_VERSION: ${{ steps.target.outputs.from }}
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+          EXPECTED_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$FROM_VERSION\"}" > /tmp/from.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/from.json'))
+          assert j.get('ok') is True, j
+          assert j.get('update_available') is True, j
+          assert str(j.get('version','')) == os.environ['TARGET_VERSION'], j
+          assert str(j.get('sha256','')).lower() == os.environ['EXPECTED_SHA'].lower(), j
+          assert str(j.get('source','')) == 'GOOGLE_DRIVE', j
+          assert str(j.get('channel','')) == 'BETA', j
+          url=j.get('download_url') or j.get('url') or ''
+          assert url, j
+          open('/tmp/url.txt','w').write(url)
+          PY
+          curl -fL --retry 4 --retry-delay 2 "$(cat /tmp/url.txt)" -o /tmp/beta.apk
+          ACTUAL=$(sha256sum /tmp/beta.apk | awk '{print $1}')
+          [[ "$ACTUAL" == "$EXPECTED_SHA" ]]
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Resolve Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" \
+             && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+             && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          SDK="$RUNNER_TEMP/android-sdk"
+          ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"
+          unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"
+          mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
+
+      - name: Verify package version and fixed signer
+        shell: bash
+        env:
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/aapt" dump badging /tmp/beta.apk > /tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionName='$TARGET_VERSION'" /tmp/badge.txt
+          "$BT/apksigner" verify --verbose --print-certs /tmp/beta.apk > /tmp/cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+
+      - name: Verify self-update false and Stable isolation
+        shell: bash
+        env:
+          TARGET_VERSION: ${{ steps.target.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_VERSION\"}" > /tmp/self.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
+            -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json,os
+          s=json.load(open('/tmp/self.json')); t=json.load(open('/tmp/stable.json'))
+          assert s.get('ok') is True and s.get('update_available') is False, s
+          assert t.get('ok') is True, t
+          assert str(t.get('channel','')) == 'STABLE', t
+          assert str(t.get('version','')) != os.environ['TARGET_VERSION'], t
+          PY
+
+      - name: OTA gate result
+        run: |
+          echo 'PASS - Beta OTA discovery, live download SHA, package/version, fixed signer, self-update and Stable isolation.'
