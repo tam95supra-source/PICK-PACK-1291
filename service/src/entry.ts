@@ -1,5 +1,6 @@
 import base, { RealtimeHub } from "./index";
 import { authenticate, internalAuthorized } from "./auth";
+import { bootstrapGoogleStart, bootstrapGoogleStatus, bootstrapGoogleStep } from "./bootstrap_resumable";
 import { compatBootstrap, compatDay, compatSyncStatus } from "./compat";
 import { currentAuthority } from "./core";
 import { rebuildGoogleStagingFromD1 } from "./dr";
@@ -35,6 +36,16 @@ async function drRebuildGoogle(request:Request,env:Env):Promise<Response>{
   try{return json(await rebuildGoogleStagingFromD1(env.DB,env));}catch(e){console.log(JSON.stringify({level:"error",kind:"dr_google_rebuild_failed",error:String(e)}));return apiError("DR_GOOGLE_REBUILD_FAILED","INTEGRITY",409,false,String(e).slice(0,500));}
 }
 
+async function resumableBootstrap(request:Request,env:Env,action:"start"|"step"|"status"):Promise<Response>{
+  if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);
+  try{
+    if(action==="start")return json(await bootstrapGoogleStart(env.DB,env));
+    const body=await readJsonBody<{run_id?:string}>(request),runId=String(body.run_id||"").trim();
+    if(action==="step"){if(!runId)return apiError("BOOTSTRAP_RUN_ID_REQUIRED","VALIDATION",400);return json(await bootstrapGoogleStep(env.DB,env,runId));}
+    return json(await bootstrapGoogleStatus(env.DB,runId||undefined));
+  }catch(e){console.log(JSON.stringify({level:"error",kind:"resumable_bootstrap_failed",action,error:String(e)}));return apiError("BOOTSTRAP_RESUMABLE_FAILED","INTERNAL",500,true,String(e).slice(0,500));}
+}
+
 async function gasBridgeAuthorized(request:Request,env:Env):Promise<boolean>{
   const supplied=request.headers.get("x-gas-bridge-secret")||"";if(!supplied)return false;
   return constantTimeEqual(await sha256Hex(supplied),await sha256Hex(env.GAS_BRIDGE_SHARED_SECRET));
@@ -64,6 +75,9 @@ async function fallbackIngestFenced(request:Request,env:Env):Promise<Response>{
 export default {
   async fetch(request:Request,env:Env,_ctx:ExecutionContext):Promise<Response>{
     const u=new URL(request.url),path=u.pathname;
+    if(path==="/internal/bootstrap-google/start"&&request.method==="POST")return resumableBootstrap(request,env,"start");
+    if(path==="/internal/bootstrap-google/step"&&request.method==="POST")return resumableBootstrap(request,env,"step");
+    if(path==="/internal/bootstrap-google/status"&&request.method==="POST")return resumableBootstrap(request,env,"status");
     if(path==="/internal/fallback/ingest"&&request.method==="POST")return fallbackIngestFenced(request,env);
     if(path==="/internal/recovery/failback"&&request.method==="POST")return recoveryFailback(request,env);
     if(path==="/internal/dr/rebuild-google-staging"&&request.method==="POST")return drRebuildGoogle(request,env);
