@@ -20,7 +20,7 @@ old = r'''once(
 new = r'''listener_start = text.find('            override fun onStatus(status: ForegroundSyncCoordinator.Status) {')
 if listener_start < 0:
     raise SystemExit("S15 onStatus listener anchor not found")
-hook = '                refreshHeaderConnection()\\n'
+hook = '                refreshHeaderConnection()\n'
 hook_pos = text.find(hook, listener_start)
 if hook_pos < 0:
     raise SystemExit("S15 refreshHeaderConnection hook not found inside onStatus")
