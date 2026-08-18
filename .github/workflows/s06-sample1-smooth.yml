@@ -25,6 +25,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 ops/s06_sample1_smooth_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('txt("QUÉT QR\nNHÂN SỰ",22f','txt("QUÉT QR\\nNHÂN SỰ",22f')
+          p.write_text(s,encoding='utf-8')
+          PY
           sed -i 's/return"/return "/g' app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'versionCode = 12' app/build.gradle.kts
           grep -q 'versionName = "0.4.2-beta.6"' app/build.gradle.kts
