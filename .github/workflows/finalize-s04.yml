@@ -63,16 +63,18 @@ jobs:
       - name: Compile Beta and Stable
         run: gradle --no-daemon :app:assembleBetaDebug :app:assembleStableDebug
 
-      - name: Commit verified source
+      - name: Commit verified application source
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .github/workflows/apply-s04-layout2.yml .github/workflows/run-s04-direct.yml .github/workflows/trigger-s04.yml .github/workflows/finalize-s04.yml
+          # The Actions token has contents:write but no workflows permission.
+          # Keep every workflow file exactly as checked out; workflow cleanup is done later via GitHub connector.
+          git restore .github/workflows
           rm -f ops/s04-trigger.txt ops/s04-direct-trigger.txt ops/s04-finalize-trigger.txt ops/s04-dispatch-receipt.txt ops/s04-observer.json ops/s04_repair.py
           rmdir ops 2>/dev/null || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add -A -- ':!.github/workflows'
           git commit -m 'feat: apply S04 layout 2 navigation and account mail'
           git fetch origin main
           git rebase origin/main
