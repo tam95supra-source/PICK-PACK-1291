@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "source_title": "DỮ LIỆU THEO NGÀY",
+  "tabs": [
+    {
+      "name": "Danh mục",
+      "headers": [
+        "DANH SÁCH NHÂN SỰ_Vị trí chính",
+        "DANH SÁCH NHÂN SỰ_Nhà cung cấp",
+        "DANH SÁCH NHÂN SỰ_Bộ phận",
+        "DANH SÁCH NHÂN SỰ_Site",
+        "DANH SÁCH NHÂN SỰ_Kho",
+        "DANH SÁCH PDA_Tình trạng",
+        "DANH SÁCH USER PICK_Tình trạng",
+        "DANH SÁCH BÀN PACK_Tình trạng",
+        "DANH SÁCH USER PACK_Tình trạng",
+        "RA - VÀO TRONG CA_Loại thao tác",
+        "VÀO - RA TRONG CA_Ca",
+        "CÔNG NHẬT_Thông tin công nhật",
+        "CÔNG NHẬT_Mốc thời gian",
+        "CÔNG NHẬT_Trạng thái"
+      ]
+    },
+    {
+      "name": "LỊCH SỬ NGHIỆP VỤ",
+      "headers": ["Ngày","Session ID","Mã nhân viên","Họ tên","Ca","Loại sự kiện","Nhãn sự kiện","Thời gian","Người xử lý","Chi tiết","Event ID","Phạm vi","App Revision"]
+    },
+    {
+      "name": "DANH SÁCH PDA",
+      "headers": ["Seri PDA","5 số cuối Seri","Tình trạng","Ghi chú"]
+    },
+    {
+      "name": "DANH SÁCH USER PICK",
+      "headers": ["Số User","User Pick","Tình trạng","Ghi chú"]
+    },
+    {
+      "name": "DANH SÁCH BÀN PACK",
+      "headers": ["Tên bàn pack","Tình trạng"]
+    },
+    {
+      "name": "DANH SÁCH USER PACK",
+      "headers": ["Tên bàn pack","User pack","User Pack","Tình trạng"]
+    },
+    {
+      "name": "DANH SÁCH NHÂN SỰ",
+      "headers": ["Mã nhân viên","Họ và tên","Số điện thoại","Vị trí chính","Nhà cung cấp","Bộ phận","Site","Kho","Ngày bắt đầu làm việc","Ghi chú","Người cập nhật","Thời gian cập nhật"]
+    },
+    {
+      "name": "RA - VÀO TRONG CA",
+      "headers": ["Ngày","Ca","Mã nhân viên","Họ và tên","Số điện thoại","Nhà cung cấp","Bộ phận","Site","Kho","Vị trí chính","Vị trí trong ca","Seri PDA","User Pick","Bàn Pack","User Pack","Loại thao tác","Ghi chú","Người cập nhật","Thời gian cập nhật","Event ID","App action","App revision"]
+    },
+    {
+      "name": "CÔNG NHẬT",
+      "headers": ["Ngày","Ca","Mã nhân viên","Họ và tên","Số điện thoại","Nhà cung cấp","Bộ phận","Site","Kho","Vị trí chính","Vị trí trong ca","Thông tin công nhật","Thời gian bắt đầu","Thời gian kết thúc","Mốc thời gian","Trạng thái","Ghi chú","Người cập nhật","Thời gian cập nhật","Event ID","Finish Event ID","App revision","Khấu trừ nhân sự"]
+    },
+    {
+      "name": "Danh sách Admin",
+      "headers": ["Số User","Password verifier","Tình trạng","Ghi chú","Vị trí","Mail","Logic quyền cơ bản","","Trạng thái tài khoản","Người cập nhật","Thời gian cập nhật"]
+    }
+  ],
+  "replica": {
+    "technical_tab": "__M1_SERVICE_REPLICA",
+    "hidden": true,
+    "headers": [
+      "event_id","event_type","entity_type","entity_id","business_date","authority_epoch","authority_seq","service_generation","base_version","new_version","actor_id","actor_role","device_id","occurred_at","committed_at","idempotency_key","origin","schema_version","checksum","payload_json"
+    ]
+  }
+}
