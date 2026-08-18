@@ -1,36 +1,38 @@
 # HANDOVER CURRENT — Pick Pack 1291
 
-Status: ACTIVE / cumulative / authoritative handover  
-Last updated: 2026-08-18 06:05 +07:00 (Asia/Bangkok)  
-Current closed session: S03  
-Next session: S04
+Status: **ACTIVE / cumulative / authoritative**  
+Last updated: **2026-08-18 09:42 +07:00 (Asia/Bangkok)**  
+Latest implementation checkpoint: **S07 — persistent tab shell, global copy rules, CI/release optimization**
 
-> **STOP RULE CHO S04:** Đầu phiên mới chỉ đọc kỹ file này, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/HANDOVER_POLICY.md` và snapshot `docs/handovers/HANDOVER_S03_2026-08-18.md`, xác nhận đã nắm trạng thái rồi **chờ lệnh chủ dự án**. Không tự build, deploy, sửa Sheet, chạy/rerun workflow, tạo release, upload/unlock APK hoặc mutation nào trước khi có lệnh mới.
+> **NEW-CHAT RULE:** Read this file together with `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. Do not infer a new architecture or resurrect superseded UI/release decisions. On a new chat, after reading authoritative state, wait for a new owner command before mutation/release work.
 
-## 1. Kiến trúc CHỐT
+## 1. Project / architecture — CHỐT
+
+Operational architecture:
 
 `Android App ↔ Google Apps Script Web App ↔ Google Sheets`
 
-- Google Sheets là operational source of truth.
-- Apps Script là API/transaction bridge gắn trực tiếp workbook.
-- GitHub dùng source/CI/release infrastructure; không phải datastore nghiệp vụ.
-- Không tự thêm Supabase/Firebase/Neon/Cloudflare/database/backend/service authority khác nếu owner chưa yêu cầu rõ.
-- Beta phải full-function để test thật.
-- Drive mutation chỉ trong cây `PICK PACK 1291 - CHÍNH THỨC`.
+- Google Sheets is the operational source of truth.
+- Apps Script is the transaction/API bridge tied directly to the workbook.
+- GitHub is source/CI/release infrastructure only, not business datastore.
+- Do **not** add/migrate authority to Supabase, Firebase, Neon/Postgres, Cloudflare backend/storage or another DB/backend/auth/sync/service unless the owner explicitly commands it.
+- Beta is full-function and uses real business data/rules for acceptance testing.
+- Drive mutation stays inside the official `PICK PACK 1291 - CHÍNH THỨC` tree.
 
-## 2. Ràng buộc workstation owner
+## 2. Owner workstation constraint — CHỐT
 
-Máy công ty của owner không chạy CMD/PowerShell/Terminal/CLI cục bộ.
+The owner's company-managed computer cannot run local CMD/PowerShell/Terminal/CLI.
 
-- Không hướng dẫn owner chạy `git`, `gh`, `clasp`, `adb`, Gradle, Node/npm/npx, Java/keytool, OpenSSL…
-- Command-line phải đưa lên GitHub Actions/CI/automation.
-- Owner-facing setup dùng browser/UI: GitHub web, Apps Script UI, Google Drive/Workspace UI.
+- Never instruct owner to run git/gh/clasp/adb/Gradle/Node/npm/npx/Java/keytool/OpenSSL or similar local CLI.
+- Move command-line work to GitHub Actions/approved automation.
+- Owner-facing setup uses browser/UI only where possible.
 
-## 3. Workbook / schema
+## 3. Authoritative workbook / main tabs
 
-Workbook authoritative: `DỮ LIỆU THEO NGÀY`.
+Workbook: `DỮ LIỆU THEO NGÀY`.
 
-Tabs chính:
+Main tabs:
+
 - `Danh mục`
 - `DANH SÁCH NHÂN SỰ`
 - `DANH SÁCH PDA`
@@ -41,248 +43,355 @@ Tabs chính:
 - `CÔNG NHẬT`
 - `Danh sách Admin`
 
-Password không lưu plaintext; `Danh sách Admin` dùng verifier. Event/revision fields phải giữ cho idempotency/sync.
+`Danh sách Admin` now has a **Mail** field. Existing accounts were initialized to the owner-approved reset address. Each account may change its own reset-mail address through the app; forgot-password delivery uses the configured email for that account.
 
-## 4. Business invariants
+Never store plaintext normal passwords in Sheets/repo/handover.
 
-- `MNV` là business key.
-- Session theo `MNV + business_date`: `NOT_ENTERED -> ACTIVE -> ENDED`.
-- `ENDED` không vào lại cùng ngày qua flow thường.
-- Mutation dùng immutable/idempotent `event_id`.
-- Resource độc quyền phải chống race; đổi resource atomic; fail giữ resource cũ.
-- State session/resource authoritative phải lấy từ Sheet API.
-- Master/static data cache local theo revision; operational state vẫn kiểm động server.
+## 4. Business invariants — CHỐT
 
-### PICK/PACK hiện tại
+- `MNV` is the business key.
+- Session key is `MNV + business_date`:
+  `NOT_ENTERED -> ACTIVE -> ENDED`.
+- Once `ENDED`, normal flow cannot re-enter on the same business date.
+- Mutations use immutable/idempotent `event_id`.
+- Exclusive resources are race-safe; one winner only.
+- Resource change is atomic; failure keeps the previous resource assignment.
+- Google Sheet/API is authoritative for active session/resource state.
+- Master/static data can be cached locally by revision; operational state remains server-authoritative.
 
-- PICK bắt buộc PDA.
-- **User Pick là tùy chọn**, được bỏ trống. Quyết định này supersede yêu cầu cũ “PICK bắt buộc User Pick”.
-- PDA UI nhập 5 số cuối serial + autocomplete/gợi ý; chỉ nhận kết quả hợp lệ/duy nhất.
-- PACK giữ mapping bàn Pack + User Pack theo ca và exclusivity.
+### PICK / PACK
 
-## 5. Role / auth / session
+- PICK requires PDA.
+- **User Pick is optional** and may be blank. This supersedes the old requirement that User Pick was mandatory.
+- PDA input uses last 5 serial digits + validated autocomplete/suggestions; ambiguous duplicate last-5 values must not be accepted as a unique selection.
+- PACK keeps shift mapping to Bàn Pack + User Pack and exclusivity rules.
 
-Role: `SUPERADMIN`, `ADMIN`, `USER`; backend enforce quyền. `CÔNG NHẬT` hiện dành cho ADMIN/SUPERADMIN theo phân quyền app.
+## 5. Roles / auth / session — CHỐT
 
-Auth:
-- credential bình thường dùng salted PBKDF2-HMAC-SHA256;
-- login challenge/HMAC proof;
-- plaintext password không gửi trực tiếp tới Apps Script;
-- không commit password/verifier thật/token/signing key/credential vào repo public.
+Roles:
 
-### Session `SINGLE_ACTIVE_DEVICE_V1`
+- `SUPERADMIN`
+- `ADMIN`
+- `USER`
 
-- Android lưu session bền trong private app storage.
-- Tắt app/process kill rồi mở lại vẫn giữ đăng nhập.
-- Không còn timeout bình thường 12 giờ.
-- Cùng account login thành công ở installation/device khác sẽ thay active server session cũ.
-- Thiết bị cũ nhận 401 ở request/sync kế tiếp và phải login lại.
-- Explicit logout, account/security change hoặc reset password có thể kết thúc phiên.
+Backend enforces permission. `CÔNG NHẬT` is currently ADMIN/SUPERADMIN according to app rules.
 
-### Quên mật khẩu — LIVE
+Credential/auth rules:
 
-- Public action `forgot_password`.
-- App gửi username; response generic không lộ account tồn tại hay không.
-- Rate limit 5 phút theo login + device.
-- Account active nhận reset credential tạm, hết hạn sau 2 giờ.
-- Mail mật khẩu tạm chỉ gửi về email quản trị owner đã chốt.
-- Login đầu bằng mật khẩu tạm nâng lại về PBKDF2 verifier.
-- Reset làm session cũ không còn hợp lệ.
-- Apps Script MailApp đã được owner authorize bằng browser helper `ppAuthorizeMail()`.
+- salted PBKDF2-HMAC-SHA256 verifier
+- login challenge/HMAC proof
+- plaintext password is not sent directly to GAS
+- never commit passwords, verifiers, OAuth credentials, signing secrets or private tokens
 
-Superadmin hiện dùng login `admin`. Reset thật đã PASS và mail đã tới Gmail. Có 2 mail reset liên tiếp; **chỉ dùng mail mới nhất**. Không ghi mật khẩu vào handover/chat/repo. One-time reset workflow đã được xóa sau khi hoàn tất.
+### Session model `SINGLE_ACTIVE_DEVICE_V1`
 
-## 6. UI / branding CHỐT — supersede Mẫu 1
+- Android persists session in private storage.
+- Closing/killing/reopening app retains login on the same installation.
+- No routine 12-hour forced logout.
+- Successful login for the same account on another installation/device replaces the old active server session.
+- Old device receives 401 on the next sync/API opportunity and must login again.
+- Explicit logout/security/account/password-reset actions may invalidate session.
 
-Từ `0.4.2-beta.4+`, visual system chính thức là **Mẫu 2 — Minimal Teal Corporate**.
+## 6. Forgot password / account mail — LIVE
 
-- White/light surface, teal primary, charcoal text, enterprise tối giản, compact PDA-friendly.
-- Footer nhỏ sát đáy: `Copyright 2026 - tamnv2 - Chuyên viên Pick Pack 1291 - Supra DCHY`.
-- Launcher icon dùng đúng artwork owner cung cấp, không redesign/inset/đổi ảnh.
-- Routine success toast/noti phải hạn chế; intrusive notification chỉ cho lỗi, session replacement, security, OTA/sự kiện quan trọng.
+Public route: `forgot_password`.
 
-Login:
-- bỏ dòng Beta/version marketing;
-- logo + fields + actions cân giữa màn hình;
-- có `QUÊN MẬT KHẨU?`.
+- User submits username.
+- External response remains generic and does not reveal whether the account exists.
+- Rate limit remains 5 minutes per login + device.
+- Active account receives a temporary reset credential valid for 2 hours.
+- Reset mail goes to the account's configured **Mail** field.
+- First successful temp-password login upgrades back to normal PBKDF2 verifier.
+- Reset invalidates the previous active session.
+- MailApp permission is already authorized.
 
-QR/performance:
-- preview/search ưu tiên master cache local;
-- `employee_context` không kéo master options/active labor nếu màn không cần;
-- session state vẫn server-authoritative.
+Settings exposes `ĐỔI MẬT KHẨU` and `ĐỔI MAIL` side by side, equal-width and single-line.
 
-Báo cáo:
-- bỏ các dòng tiêu đề thừa `NGUỒN LỰC` / `THÂM NIÊN`;
-- khối hỗ trợ chỉ hiện khi tổng khấu trừ > 0;
-- `Phúc Long` đứng trước `Kéo hàng`;
-- giảm padding/margin để bảng sát màn hình hơn;
-- ô 0/cột toàn 0 tiếp tục tối ưu hiển thị theo logic hiện có.
+## 7. UI / UX — CURRENT OWNER-APPROVED SYSTEM
 
-## 7. Google Apps Script — LIVE
+**SUPERSEDES** earlier `Minimal Teal Corporate / Mẫu 2`, fixed teal assumptions and the intermediate unequal-hero-card dashboard.
 
-Repo source và live Web App đã xác nhận:
-- `api_version: 0.4.2`
-- `mode: APP_GSHEET`
-- `sheet_read: true`
-- `auth_session_model: SINGLE_ACTIVE_DEVICE_V1`
-- `update_check` BETA/STABLE đọc Google Drive đúng channel;
-- `forgot_password` live;
-- MailApp permission đã authorize;
-- actual superadmin reset + mail delivery PASS.
+Authoritative specification: `docs/UI_UX_SYSTEM.md`.
 
-Deploy GAS đã chuyển khỏi yêu cầu local `clasp`. Browser-only Google OAuth + Apps Script REST API dùng 5 GitHub Secrets đã cấu hình và hoạt động:
-- `GOOGLE_OAUTH_CLIENT_ID`
-- `GOOGLE_OAUTH_CLIENT_SECRET`
-- `GOOGLE_OAUTH_REFRESH_TOKEN`
-- `GAS_SCRIPT_ID`
-- `GAS_DEPLOYMENT_ID`
+Owner approved a unified modern enterprise design family:
 
-Không ghi giá trị secrets vào repo/handover.
+- blue / indigo / violet visual language with centralized theme tokens
+- 7 selectable theme colors remain supported
+- all 7 swatches always on one horizontal row, no names, no wrap
+- work cards are equal components
+- semantic icons throughout tabs/cards/titles/actions
+- the approved visual language applies to inner workflows as well as outer screens
 
-## 8. OTA CHỐT từ 0.4.2+
+### Authenticated header
 
-Steady-state authority:
+Do not use `PICK PACK 1291` as the routine top tab title.
+
+Header identity area uses separate constrained lines:
+
+1. Họ tên
+2. Vị trí
+3. `Tài khoản: <login>`
+
+Compact right-side status area is reserved for user-facing:
+
+- Mạng
+- Đồng bộ
+- Service
+
+No revision/server-sequence/API jargon in routine UI.
+
+### Fixed five-tab navigation
+
+Exact order:
+
+`Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`
+
+S07 functional refactor changed authenticated navigation to **one persistent `OperationsActivity` shell**:
+
+- Business and the other four tabs no longer cross Activities.
+- Tab switch no longer uses `TransitionManager/Fade`.
+- Content swaps in-place immediately.
+- Bottom nav remains mounted; selected state updates in-place.
+- Authenticated login/restore enters the BUSINESS shell and closes the login Activity.
+
+S07 Beta+Stable **release compilation passed** for this refactor.
+
+### User-facing copy rule — global
+
+Visible text is only information useful to ordinary users.
+
+Do not insert AI/developer/system-design commentary into screens, including:
+
+- ACK/request protocol explanations
+- server/master revision numbers
+- cache/Sheet architecture explanations
+- `Không cần nút kiểm tra`
+- `Màu giao diện được đổi trong tab Cài đặt`
+- explanations of implementation decisions
+
+Technical details belong in diagnostics/docs/logs, not routine UI.
+
+Settings no longer duplicates a `Đồng bộ / dữ liệu` section because `Đồng bộ` has its own tab.
+
+### Current visual implementation caveat
+
+The owner-approved multi-screen mockup family is the **visual target/spec**. S07 implemented the global shell/navigation/copy behavior and equal work-card structure, but future visual work must continue to align every inner screen pixel/layout component with `docs/UI_UX_SYSTEM.md`; do not falsely assume every mockup detail is already implemented just because the behavioral shell is complete.
+
+## 8. Notifications / interaction — CHỐT
+
+- Routine notifications appear at top of screen for about 3 seconds.
+- Maximum 3 notifications; newer items evict the oldest when over limit.
+- Routine not-found/success/status messages should not require an OK dialog.
+- Yes/No confirmations are reserved for consequential actions or owner-approved cases.
+- Manual diagnostic-log submission requires Yes/No confirmation.
+- Scanner-oriented MNV input triggers on PDA/keyboard Enter/OK; no redundant `Kiểm tra` button is required.
+
+## 9. Staff / history / sync / settings
+
+### Nhân sự
+
+- full staff list available from local master data
+- search MNV/name
+- ADMIN/SUPERADMIN can add/edit/delete
+- delete requires confirmation
+- backend prevents deletion when business constraints disallow it, e.g. active session
+
+### Lịch sử
+
+- shows user-facing action history and synchronized/not-synchronized state
+- does not explain ACK/protocol internals
+
+### Đồng bộ
+
+User-facing summary uses understandable concepts such as:
+
+- Mạng
+- Đồng bộ
+- Dữ liệu chờ gửi
+- Phiên bản
+- Service
+
+Developer fields such as server/master revisions may remain internally available but are not routine user copy.
+
+### Cài đặt
+
+Contains practical configuration only, including account/mail, 7-color theme, updates, logs, device/admin items and logout. Duplicate sync-details section is removed.
+
+## 10. Logging — CHỐT
+
+Categories:
+
+- MANUAL -> `BÁO LỖI THỦ CÔNG`
+- CRASH -> `BÁO LỖI TỰ ĐỘNG`
+- DAILY -> `NHẬT KÝ ANDROID`
+
+Rules:
+
+- redact secrets/private data where applicable
+- manual send uses Yes/No confirmation
+- Manual/Crash/Daily local file is deleted **only after successful server ACK for that upload/event**
+- pending Crash/Daily logs are also attempted after restored session, not only after a fresh login
+- user-facing success text does not expose ACK implementation jargon
+
+## 11. Reports — active business/UI rules
+
+- no redundant `NGUỒN LỰC` / `THÂM NIÊN` title rows
+- support block only shown when deducted support total > 0
+- `Phúc Long` before `Kéo hàng`
+- compact PDA-friendly spacing
+- zero-cell/all-zero-column display optimizations remain according to existing logic
+- table sections should read as one coherent block; avoid heavy rounded outline around each table
+
+## 12. GAS live state
+
+Live API remains `0.4.2` / `APP_GSHEET` architecture with:
+
+- Sheet read health
+- `SINGLE_ACTIVE_DEVICE_V1`
+- Drive-based `update_check` channel routing
+- account-email forgot-password route
+- MailApp authorization
+
+Browser-only GAS deployment uses configured GitHub Secrets. Never expose their values.
+
+## 13. OTA — CHỐT
+
+Steady-state:
 
 `Android -> GAS update_check -> Google Drive channel folder`
 
-- BETA chỉ đọc `BẢN THỬ NGHIỆM`.
-- STABLE chỉ đọc `BẢN ỔN ĐỊNH`.
-- Không restore GitHub Releases làm steady-state OTA authority nếu owner chưa đổi yêu cầu.
-- GitHub prerelease beta.2 chỉ là compatibility bridge cho legacy updater.
-- App check ở open/foreground; không thêm polling background/screen-off.
-- APK phải SHA-256 verify trước Android package installer.
-- Android bình thường vẫn có thể yêu cầu user xác nhận cài/unknown-source; không phải silent Device Owner install.
+- BETA only `BẢN THỬ NGHIỆM`
+- STABLE only `BẢN ỔN ĐỊNH`
+- GitHub Releases are not steady-state OTA authority
+- check on open/foreground; no screen-off/background polling
+- verify downloaded APK SHA-256 before installer
+- normal Android may still require user install confirmation / unknown-source permission
 
-Migration:
-- `0.4.1-beta.1` cần cài OTA-enabled build thủ công một lần.
-- `0.4.2-beta.2+` dùng GAS/Drive OTA.
+## 14. Current release state
 
-## 9. Current Beta — `0.4.2-beta.4`
+### Published Beta — `0.4.2-beta.6`
 
 - Package: `vn.pickpack1291.app.beta.publicbeta`
-- VersionCode: `10`
-- VersionName: `0.4.2-beta.4`
-- APK name: `pick-pack-1291-public-beta-v0.4.2-beta.4.apk`
-- SHA-256: `e6bff0cc81f82cb6e8365f9fff3abd3e4c76dcfcfa65d85fe54789d131485084`
-- Fixed signer SHA-256 phải giữ nguyên: `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
+- VersionCode: `12`
+- SHA-256: `ac6c537d3d0e6a85574233ad9031544befd3a282349e47c605e5cd05b0701860`
+- Fixed signer SHA-256:
+  `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
 
-Gates PASS:
-- Beta + Stable compile;
-- package/version metadata;
-- owner launcher resource;
-- fixed signer;
-- Drive upload;
-- OTA E2E beta.3 -> beta.4;
-- download Drive thật + SHA match;
-- beta.4 không update lại chính nó;
-- Stable isolation khỏi Beta.
+beta.6 OTA E2E passed:
 
-## 10. GitHub state / CI risk
+- beta.5 -> beta.6 update found
+- actual OTA download SHA matched
+- beta.6 does not update to itself
+- Stable does not see Beta build
 
-Repo: `tam95supra-source/pick-pack-1291`, branch `main`.
+### Source candidate — `0.4.2-beta.7`
 
-Implementation head trước các commit handover S03:
-`625037d8911b2051a1fd001e00ef8a7366b538b9` — remove one-time superadmin reset workflow.
+- VersionCode: `13`
+- Source contains S07 persistent-shell/copy-rule refactor.
+- Beta Release + Stable Release compilation passed before source commit.
+- **NOT published to Google Drive OTA.**
+- Do not tell owner beta.7 is released unless a later OTA publish and E2E verification actually completes.
 
-Commit quan trọng S03:
-- `38b13dcdf52daa4050eb209e8b27cf39e3eb3d10` — Minimal Teal + reset flow + performance/PDA/report changes.
-- `bbe7c64f29ea24731120dabeab852a23123b9158` — public Apps Script MailApp authorization helper.
-- `625037d8911b2051a1fd001e00ef8a7366b538b9` — delete one-time reset workflow.
+### Stable
 
-### P0 CI technical debt
+Not promoted. Stable release still requires Beta soak/business acceptance and an explicit owner decision.
 
-`.github/workflows/beta-preview.yml` **vẫn hardcode beta.3/versionCode 9** ở metadata/sign/release trong khi source hiện là beta.4/versionCode 10.
+## 15. Build / CI / release optimization — CHỐT
 
-=> Không coi workflow này là pipeline release chuẩn cho bản kế tiếp cho tới khi sửa/consolidate. Trước release mới phải làm version metadata dynamic hoặc đồng bộ target hiện tại, tránh phát nhầm beta.3.
+Authoritative procedure: `docs/BUILD_RELEASE_PLAYBOOK.md`.
 
-Beta4 được build bằng workflow riêng `build-beta4-final.yml`, deploy GAS bằng `beta4-deploy-gas.yml`, verify OTA bằng `verify-ota-beta4-final.yml`.
+### Permanent two-tier model
 
-Repo còn nhiều workflow migration/repair/verify one-shot. Chỉ cleanup sau khi owner ra lệnh và đã rà soát gate cần giữ.
+**Tier A — `App Fast Check`**
 
-### Android signing automation
+Normal source changes:
 
-4 Actions signing secrets chưa được xác nhận cấu hình đầy đủ:
+- static architecture/UX guards
+- launcher hash
+- Beta Debug assemble
+- Stable Debug assemble
+- no live GAS/Drive release probe
+- no signing/publish
+- concurrency cancels stale older fast checks
+
+**Tier B — `Release Preflight - Beta and Stable`**
+
+Explicit pre-release only:
+
+- live GAS health
+- live BETA/STABLE Drive channel checks
+- dynamic source version metadata
+- Beta Release + Stable Release assemble
+- package/version validation
+- candidate artifact
+- fixed-signer validation if four signing secrets are ready
+- validation only; no automatic Drive OTA publish
+
+Both pipelines first use an exact preinstalled Android SDK when available and only fall back to the pinned verified SDK bootstrap when required.
+
+### Recurring failures now recorded/prevented
+
+The build playbook records these known failure classes:
+
+- brittle one-line Kotlin patch anchors / parser cascades
+- multiline source embedded in workflow YAML
+- dispatching newly-created workflows before registration
+- observers writing receipts to `main` causing rebase races
+- CI trying to self-edit `.github/workflows`
+- `ops/*` source/status conflicts
+- stale hardcoded release versions
+- full release/live probes on every tiny edit
+- repeated Android SDK bootstrap
+- wrong/historical external-service assumptions
+- OAuth scope mismatch for Drive upload
+
+Permanent CI must validate, not write observer/status/source commits back to `main`.
+
+## 16. Android signing automation
+
+Four GitHub signing secrets remain the preferred full-auto signing path when confirmed configured:
+
 - `ANDROID_SIGNING_KEY_B64`
 - `ANDROID_SIGNING_STORE_PASSWORD`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 - `ANDROID_SIGNING_ALIAS`
 
-Beta4 đã được ký bằng recovery material chính thức và fixed signer đúng. Full-auto sign/release vẫn là backlog nếu owner muốn hands-off release. Không expose signing material.
+Do not expose values.
 
-## 11. Sync / scanner / logging
+Until confirmed, use only the official existing signing recovery path and verify the fixed signer. Never create a replacement signing identity.
 
-Sync:
-- foreground sync open/resume;
-- background/screen-off không khởi tạo polling mới;
-- request đang chạy được phép drain.
+## 17. Scanner / performance
 
-Scanner:
-- MNV numeric;
-- IME/hardware Enter suffix support;
-- Newland/PDA hardware cần test thiết bị thật sau Beta4.
+- MNV numeric input supports hardware/IME Enter suffix.
+- master lookup/search prefers local cache where appropriate.
+- operational session/resource state remains server-authoritative.
+- actual Newland/PDA hardware behavior still needs real-device acceptance after relevant Beta updates.
 
-Logging:
-- MANUAL -> `BÁO LỖI THỦ CÔNG`;
-- CRASH -> `BÁO LỖI TỰ ĐỘNG`;
-- DAILY -> `NHẬT KÝ ANDROID`;
-- redact secrets; local chỉ xóa sau ACK thành công.
+## 18. P0 acceptance / backlog
 
-## 12. DONE S03
+On real PDA after next OTA candidate:
 
-- Ghi rule no-local-CLI toàn dự án.
-- Browser-only OAuth/REST deploy GAS hoạt động.
-- OTA chuyển sang GAS + Drive Beta/Stable.
-- GAS 0.4.2 + WEB_APP + health gates PASS.
-- Icon owner artwork đúng và session persistent/single-active-device từ beta3.
-- Chốt Minimal Teal Corporate beta4.
-- Center login, bỏ Beta/version text.
-- Tối ưu login và QR latency.
-- PDA last-5 autocomplete; User Pick optional.
-- Giảm routine notifications.
-- Report layout/order/conditional support theo owner.
-- Forgot password -> admin email + MailApp authorization.
-- Reset thật superadmin và mail delivery PASS.
-- Build/sign/upload beta4 + OTA E2E PASS.
-- One-time reset workflow đã xóa.
+- verify five-tab switching is perceptually immediate with no Activity flash/delay
+- verify approved header/layout on actual screen dimensions
+- verify QR MNV Enter/OK flow and NOT_ENTERED/ACTIVE/ENDED states
+- verify PDA last-5 suggestions and duplicate handling
+- verify PICK without User Pick
+- verify Công nhật flows and report readability
+- verify theme switching across all inner screens
+- verify notifications queue/3-second behavior
+- verify forgot password for a normal user using configured account email
+- verify force-close/reopen session persistence
+- verify same-account replacement from a second installation/device
 
-## 13. TODO / device acceptance
+Visual implementation should continue from the approved design spec; do not redesign it again without owner request.
 
-### P0 trên PDA thật
-- Cài/OTA beta4.
-- Login superadmin bằng **mail reset mới nhất**.
-- Đo loading login.
-- Force close/mở lại -> session phải còn.
-- Login account đó trên máy 2 -> máy 1 bị thay session ở request/sync kế.
-- QR nhân sự: latency + NOT_ENTERED/ACTIVE/ENDED.
-- PDA 5 số cuối -> gợi ý đúng; duplicate last5 không được chọn mơ hồ.
-- PICK không User Pick -> lưu được.
-- Báo cáo Minimal Teal trên kích thước PDA thật.
-- Forgot password cho một user thường -> mail admin, generic response, mật khẩu tạm login trong 2 giờ.
+## 19. Handover policy
 
-### P0 trước release kế tiếp
-- Sửa/consolidate `beta-preview.yml` hardcode beta3/versionCode9.
-- Rà soát và cleanup one-shot workflows nếu owner yêu cầu.
-- Nếu cần full-auto release: cấu hình/test 4 Android signing secrets bằng browser-only flow.
-- Không thay OTA authority về GitHub Releases.
+Two layers:
 
-### Stable
-- Chưa promote Stable chỉ vì Beta build PASS.
-- Stable cần soak/test Beta thật trước khi release.
-- Stable dùng cùng OTA code nhưng chỉ đọc `BẢN ỔN ĐỊNH`.
+1. `docs/HANDOVER_CURRENT.md` — cumulative authoritative state.
+2. `docs/handovers/HANDOVER_SXX_YYYY-MM-DD.md` — immutable snapshot when a chat handover is requested.
 
-## 14. Known risks / technical debt
+When a later decision replaces an old one, mark the old decision `SUPERSEDED` rather than silently dropping it.
 
-- `beta-preview.yml` stale hardcodes là rủi ro phát nhầm version.
-- Nhiều workflow one-shot cần consolidate có kiểm soát.
-- GAS còn constant GitHub Releases legacy dù runtime OTA authority đã là Drive; có thể cleanup sau.
-- Actual latency/UX trên PDA thật chưa đo end-to-end sau beta4.
-- Android installer vẫn cần user interaction trên thiết bị bình thường.
-- Forgot-password public route hiện có generic response + 5-minute rate limit; cần theo dõi abuse/mail quota nếu rollout rộng.
-
-## 15. Cách tiếp tục S04
-
-1. Đọc handover/guardrails, xác nhận trạng thái, chờ owner.
-2. Nếu owner báo lỗi Beta4: inspect logs/reproduce trước, không đổi kiến trúc.
-3. Nếu release tiếp: **sửa CI hardcode trước**, tăng version/versionCode, deploy GAS nếu source GAS đổi, build, signer gate, Drive upload, OTA E2E.
-4. Nếu Stable: soak Beta trước, giữ fixed signer, upload duy nhất vào Stable folder.
-5. Không hướng dẫn owner dùng CMD/PowerShell/terminal.
+Public repo handovers must not include plaintext passwords, tokens, private signing material, real personnel data or unnecessary private identifiers.
