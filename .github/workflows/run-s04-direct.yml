@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract and run staged S04 patch
+      - name: Extract and apply S04 patch
         shell: bash
         run: |
           set -euo pipefail
@@ -34,133 +34,7 @@ jobs:
           PY
           sed -i "s/start='    private fun laborHome(){'/start='    private fun laborHome() {'/" /tmp/apply_s04.py
           python3 /tmp/apply_s04.py
-
-      - name: Repair generated Kotlin blocks
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 <<'PY'
-          from pathlib import Path
-
-          def replace_between(path, start, end, replacement):
-              p=Path(path); t=p.read_text(encoding='utf-8')
-              a=t.index(start); b=t.index(end,a+len(start))
-              p.write_text(t[:a]+replacement+t[b:],encoding='utf-8')
-
-          full='app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt'
-          replace_between(full,
-              '    private fun bottomNav(active:String)=',
-              '    private fun sessionExpired()',
-'''    private fun bottomNav(active:String): LinearLayout = row(surface).apply {
-        gravity = Gravity.CENTER
-        setPadding(dp(3),dp(3),dp(3),dp(3))
-        background = GradientDrawable().apply { setColor(surface); setStroke(dp(1),line) }
-        val items = listOf(
-            Triple("▦","Nghiệp vụ","BUSINESS"),
-            Triple("◉","Nhân sự","STAFF"),
-            Triple("◷","Lịch sử","HISTORY"),
-            Triple("↻","Đồng bộ","SYNC"),
-            Triple("⚙","Cài đặt","SETTINGS")
-        )
-        items.forEach { item ->
-            val cell = column(surface).apply {
-                gravity = Gravity.CENTER
-                addView(txt(item.first,17f,if(item.third==active)teal else muted,true).apply { gravity=Gravity.CENTER })
-                addView(txt(item.second,8.4f,if(item.third==active)teal else muted,item.third==active).apply { gravity=Gravity.CENTER; maxLines=1 })
-                setOnClickListener { _ ->
-                    if(item.third=="BUSINESS") dashboard() else openModule(item.third)
-                }
-            }
-            addView(cell,LinearLayout.LayoutParams(0,-1,1f))
-        }
-    }
-
-''')
-
-          ops='app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt'
-          replace_between(ops,
-              '    private fun staffScreen(){',
-              '    private fun staffEditor(',
-'''    private fun staffScreen(){
-        screenState="STAFF"
-        val root=baseRoot("NHÂN SỰ")
-        val body=body()
-        val q=input("Tìm MNV / họ tên",false).apply {
-            setSingleLine(true)
-            imeOptions=EditorInfo.IME_ACTION_SEARCH
-        }
-        body.addView(q,matchWrap())
-        body.addView(gap(7))
-        if(isAdmin()){
-            body.addView(primary("＋ THÊM NHÂN SỰ",teal){ staffEditor(null) },matchWrap())
-            body.addView(gap(7))
-        }
-        val box=column(bg)
-        body.addView(box,matchWrap())
-        fun render(query:String){
-            box.removeAllViews()
-            val arr=MasterDataCache.searchStaff(this,query,2000)
-            for(i in 0 until arr.length()){
-                val e=arr.optJSONObject(i) ?: continue
-                val card=column(surface).apply {
-                    setPadding(dp(11),dp(9),dp(11),dp(9))
-                    background=outlineBg(surface,8)
-                    addView(txt("◉  ${e.optString("mnv")} • ${e.optString("full_name")}",12.5f,ink,true))
-                    addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))} • ${dash(e.optString("department"))}",9.7f,muted,false))
-                    if(isAdmin()){
-                        addView(gap(5))
-                        val actions=row(surface)
-                        val edit=primary("✎ SỬA",teal){ staffEditor(e) }.apply { textSize=9.2f; setSingleLine(true) }
-                        val del=primary("× XÓA",red){ confirmDeleteStaff(e) }.apply { textSize=9.2f; setSingleLine(true) }
-                        actions.addView(edit,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginEnd=dp(3)})
-                        actions.addView(del,LinearLayout.LayoutParams(0,dp(38),1f).apply{marginStart=dp(3)})
-                        addView(actions,matchWrap())
-                    }
-                }
-                box.addView(card,matchWrap())
-                box.addView(gap(6))
-            }
-            if(arr.length()==0) box.addView(info("ⓘ Không có nhân sự phù hợp."))
-        }
-        q.addTextChangedListener(object:TextWatcher{
-            override fun beforeTextChanged(v:CharSequence?,s:Int,c:Int,a:Int)=Unit
-            override fun onTextChanged(v:CharSequence?,s:Int,b:Int,c:Int){ render(v?.toString().orEmpty()) }
-            override fun afterTextChanged(v:Editable?)=Unit
-        })
-        q.setOnEditorActionListener { _,_,_ -> render(q.text.toString()); true }
-        render("")
-        attach(root,body)
-    }
-
-''')
-          replace_between(ops,
-              '    private fun bottomNav()=',
-              '    private fun navigateTab(',
-'''    private fun bottomNav(): LinearLayout = row(surface).apply {
-        gravity=Gravity.CENTER
-        setPadding(dp(3),dp(3),dp(3),dp(3))
-        background=GradientDrawable().apply { setColor(surface); setStroke(dp(1),line) }
-        val active=activeTab()
-        val items=listOf(
-            Triple("▦","Nghiệp vụ","BUSINESS"),
-            Triple("◉","Nhân sự","STAFF"),
-            Triple("◷","Lịch sử","HISTORY"),
-            Triple("↻","Đồng bộ","SYNC"),
-            Triple("⚙","Cài đặt","SETTINGS")
-        )
-        items.forEach { item ->
-            val cell=column(surface).apply {
-                gravity=Gravity.CENTER
-                addView(txt(item.first,17f,if(item.third==active)teal else muted,true).apply { gravity=Gravity.CENTER })
-                addView(txt(item.second,8.4f,if(item.third==active)teal else muted,item.third==active).apply { gravity=Gravity.CENTER; maxLines=1 })
-                setOnClickListener { _ -> navigateTab(item.third) }
-            }
-            addView(cell,LinearLayout.LayoutParams(0,-1,1f))
-        }
-    }
-
-''')
-          PY
+          python3 ops/s04_repair.py
 
       - name: Check Apps Script syntax
         run: cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js && node --check /tmp/PICK_PACK_API.js
@@ -198,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f .github/workflows/apply-s04-layout2.yml .github/workflows/trigger-s04.yml .github/workflows/run-s04-direct.yml
-          rm -f ops/s04-trigger.txt ops/s04-direct-trigger.txt ops/s04-dispatch-receipt.txt ops/s04-observer.json
+          rm -f ops/s04-trigger.txt ops/s04-direct-trigger.txt ops/s04-dispatch-receipt.txt ops/s04-observer.json ops/s04_repair.py
           rmdir ops 2>/dev/null || true
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
