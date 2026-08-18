@@ -1,0 +1,56 @@
+{
+  "gas-deploy.yml": [
+    {
+      "conclusion": "success",
+      "createdAt": "2026-08-18T04:27:07Z",
+      "databaseId": 32099191238,
+      "displayTitle": "ops: deploy S09 GAS catalog rules",
+      "headSha": "89ed8385735537f75394287b05e79c3fe09e83fd",
+      "status": "completed"
+    }
+  ],
+  "app-fast-check.yml": [
+    {
+      "conclusion": "",
+      "createdAt": "2026-08-18T04:27:52Z",
+      "databaseId": 32099239199,
+      "displayTitle": "ci: align fast guards with semantic icons and Admin rules",
+      "headSha": "33290bdb0a55f8b52178b89e83a534dff2e53d0a",
+      "status": "in_progress"
+    },
+    {
+      "conclusion": "success",
+      "createdAt": "2026-08-18T02:56:42Z",
+      "databaseId": 32093658560,
+      "displayTitle": "docs: lock explicit GAS deploy and permanent pipeline set",
+      "headSha": "b10fcfca4baab3321d39eb92496ee4435d61cf20",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "createdAt": "2026-08-18T02:52:26Z",
+      "databaseId": 32093406359,
+      "displayTitle": "ci: include GAS source in fast validation",
+      "headSha": "300463de965e30f5ac5b1293812cdfce283fffa8",
+      "status": "completed"
+    }
+  ],
+  "release-preflight.yml": [
+    {
+      "conclusion": "success",
+      "createdAt": "2026-08-18T03:20:10Z",
+      "databaseId": 32095096326,
+      "displayTitle": "ops: run beta8 release preflight",
+      "headSha": "55468ed630566a788ba405fcb5fac02cc3e90a3a",
+      "status": "completed"
+    },
+    {
+      "conclusion": "success",
+      "createdAt": "2026-08-18T02:55:18Z",
+      "databaseId": 32093577685,
+      "displayTitle": "ops: validate renamed release preflight pipeline",
+      "headSha": "194009e1fb41da0e90a61b17605b9aa6a3715cd2",
+      "status": "completed"
+    }
+  ]
+}
