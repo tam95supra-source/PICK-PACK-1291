@@ -116,18 +116,19 @@ class FullBetaActivity : Activity() {
 
         val card = column(surface).apply {
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(22), dp(22), dp(22))
-            background = outlineBg(surface, 14)
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            background = outlineBg(surface, 20)
+            elevation = dp(8).toFloat()
         }
-        card.addView(ImageView(this).apply { setImageResource(R.drawable.owner_launcher); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(98), dp(98)))
+        card.addView(ImageView(this).apply { setImageResource(R.drawable.owner_launcher); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(92), dp(92)))
         card.addView(gap(9))
-        card.addView(txt("PICK PACK 1291", 22f, navy, true).center())
-        card.addView(txt("SUPRA DC HƯNG YÊN", 10.5f, teal, true).center())
+        card.addView(txt("PICK PACK 1291", 24f, navy, true).center())
+        card.addView(txt("SUPRA DC HƯNG YÊN", 10.5f, accent, true).center())
         card.addView(gap(20))
         card.addView(labelled("Tài khoản", user)); card.addView(gap(10))
         card.addView(labelled("Mật khẩu", pass)); card.addView(gap(14))
 
-        val button = primary("ĐĂNG NHẬP", teal) {}
+        val button = primary("ĐĂNG NHẬP", teal) {}.apply{background=gradient(navy,accent,14)}
         fun submit() {
             val login = user.text.toString().trim(); val password = pass.text.toString()
             if (login.isBlank() || password.isBlank()) { toast("Nhập tài khoản và mật khẩu."); return }
@@ -175,7 +176,7 @@ class FullBetaActivity : Activity() {
         val holder = FrameLayout(this).apply {
             setBackgroundColor(bg)
             minimumHeight = (resources.displayMetrics.heightPixels - dp(70)).coerceAtLeast(dp(560))
-            setPadding(dp(18), dp(12), dp(18), dp(12))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
             addView(card, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         }
         setScreen(ScrollView(this).apply { isFillViewport = true; addView(holder) })
@@ -416,10 +417,10 @@ class FullBetaActivity : Activity() {
         return AutoCompleteTextView(this).apply{hint="Nhập 5 số cuối seri PDA";threshold=1;textSize=14f;setTextColor(ink);setHintTextColor(Color.rgb(153,163,176));inputType=InputType.TYPE_CLASS_NUMBER;keyListener=DigitsKeyListener.getInstance("0123456789");setPadding(dp(12),dp(9),dp(12),dp(9));minHeight=dp(46);background=outline();setAdapter(ArrayAdapter(this@FullBetaActivity,android.R.layout.simple_dropdown_item_1line,labels));setOnItemClickListener{parent,_,pos,_->setText(parent.getItemAtPosition(pos).toString().substringBefore(" • "),false)};if(currentLast5.isNotBlank())setText(currentLast5,false)}
     }
     private fun resolvePda(pdas:JSONArray,rawValue:String):String?{val raw=rawValue.trim().substringBefore(" • ");if(raw.length!=5||!raw.all{it.isDigit()})return null;val hits=mutableListOf<String>();for(i in 0 until pdas.length()){val p=pdas.optJSONObject(i)?:continue;val serial=p.optString("serial").trim();val last5=p.optString("last5").trim().ifBlank{serial.takeLast(5)};if(last5==raw&&serial.isNotBlank())hits.add(serial)};return hits.singleOrNull()}
-    private fun input(hintValue:String,password:Boolean)=EditText(this).apply{hint=hintValue;textSize=14f;setTextColor(ink);setHintTextColor(Color.rgb(153,163,176));inputType=if(password)InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT;setPadding(dp(12),dp(9),dp(12),dp(9));minHeight=dp(46);background=outline()}
+    private fun input(hintValue:String,password:Boolean)=EditText(this).apply{hint=hintValue;textSize=14f;setTextColor(ink);setHintTextColor(Color.rgb(153,163,176));inputType=if(password)InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD else InputType.TYPE_CLASS_TEXT;setPadding(dp(13),dp(10),dp(13),dp(10));minHeight=dp(48);background=outline()}
     private fun labelled(label:String,view:View)=column(bg).apply{addView(txt(label,10.5f,ink,true));addView(gap(4));addView(view,matchWrap())}
     private fun spinner(items:Array<String>)=Spinner(this).apply{adapter=ArrayAdapter(this@FullBetaActivity,android.R.layout.simple_spinner_dropdown_item,items);setPadding(dp(7),dp(3),dp(7),dp(3));minimumHeight=dp(46);background=outline()}
-    private fun primary(title:String,color:Int,click:()->Unit)=Button(this).apply{text=title;textSize=12.5f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;isAllCaps=false;minHeight=dp(48);background=round(color,7);setOnClickListener{click()}}
+    private fun primary(title:String,color:Int,click:()->Unit)=Button(this).apply{text=title;textSize=12.5f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;isAllCaps=false;minHeight=dp(50);background=round(color,12);setOnClickListener{click()}}
 
     private fun setScreen(content:View){setContentView(host(content))}
     private fun navigateBack(){when(currentScreen){"EMPLOYEE"->employeeScan();"SCAN"->dashboard();"DASHBOARD"->finish();else->dashboard()}}
@@ -469,7 +470,7 @@ class FullBetaActivity : Activity() {
     private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(h))}
     private fun round(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
     private fun gradient(a:Int,b:Int,r:Int)=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(a,b)).apply{cornerRadius=dp(r).toFloat()}
-    private fun outline()=GradientDrawable().apply{setColor(surface);cornerRadius=dp(7).toFloat();setStroke(dp(1),line)}
+    private fun outline()=GradientDrawable().apply{setColor(surface);cornerRadius=dp(12).toFloat();setStroke(dp(1),line)}
     private fun outlineBg(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat();setStroke(dp(1),line)}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private fun size(w:Int,h:Int)=ViewGroup.LayoutParams(w,h)
