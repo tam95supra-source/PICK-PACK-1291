@@ -81,6 +81,31 @@ class M2ServiceTransport(context: Context) {
         }
     }
 
+    fun sync(action: String, payload: JSONObject): TransportResult {
+        if (action !in SYNC_ACTIONS) return TransportResult(false, false, 0, null, null)
+        if (!hasNetwork() || circuitOpen()) return TransportResult(false, false, 0, null, "SERVICE_READ_UNAVAILABLE")
+        val discovery = discover() ?: return TransportResult(false, false, 0, null, "DISCOVERY_UNAVAILABLE")
+        if (discovery.optString("authority_mode") != "SERVICE_PRIMARY") return TransportResult(false, false, 0, null, null)
+        val base = discovery.optString("service_url").trimEnd('/')
+        val token = prefs.getString(KEY_SERVICE_TOKEN, null)
+        if (!validServiceUrl(base) || token.isNullOrBlank()) return TransportResult(false, false, 0, null, "SERVICE_SESSION_UNAVAILABLE")
+        val request = JSONObject(payload.toString()).put("action", action)
+        return try {
+            val r = httpJson("$base/v1/legacy-sync", request, token)
+            if (r.code >= 500 || r.code == -1) {
+                recordFailure()
+                TransportResult(false, false, r.code, r.json, r.error)
+            } else {
+                if (r.code == 401) prefs.edit().remove(KEY_SERVICE_TOKEN).apply()
+                if (r.ok) closeCircuit()
+                TransportResult(true, r.ok, r.code, r.json, r.error)
+            }
+        } catch (t: Throwable) {
+            recordFailure()
+            TransportResult(false, false, -1, null, t.message ?: "SERVICE_READ_NETWORK_ERROR")
+        }
+    }
+
     fun flushOutbox(): Boolean {
         if (!hasNetwork() || circuitOpen()) return false
         val discovery = discover(force = true) ?: return false
@@ -201,6 +226,7 @@ class M2ServiceTransport(context: Context) {
         private const val DISCOVERY_TTL_MS = 60_000L
         private const val CIRCUIT_MS = 15_000L
         val OPERATIONAL = setOf("enter", "exit", "resource_change", "labor_start", "labor_finish")
+        val SYNC_ACTIONS = setOf("sync_status", "sync_day", "sync_bootstrap")
     }
 }
 
