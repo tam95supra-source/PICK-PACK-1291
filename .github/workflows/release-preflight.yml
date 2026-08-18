@@ -15,11 +15,36 @@ permissions:
   contents: read
 
 jobs:
-  release-preflight:
+  live-gates:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 8
     env:
       GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe live API and Drive OTA channels
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg'" google-apps-script/PICK_PACK_API.gs
+          grep -q "OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4'" google-apps-script/PICK_PACK_API.gs
+          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
+          grep -q '"mode":"APP_GSHEET"' /tmp/health.json
+          grep -q '"sheet_read":true' /tmp/health.json
+          grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/health.json
+          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta-ota.json
+          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable-ota.json
+          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta-ota.json
+          grep -q '"channel":"BETA"' /tmp/beta-ota.json
+          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable-ota.json
+          grep -q '"channel":"STABLE"' /tmp/stable-ota.json
+          echo 'PASS - live GAS health + Beta/Stable OTA isolation.'
+
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
       SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
       SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
       SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
@@ -28,15 +53,12 @@ jobs:
       EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
     steps:
       - uses: actions/checkout@v4
-
-      - name: Enforce architecture, UX and OTA invariants
+      - name: Enforce release invariants
         shell: bash
         run: |
           set -euo pipefail
           test -f ARCHITECTURE_GUARDRAILS.md
           test -f google-apps-script/PICK_PACK_API.gs
-          grep -q "OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg'" google-apps-script/PICK_PACK_API.gs
-          grep -q "OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4'" google-apps-script/PICK_PACK_API.gs
           grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           grep -q 'SINGLE_ACTIVE_DEVICE_V1' google-apps-script/PICK_PACK_API.gs
           grep -q 'android:icon="@drawable/owner_launcher"' app/src/main/AndroidManifest.xml
@@ -59,40 +81,20 @@ jobs:
           beta=re.search(r'create\("beta"\)\s*\{(.*?)\n\s*\}',text,re.S).group(1)
           stable=re.search(r'create\("stable"\)\s*\{(.*?)\n\s*\}',text,re.S).group(1)
           def one(block,pattern):
-              m=re.search(pattern,block)
-              assert m, pattern
-              return m.group(1)
+              m=re.search(pattern,block); assert m, pattern; return m.group(1)
           print('beta_code='+one(beta,r'versionCode\s*=\s*(\d+)'))
           print('beta_name='+one(beta,r'versionName\s*=\s*"([^"]+)"'))
           print('stable_code='+one(stable,r'versionCode\s*=\s*(\d+)'))
           print('stable_name='+one(stable,r'versionName\s*=\s*"([^"]+)"'))
           PY
 
-      - name: Probe live API and Drive OTA channels
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/health.json
-          grep -q '"ok":true' /tmp/health.json
-          grep -q '"mode":"APP_GSHEET"' /tmp/health.json
-          grep -q '"sheet_read":true' /tmp/health.json
-          grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/health.json
-          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta-ota.json
-          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable-ota.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta-ota.json
-          grep -q '"channel":"BETA"' /tmp/beta-ota.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable-ota.json
-          grep -q '"channel":"STABLE"' /tmp/stable-ota.json
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
-
       - name: Resolve exact Android SDK
         shell: bash
         run: |
@@ -117,13 +119,13 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
 
-      - name: Assemble release candidates
+      - name: Assemble release candidates once
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon --build-cache :app:assembleBetaRelease :app:assembleStableRelease
+          gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
 
-      - name: Verify package metadata from source
+      - name: Verify package metadata
         shell: bash
         env:
           BETA_CODE: ${{ steps.meta.outputs.beta_code }}
@@ -143,13 +145,18 @@ jobs:
           grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt
           grep -q "versionCode='$STABLE_CODE'" /tmp/stable.txt
           grep -q "versionName='$STABLE_NAME'" /tmp/stable.txt
+          printf 'commit=%s\nbeta_name=%s\nbeta_code=%s\nstable_name=%s\nstable_code=%s\n' \
+            "$GITHUB_SHA" "$BETA_NAME" "$BETA_CODE" "$STABLE_NAME" "$STABLE_CODE" > app/build/outputs/apk/release-metadata.txt
+          sha256sum "$BETA" >> app/build/outputs/apk/release-metadata.txt
 
-      - name: Upload unsigned Beta candidate
+      - name: Upload authoritative unsigned Beta candidate
         uses: actions/upload-artifact@v4
         with:
           name: pick-pack-1291-${{ steps.meta.outputs.beta_name }}-unsigned
-          path: app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          retention-days: 3
+          path: |
+            app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+            app/build/outputs/apk/release-metadata.txt
+          retention-days: 7
 
       - name: Detect automated signing readiness
         id: signing
@@ -162,7 +169,7 @@ jobs:
           echo "ready=$READY" >> "$GITHUB_OUTPUT"
           echo "Signing secrets ready: $READY"
 
-      - name: Sign and verify fixed identity
+      - name: Sign same validated artifact and verify fixed identity
         if: steps.signing.outputs.ready == 'true'
         shell: bash
         env:
@@ -188,14 +195,17 @@ jobs:
           path: dist/*
           retention-days: 7
 
-      - name: Preflight result
-        shell: bash
-        run: |
-          echo 'PASS - release candidates validated.'
-          echo 'No GitHub Release or Google Drive OTA publish is performed by this workflow.'
-          echo 'OTA authority remains GAS update_check -> Google Drive channel folders.'
-
       - name: Cleanup signing material
         if: always()
         shell: bash
         run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
+
+  preflight-pass:
+    needs: [live-gates, android-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: |
+          echo 'PASS - live gates and Android release validation completed in parallel.'
+          echo 'Reuse the uploaded Beta artifact; do not rebuild before signing/publish.'
+          echo 'No Google Drive OTA publish is performed by this workflow.'
