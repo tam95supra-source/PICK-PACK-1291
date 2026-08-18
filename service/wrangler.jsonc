@@ -2,11 +2,12 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "pick-pack-1291-service-m1-staging",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-18",
+  "compatibility_date": "2026-08-19",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "vars": {
-    "SERVICE_GENERATION": "m1-staging-20260818-001"
+    "SERVICE_GENERATION": "m2-precutover-20260819-001",
+    "GOOGLE_SOURCE_SHEET_ID": "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78"
   },
   "secrets": {
     "required": [
@@ -34,6 +35,12 @@
   "migrations": [
     {"tag": "v1", "new_sqlite_classes": ["RealtimeHub"]}
   ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/health", "/v1/*", "/internal/*"]
+  },
   "triggers": {"crons": ["*/1 * * * *"]},
   "observability": {"enabled": true, "head_sampling_rate": 1}
 }
