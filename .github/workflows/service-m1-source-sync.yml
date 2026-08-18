@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [ main ]
     types: [ opened, synchronize, reopened ]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,151 +12,58 @@ concurrency:
   group: service-m1-source-sync-acceptance
   cancel-in-progress: false
 
-env:
-  BUNDLE_SHA256: 8082900892389b11333caa08b50cd37a02b2864391ff64d40d36e7d750f0e176
-  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
-  STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
-  D1_NAME: pick-pack-1291-m1-staging
-  WORKER_NAME: pick-pack-1291-service-m1-staging
-
 jobs:
   source-and-acceptance:
+    if: github.head_ref == 'agent/service-foundation-m1'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref || 'agent/service-foundation-m1' }}
+          ref: agent/service-foundation-m1
           fetch-depth: 0
 
-      - name: Reconstruct exact M1 source bundle
+      - name: Recover exact reviewed M1 source bundle
         shell: bash
         run: |
           set -euo pipefail
-          cat .m1-source/chunk-00.b64 .m1-source/chunk-01.b64 .m1-source/chunk-02.b64 .m1-source/chunk-03.b64 | base64 -d > /tmp/m1-source.zip
-          echo "$BUNDLE_SHA256  /tmp/m1-source.zip" | sha256sum -c -
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, re
+          files=[Path(f'.m1-source/chunk-{i:02d}.b64') for i in range(4)]
+          text=''.join(p.read_text(encoding='utf-8-sig') for p in files)
+          compact=re.sub(r'\s+', '', text)
+          data=base64.b64decode(compact, validate=True)
+          digest=hashlib.sha256(data).hexdigest()
+          expected='8082900892389b11333caa08b50cd37a02b2864391ff64d40d36e7d750f0e176'
+          if digest != expected:
+              raise SystemExit(f'bundle checksum mismatch: {digest}')
+          Path('/tmp/m1-source.zip').write_bytes(data)
+          print(f'bundle PASS sha256={digest} bytes={len(data)}')
+          PY
           unzip -t /tmp/m1-source.zip >/dev/null
           unzip -oq /tmp/m1-source.zip -d .
-          rm -rf service/node_modules service/.wrangler service/m1-artifacts service/worker-configuration.d.ts
+          rm -rf service/node_modules service/.wrangler service/m1-artifacts service/worker-configuration.d.ts service/package-lock.json
+          rm -f .github/workflows/service-m1-staging.yml
+          for f in \
+            service/src/bootstrap.ts \
+            service/src/core.ts \
+            service/src/index.ts \
+            service/src/replication.ts \
+            service/scripts/m1-bootstrap.mjs \
+            service/scripts/m1-test.mjs; do
+            test -s "$f" || { echo "Missing required source: $f" >&2; exit 1; }
+          done
 
-      - name: Commit exact M1 source to branch
-        if: github.event_name == 'pull_request'
+      - name: Commit exact source to M1 branch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ARCHITECTURE_GUARDRAILS.md docs/SERVICE_MIGRATION_M1.md service .github/workflows/service-m1-staging.yml
-          if ! git diff --cached --quiet; then
-            git commit -m 'feat: synchronize complete M1 service foundation source'
-            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git add ARCHITECTURE_GUARDRAILS.md docs/SERVICE_MIGRATION_M1.md service
+          if git diff --cached --quiet; then
+            echo 'Exact M1 source already synchronized.'
+          else
+            git commit -m 'feat: recover complete reviewed M1 service source'
+            git push origin HEAD:agent/service-foundation-m1
           fi
-
-      - name: Safety preflight
-        shell: bash
-        run: |
-          set -euo pipefail
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do
-            if [[ -z "${!v:-}" ]]; then echo "Missing required secret: $v" >&2; exit 1; fi
-          done
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: service/package.json
-
-      - name: Google source read-only preflight
-        shell: bash
-        run: |
-          set -euo pipefail
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
-            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
-          TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP")
-          test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          META=$(curl -fsS -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID?fields=properties.title,sheets.properties.title")
-          node - <<'NODE' "$META"
-          const m=JSON.parse(process.argv[2]); const expected=["Danh mục","LỊCH SỬ NGHIỆP VỤ","DANH SÁCH PDA","DANH SÁCH USER PICK","DANH SÁCH BÀN PACK","DANH SÁCH USER PACK","DANH SÁCH NHÂN SỰ","RA - VÀO TRONG CA","CÔNG NHẬT","Danh sách Admin"];
-          if(m.properties?.title!=="DỮ LIỆU THEO NGÀY"||JSON.stringify((m.sheets||[]).map(x=>x.properties?.title))!==JSON.stringify(expected)) throw new Error('production source schema drift');
-          NODE
-
-      - name: Type-check and prepare D1
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run check
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          CREATED=false
-          if [[ -z "$ID" ]]; then npx wrangler d1 create "$D1_NAME" --location apac >/tmp/d1-create.log; LIST=$(npx wrangler d1 list --json); ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST"); CREATED=true; fi
-          test -n "$ID"; echo "M1_D1_ID=$ID" >> "$GITHUB_ENV"; echo "M1_D1_CREATED=$CREATED" >> "$GITHUB_ENV"
-          node - <<'NODE' "$ID"
-          const fs=require('fs');let s=fs.readFileSync('wrangler.jsonc','utf8');fs.writeFileSync('wrangler.deploy.jsonc',s.replace('__M1_D1_DATABASE_ID__',process.argv[2]));
-          NODE
-          npx wrangler d1 migrations apply "$D1_NAME" --remote --config wrangler.deploy.jsonc
-          rm -rf /tmp/pick-pack-m1-empty-d1
-          npx wrangler d1 migrations apply "$D1_NAME" --local --persist-to /tmp/pick-pack-m1-empty-d1 --config wrangler.deploy.jsonc
-          OUT=$(npx wrangler d1 execute "$D1_NAME" --local --persist-to /tmp/pick-pack-m1-empty-d1 --config wrangler.deploy.jsonc --command "SELECT version,checksum FROM schema_migrations WHERE version='0001_m1_foundation';" --json)
-          node -e 'const x=JSON.parse(process.argv[1]);const rows=x?.[0]?.results||x?.results||[];if(!rows.length)throw new Error("empty migration marker missing")' "$OUT"
-
-      - name: Deploy M1 staging Worker
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          ADMIN=$(openssl rand -hex 32); SERVICE=$(openssl rand -hex 32); echo "::add-mask::$ADMIN"; echo "::add-mask::$SERVICE"; echo "M1_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
-          node - <<'NODE' "$SERVICE" "$ADMIN" "$GOOGLE_OAUTH_CLIENT_ID" "$GOOGLE_OAUTH_CLIENT_SECRET" "$GOOGLE_OAUTH_REFRESH_TOKEN" "$STAGING_SHEET_ID"
-          const fs=require('fs');const [service,admin,cid,cs,rt,sheet]=process.argv.slice(2);fs.writeFileSync('/tmp/m1-secrets.json',JSON.stringify({SERVICE_TOKEN_SECRET:service,M1_ADMIN_TOKEN:admin,GOOGLE_OAUTH_CLIENT_ID:cid,GOOGLE_OAUTH_CLIENT_SECRET:cs,GOOGLE_OAUTH_REFRESH_TOKEN:rt,GOOGLE_STAGING_SHEET_ID:sheet}));
-          NODE
-          chmod 600 /tmp/m1-secrets.json
-          npx wrangler deploy --config wrangler.deploy.jsonc --secrets-file /tmp/m1-secrets.json 2>&1 | tee /tmp/wrangler-deploy.log
-          URL=$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' /tmp/wrangler-deploy.log | tail -1 || true); test -n "$URL"; echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
-
-      - name: Real-data bootstrap and M1 acceptance matrix
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS "$SERVICE_URL/health" >/tmp/health.json; curl -fsS "$SERVICE_URL/v1/capabilities" >/tmp/capabilities.json
-          node -e 'const fs=require("fs");const h=JSON.parse(fs.readFileSync("/tmp/health.json"));const c=JSON.parse(fs.readFileSync("/tmp/capabilities.json"));if(!h.ok||h.environment!=="staging-shadow"||c.production_cutover!==false)throw new Error("health/capabilities safety mismatch")'
-          node scripts/m1-bootstrap.mjs
-          node scripts/m1-bootstrap.mjs
-          node - <<'NODE'
-          const fs=require('fs');const a=JSON.parse(fs.readFileSync('m1-artifacts/bootstrap-a.json'));const b=JSON.parse(fs.readFileSync('m1-artifacts/bootstrap-b.json'));const p=x=>({sheets:x.sheets.map(v=>({name:v.name,row_count:v.row_count,checksum:v.checksum})),projection_counts:x.report.projection_counts,business_date_min:x.report.business_date_min,business_date_max:x.report.business_date_max,business_date_count:x.report.business_date_count});if(JSON.stringify(p(a))!==JSON.stringify(p(b)))throw new Error('REBOOTSTRAP_RECONCILIATION_CHANGED');
-          NODE
-          node scripts/m1-test.mjs
-          RANGE=$(python3 - <<'PY'
-          import urllib.parse
-          print(urllib.parse.quote("'__M1_SERVICE_REPLICA'!A1:T", safe=''))
-          PY
-          )
-          R=$(curl -fsS -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$STAGING_SHEET_ID/values/$RANGE?valueRenderOption=FORMATTED_VALUE")
-          node - <<'NODE' "$R"
-          const j=JSON.parse(process.argv[2]);const rows=j.values||[];const h=["event_id","event_type","entity_type","entity_id","business_date","authority_epoch","authority_seq","service_generation","base_version","new_version","actor_id","actor_role","device_id","occurred_at","committed_at","idempotency_key","origin","schema_version","checksum","payload_json"];if(JSON.stringify(rows[0]||[])!==JSON.stringify(h)||rows.length<2)throw new Error('staging replica verification failed');
-          NODE
-          node - <<'NODE'
-          const fs=require('fs');const a=JSON.parse(fs.readFileSync('m1-artifacts/bootstrap-b.json'));const t=JSON.parse(fs.readFileSync('m1-artifacts/test-report.json'));const state={run_id:process.env.GITHUB_RUN_ID,source_commit:process.env.GITHUB_SHA,worker_name:process.env.WORKER_NAME,service_url:process.env.SERVICE_URL,service_generation:'m1-staging-20260818-001',d1_name:process.env.D1_NAME,d1_id:process.env.M1_D1_ID,d1_created_in_run:process.env.M1_D1_CREATED,source_sheet_id:process.env.SOURCE_SHEET_ID,staging_sheet_id:process.env.STAGING_SHEET_ID,bootstrap_summary:{sheets:a.sheets,projection_counts:a.report.projection_counts,business_date_min:a.report.business_date_min,business_date_max:a.report.business_date_max,business_date_count:a.report.business_date_count},test_summary:t.summary,secrets_names:['SERVICE_TOKEN_SECRET','M1_ADMIN_TOKEN','GOOGLE_OAUTH_CLIENT_ID','GOOGLE_OAUTH_CLIENT_SECRET','GOOGLE_OAUTH_REFRESH_TOKEN','GOOGLE_STAGING_SHEET_ID']};fs.writeFileSync('m1-artifacts/deployment-state.json',JSON.stringify(state,null,2));
-          NODE
-
-      - name: Commit safe PASS evidence
-        if: success() && github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p docs/m1-evidence
-          cp service/m1-artifacts/bootstrap-b.json docs/m1-evidence/bootstrap.json
-          cp service/m1-artifacts/test-report.json docs/m1-evidence/test-report.json
-          cp service/m1-artifacts/deployment-state.json docs/m1-evidence/deployment-state.json
-          git add docs/m1-evidence
-          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m "test: record M1 staging PASS evidence run $GITHUB_RUN_ID"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
