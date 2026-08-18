@@ -38,15 +38,9 @@ jobs:
             G=$?
             set -e
             if [[ $S -eq 0 && $G -eq 0 ]]; then
-              if node - <<'NODE'
-              const fs=require('fs');
-              const s=JSON.parse(fs.readFileSync('/tmp/service-health.json','utf8'));
-              const g=JSON.parse(fs.readFileSync('/tmp/gas-discovery.json','utf8'));
-              const epoch=Number(s.authority?.authority_epoch||0);
-              const good=s.ok&&s.environment==='production'&&s.authority?.scope==='PRODUCTION'&&s.authority?.mode==='SERVICE_PRIMARY'&&s.generation===process.env.SERVICE_GENERATION&&epoch>=2&&g.ok&&g.authority_mode==='SERVICE_PRIMARY'&&g.service_url===process.env.SERVICE_URL&&g.cutover_configured===true&&Number(g.authority?.authority_epoch||0)===epoch;
-              process.exit(good?0:1);
-              NODE
-              then OK=true; break; fi
+              if node -e 'const fs=require("fs"),s=JSON.parse(fs.readFileSync("/tmp/service-health.json","utf8")),g=JSON.parse(fs.readFileSync("/tmp/gas-discovery.json","utf8")),epoch=Number(s.authority?.authority_epoch||0);process.exit(s.ok&&s.environment==="production"&&s.authority?.scope==="PRODUCTION"&&s.authority?.mode==="SERVICE_PRIMARY"&&s.generation===process.env.SERVICE_GENERATION&&epoch>=2&&g.ok&&g.authority_mode==="SERVICE_PRIMARY"&&g.service_url===process.env.SERVICE_URL&&g.cutover_configured===true&&Number(g.authority?.authority_epoch||0)===epoch?0:1)'; then
+                OK=true; break
+              fi
             fi
             if (( i % 10 == 0 )); then echo "CUTOVER_OBSERVER attempt=$i"; cat /tmp/service-health.json 2>/dev/null || true; cat /tmp/gas-discovery.json 2>/dev/null || true; fi
             sleep 5
@@ -54,10 +48,7 @@ jobs:
           [[ "$OK" == true ]] || { echo CUTOVER_NOT_CONVERGED >&2; cat /tmp/service-health.json 2>/dev/null || true; cat /tmp/gas-discovery.json 2>/dev/null || true; exit 1; }
           curl -fsS "$SERVICE_URL/" >/tmp/pwa.html; grep -qi '<html' /tmp/pwa.html
           curl -fsS "$SERVICE_URL/manifest.webmanifest" >/tmp/manifest.json; grep -q 'Pick Pack 1291' /tmp/manifest.json
-          node - <<'NODE'
-          const fs=require('fs'),s=JSON.parse(fs.readFileSync('/tmp/service-health.json')),g=JSON.parse(fs.readFileSync('/tmp/gas-discovery.json'));
-          fs.writeFileSync('/tmp/cutover-observer-state.json',JSON.stringify({ok:true,service_url:process.env.SERVICE_URL,generation:s.generation,authority:s.authority,replication:s.replication,gas:{authority_mode:g.authority_mode,authority:g.authority,service_url:g.service_url,cutover_configured:g.cutover_configured}},null,2));
-          NODE
+          node -e 'const fs=require("fs"),s=JSON.parse(fs.readFileSync("/tmp/service-health.json")),g=JSON.parse(fs.readFileSync("/tmp/gas-discovery.json"));fs.writeFileSync("/tmp/cutover-observer-state.json",JSON.stringify({ok:true,service_url:process.env.SERVICE_URL,generation:s.generation,authority:s.authority,replication:s.replication,gas:{authority_mode:g.authority_mode,authority:g.authority,service_url:g.service_url,cutover_configured:g.cutover_configured}},null,2))'
       - name: Emit observer evidence
         shell: bash
         run: |
