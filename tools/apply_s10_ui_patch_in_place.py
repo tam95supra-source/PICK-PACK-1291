@@ -23,4 +23,7 @@ runpy.run_path(str(ROOT / "tools/apply_s12_compile_hotfix.py"), run_name="__main
 runpy.run_path(str(ROOT / "tools/apply_s13_shared_history_ui_patch.py"), run_name="__main__")
 # S14 balances scanner sizes and adds device-side stale-while-revalidate report/history snapshots.
 runpy.run_path(str(ROOT / "tools/apply_s14_device_cache_scan_patch.py"), run_name="__main__")
-print(f"Applied S10 + S11 + S12 + S13 + S14 runtime patches in build workspace: {source}")
+# S15 replaces screen-result caching with a revision-driven 45-day SQLite local-first store,
+# adds report date selection from cached dates, and compacts/restyles scanner controls.
+runpy.run_path(str(ROOT / "tools/apply_s15_local_first_ui_patch.py"), run_name="__main__")
+print(f"Applied S10 + S11 + S12 + S13 + S14 + S15 runtime patches in build workspace: {source}")
