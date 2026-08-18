@@ -1,1 +1,0 @@
-PASS: Sample 1 UI + smooth tab navigation compile for Beta and Stable.
