@@ -15,12 +15,12 @@ async function legacySync(request:Request,env:Env):Promise<Response>{
 }
 
 export default {
-  async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
+  async fetch(request:Request,env:Env,_ctx:ExecutionContext):Promise<Response>{
     const u=new URL(request.url);
     if(u.pathname==="/v1/legacy-sync"&&request.method==="POST"){
       try{return await legacySync(request,env);}catch(e){console.log(JSON.stringify({level:"error",kind:"legacy_sync_failed",error:String(e)}));return apiError("LEGACY_SYNC_FAILED","INTERNAL",500,true);}
     }
-    return base.fetch(request,env,ctx);
+    return base.fetch(request,env);
   },
   async scheduled(controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{return base.scheduled(controller,env,ctx);},
 } satisfies ExportedHandler<Env>;
