@@ -333,7 +333,7 @@ class OperationsActivity : Activity() {
     }
 
     private fun reportGrid(title:String,data:JSONObject?,firstTitle:String,rowKey:String):View{
-        val wrap=column(surface).apply{setPadding(dp(1),dp(2),dp(1),dp(2));background=outlineBg(surface,6)};if(title.isNotBlank())wrap.addView(txt(title,11f,navy,true).apply{gravity=Gravity.CENTER;setPadding(0,0,0,dp(3))})
+        val wrap=column(surface).apply{setPadding(dp(1),dp(2),dp(1),dp(2));setBackgroundColor(surface)};if(title.isNotBlank())wrap.addView(txt(title,11f,navy,true).apply{gravity=Gravity.CENTER;setPadding(0,0,0,dp(3))})
         if(data==null){wrap.addView(txt("Chưa có dữ liệu",10f,muted,false));return wrap}
         val cols=jsonStrings(data.optJSONArray("columns"));val rows=data.optJSONArray("rows")?:JSONArray();val table=TableLayout(this).apply{isStretchAllColumns=true;isShrinkAllColumns=true}
         fun cell(v:String,bold:Boolean=false,header:Boolean=false)=TextView(this).apply{text=v;textSize=if(header)8.2f else 8.5f;setTextColor(if(header)navy else ink);typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT;gravity=Gravity.CENTER;setPadding(dp(1),dp(3),dp(1),dp(3));maxLines=3;background=GradientDrawable().apply{setColor(if(header)Color.rgb(232,241,246) else Color.WHITE)}}
@@ -344,7 +344,7 @@ class OperationsActivity : Activity() {
     }
 
     private fun supportGrid(data:JSONObject?):View{
-        val wrap=column(surface).apply{setPadding(dp(1),dp(2),dp(1),dp(2));background=outlineBg(surface,6)};wrap.addView(txt("NHÂN SỰ ĐI HỖ TRỢ",11f,navy,true).apply{gravity=Gravity.CENTER;setPadding(0,0,0,dp(3))})
+        val wrap=column(surface).apply{setPadding(dp(1),dp(2),dp(1),dp(2));setBackgroundColor(surface)};wrap.addView(txt("NHÂN SỰ ĐI HỖ TRỢ",11f,navy,true).apply{gravity=Gravity.CENTER;setPadding(0,0,0,dp(3))})
         val table=TableLayout(this).apply{isStretchAllColumns=true;isShrinkAllColumns=true}
         fun cell(v:String,bold:Boolean=false,header:Boolean=false)=TextView(this).apply{text=v;textSize=8.8f;setTextColor(if(header)navy else ink);typeface=if(bold)Typeface.DEFAULT_BOLD else Typeface.DEFAULT;gravity=Gravity.CENTER;setPadding(dp(1),dp(3),dp(1),dp(3));maxLines=3;background=GradientDrawable().apply{setColor(if(header)Color.rgb(232,241,246) else Color.WHITE)}}
         val h=TableRow(this);h.addView(cell("Thông tin công nhật",true,true));h.addView(cell("Số lượng",true,true));table.addView(h)
