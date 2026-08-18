@@ -1,11 +1,12 @@
-name: Deploy Beta4 GAS
+name: Deploy Current GAS
 
 on:
   push:
     branches: [ main ]
     paths:
       - '.github/workflows/beta4-deploy-gas.yml'
-      - 'google-apps-script/AUTH_HELPERS.gs'
+      - 'google-apps-script/**'
+      - 'ops/s04-gas-deploy.txt'
   workflow_dispatch:
 
 permissions:
@@ -24,18 +25,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate beta4 GAS source
+      - name: Validate current GAS source
         shell: bash
         run: |
           set -euo pipefail
           grep -q "forgot_password" google-apps-script/PICK_PACK_API.gs
-          grep -q "RESET_ADMIN_EMAIL: 'tam95.supra@gmail.com'" google-apps-script/PICK_PACK_API.gs
+          grep -q "delivery:'ACCOUNT_EMAIL'" google-apps-script/PICK_PACK_API.gs
+          grep -q "a.email||PP.RESET_ADMIN_EMAIL" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
           grep -q "script.send_mail" google-apps-script/appsscript.json
           grep -q "function ppAuthorizeMail_" google-apps-script/AUTH_HELPERS.gs
           grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
           grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
           ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
-          echo 'Beta4 GAS source gates: PASS'
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          node --check /tmp/PICK_PACK_API.js
+          echo 'Current GAS source gates: PASS'
 
       - name: Exchange OAuth and normalize IDs
         id: auth
@@ -79,12 +86,12 @@ jobs:
           PY
           H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
           [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
-          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 Beta4 Minimal Teal + performance + password reset"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 S04 account mail, staff CRUD, layout-support API"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
           [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
           V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
           python3 - "$SCRIPT_ID" "$V" <<'PY'
           import json,sys
-          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API Beta4'}}))
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API S04'}}))
           PY
           H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
           [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
@@ -113,7 +120,7 @@ jobs:
           PY
           URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Verify live health and public reset route without changing account
+      - name: Verify live health, reset mail route and Drive OTA channels
         shell: bash
         env:
           WEB_URL: ${{ steps.webapp.outputs.url }}
@@ -126,7 +133,11 @@ jobs:
             sleep 4
           done
           [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' > /tmp/reset.json
+          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe-s04"}' > /tmp/reset.json
           grep -q '"ok":true' /tmp/reset.json
-          grep -q '"delivery":"ADMIN_EMAIL"' /tmp/reset.json
-          echo 'Live health + reset route (non-mutating probe): PASS'
+          grep -q '"delivery":"ACCOUNT_EMAIL"' /tmp/reset.json
+          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta.json
+          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
+          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta.json; grep -q '"channel":"BETA"' /tmp/beta.json
+          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable.json; grep -q '"channel":"STABLE"' /tmp/stable.json
+          echo 'Live health + ACCOUNT_EMAIL reset probe + Drive OTA isolation: PASS'
