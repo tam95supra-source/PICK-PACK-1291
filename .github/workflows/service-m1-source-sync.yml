@@ -22,7 +22,7 @@ jobs:
           ref: agent/service-foundation-m1
           fetch-depth: 0
 
-      - name: Decode embedded M1 source bundle
+      - name: Decode and repair embedded M1 source bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -38,11 +38,12 @@ jobs:
           expected='b4e8927d8869256b54e6f241313d76d30327943abf54eb809617da44f21a4bf3'
           if digest != expected:
               raise SystemExit(f'embedded bundle checksum changed: {digest}')
-          Path('/tmp/m1-source.zip').write_bytes(data)
-          print(f'embedded bundle sha256={digest} bytes={len(data)}')
+          Path('/tmp/m1-source.truncated.zip').write_bytes(data)
+          print(f'embedded truncated bundle sha256={digest} bytes={len(data)}')
           PY
-          unzip -t /tmp/m1-source.zip
-          unzip -oq /tmp/m1-source.zip -d .
+          printf 'y\n' | zip -FF /tmp/m1-source.truncated.zip --out /tmp/m1-source.repaired.zip
+          unzip -t /tmp/m1-source.repaired.zip
+          unzip -oq /tmp/m1-source.repaired.zip -d .
           rm -rf service/node_modules service/.wrangler service/m1-artifacts service/worker-configuration.d.ts service/package-lock.json
           rm -f .github/workflows/service-m1-staging.yml
           for f in \
@@ -52,7 +53,7 @@ jobs:
             service/src/replication.ts \
             service/scripts/m1-bootstrap.mjs \
             service/scripts/m1-test.mjs; do
-            test -s "$f" || { echo "Missing required source: $f" >&2; exit 1; }
+            test -s "$f" || { echo "Missing required recovered source: $f" >&2; exit 1; }
           done
 
       - uses: actions/setup-node@v4
