@@ -308,7 +308,7 @@ M2 branch: `agent/service-migration-m2`.
 
 PR #38 remains open, draft, unmerged, base `main`.
 
-Implementation head immediately before S12 handover-document commits was `6b23b69d5ed5e3c4dc1fca2bbc2193426a015418`. `HANDOVER_CURRENT` commit was `f3244ebc8ad93d9f4acac90964b8b66f29aad071`; immutable S12 snapshot commit was `f1c0831e7b529ea3e3ce3db8b1e90cbaf572a772`. Always re-fetch PR #38 before any modification or merge.
+Implementation head immediately before S12 handover-document commits was `6b23b69d5ed5e3c4dc1fca2bbc2193426a015418`. S12 handover-document commits then moved branch head. Always re-fetch PR #38 before any modification or merge.
 
 Do not merge PR #38 until full M2 Definition of Done passes.
 
