@@ -7,18 +7,15 @@ import android.os.SystemClock
 import org.json.JSONObject
 
 /**
- * Foreground-only Google Sheet revision watcher.
+ * Foreground Service/D1 revision watcher with WebSocket wakeups and polling fallback.
  *
  * Contract:
  * - starts with an immediate sync when an Activity enters foreground;
  * - never overlaps requests;
- * - backs off while idle to reduce bandwidth;
- * - when the app leaves foreground during a request, enters DRAINING, lets that
- *   request finish, persists the cursor, then becomes SUSPENDED;
- * - never starts a new request while DRAINING/SUSPENDED.
- *
- * S15 also carries the tiny per-day revision manifest. Android uses that manifest to update its
- * 45-day SQLite snapshot store; screen rendering itself never waits for this network request.
+ * - foreground Service primary also opens a realtime ticket/WebSocket;
+ * - any DELTA immediately wakes the manifest/day sync path;
+ * - polling remains as reconnect/fallback protection;
+ * - when app leaves foreground, WebSocket closes and any in-flight request drains safely.
  */
 class ForegroundSyncCoordinator(
     context: Context,
@@ -58,6 +55,15 @@ class ForegroundSyncCoordinator(
     private var lastSeq = prefs.getLong(cursorKey, 0L)
     private var lastMasterRevision = prefs.getLong(masterCursorKey, 0L)
     private var generation = 0L
+    private val realtime = M2RealtimeClient(context.applicationContext) {
+        main.post {
+            if (state == State.ACTIVE) {
+                idlePolls = 0
+                main.removeCallbacks(tick)
+                if (!inFlight) main.post(tick)
+            }
+        }
+    }
 
     private val tick = Runnable { poll() }
 
@@ -76,6 +82,7 @@ class ForegroundSyncCoordinator(
         check(Looper.myLooper() == Looper.getMainLooper()) { "ForegroundSyncCoordinator.stop must run on main thread" }
         generation += 1
         main.removeCallbacks(tick)
+        realtime.stop()
         state = if (inFlight) State.DRAINING else State.SUSPENDED
     }
 
@@ -91,6 +98,7 @@ class ForegroundSyncCoordinator(
 
                 if (result.code == 401) {
                     state = State.SUSPENDED
+                    realtime.stop()
                     main.removeCallbacks(tick)
                     listener.onAuthExpired()
                     return@post
@@ -114,6 +122,8 @@ class ForegroundSyncCoordinator(
                     } else if (!changed) {
                         idlePolls = (idlePolls + 1).coerceAtMost(1000)
                     }
+                    val businessDate = body.optString("business_date")
+                    if (businessDate.isNotBlank()) realtime.start(businessDate)
 
                     if (state == State.ACTIVE && requestGeneration == generation) {
                         listener.onStatus(
@@ -126,7 +136,7 @@ class ForegroundSyncCoordinator(
                                 masterRevision = masterRevision,
                                 masterChanged = masterChanged,
                                 latencyMs = latencyMs,
-                                businessDate = body.optString("business_date"),
+                                businessDate = businessDate,
                                 retentionFloor = body.optString("retention_floor"),
                                 retentionEpoch = body.optLong("retention_epoch", 0L),
                                 dayRevisions = body.optJSONObject("day_revisions") ?: JSONObject(),
@@ -150,13 +160,12 @@ class ForegroundSyncCoordinator(
                 }
 
                 if (state == State.DRAINING || requestGeneration != generation) {
+                    realtime.stop()
                     state = State.SUSPENDED
                     return@post
                 }
 
-                if (state == State.ACTIVE) {
-                    main.postDelayed(tick, nextDelay(result.ok))
-                }
+                if (state == State.ACTIVE) main.postDelayed(tick, nextDelay(result.ok))
             }
         }
     }
