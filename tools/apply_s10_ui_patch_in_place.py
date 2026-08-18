@@ -27,4 +27,7 @@ runpy.run_path(str(ROOT / "tools/apply_s14_device_cache_scan_patch.py"), run_nam
 # adds report date selection from cached dates, and compacts/restyles scanner controls.
 # The wrapper only hardens one duplicated S14 anchor; it executes the authoritative S15 patch.
 runpy.run_path(str(ROOT / "tools/apply_s15_local_first_ui_patch_wrapper.py"), run_name="__main__")
-print(f"Applied S10 + S11 + S12 + S13 + S14 + S15 runtime patches in build workspace: {source}")
+# S17 recovery lets fixed clients derive the 45-day floor while the live server deliberately leaves
+# retention_floor blank to stop Beta15/Beta16 crash loops before OTA.
+runpy.run_path(str(ROOT / "tools/apply_s17_sqlite_recovery_ui_patch.py"), run_name="__main__")
+print(f"Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 runtime patches in build workspace: {source}")
