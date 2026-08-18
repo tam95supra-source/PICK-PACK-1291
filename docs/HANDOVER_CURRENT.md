@@ -1,7 +1,7 @@
 # HANDOVER CURRENT — Pick Pack 1291
 
 Status: **ACTIVE / cumulative / authoritative**  
-Last updated: **2026-08-18 09:42 +07:00 (Asia/Bangkok)**  
+Last updated: **2026-08-18 09:58 +07:00 (Asia/Bangkok)**  
 Latest implementation checkpoint: **S07 — persistent tab shell, global copy rules, CI/release optimization**
 
 > **NEW-CHAT RULE:** Read this file together with `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. Do not infer a new architecture or resurrect superseded UI/release decisions. On a new chat, after reading authoritative state, wait for a new owner command before mutation/release work.
@@ -252,7 +252,7 @@ Live API remains `0.4.2` / `APP_GSHEET` architecture with:
 - account-email forgot-password route
 - MailApp authorization
 
-Browser-only GAS deployment uses configured GitHub Secrets. Never expose their values.
+GAS source changes are validated by Fast Check and **do not auto-deploy live**. Live deployment is explicit through permanent workflow `Deploy Current GAS`, using configured GitHub Secrets and post-deploy health/reset/OTA-isolation checks. Never expose secret values.
 
 ## 13. OTA — CHỐT
 
@@ -300,21 +300,32 @@ Not promoted. Stable release still requires Beta soak/business acceptance and an
 
 Authoritative procedure: `docs/BUILD_RELEASE_PLAYBOOK.md`.
 
-### Permanent two-tier model
+### Permanent pipeline set
 
-**Tier A — `App Fast Check`**
+Repo intentionally keeps only these four workflows:
 
-Normal source changes:
+- `App Fast Check`
+- `Release Preflight - Beta and Stable`
+- `Deploy Current GAS`
+- `Verify Google Apps Script Credentials`
+
+Old beta4 UI/build workflows, 0.4.2 OTA migration/bridge workflows, beta2/beta4 verification workflows and observer workflows that wrote status into `main` were removed. Superseded `tools/apply_beta4_minimal_teal.py` and `tools/run_beta4_patch.py` were also removed.
+
+### Tier A — `App Fast Check`
+
+Normal app/GAS source changes:
 
 - static architecture/UX guards
 - launcher hash
+- GAS syntax/route guards
 - Beta Debug assemble
 - Stable Debug assemble
 - no live GAS/Drive release probe
+- no GAS deployment
 - no signing/publish
 - concurrency cancels stale older fast checks
 
-**Tier B — `Release Preflight - Beta and Stable`**
+### Tier B — `Release Preflight - Beta and Stable`
 
 Explicit pre-release only:
 
@@ -327,7 +338,7 @@ Explicit pre-release only:
 - fixed-signer validation if four signing secrets are ready
 - validation only; no automatic Drive OTA publish
 
-Both pipelines first use an exact preinstalled Android SDK when available and only fall back to the pinned verified SDK bootstrap when required.
+Both Android pipelines first use an exact preinstalled Android SDK when available and only fall back to the pinned verified SDK bootstrap when required.
 
 ### Recurring failures now recorded/prevented
 
@@ -345,7 +356,7 @@ The build playbook records these known failure classes:
 - wrong/historical external-service assumptions
 - OAuth scope mismatch for Drive upload
 
-Permanent CI must validate, not write observer/status/source commits back to `main`.
+Permanent CI validates, but does not write observer/status/source commits back to `main`.
 
 ## 16. Android signing automation
 
