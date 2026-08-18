@@ -141,17 +141,9 @@ Resolution — **CHỐT**:
 
 Roles: SUPERADMIN, ADMIN, USER. Backend enforcement is mandatory.
 
-Admin `Vị trí` values exactly:
+Admin `Vị trí` values exactly: `superadmin`, `admin`, `user`.
 
-- `superadmin`
-- `admin`
-- `user`
-
-Role mapping:
-
-- SUPERADMIN → `superadmin`
-- ADMIN → `admin`
-- USER → `user`
+Role mapping: SUPERADMIN → `superadmin`; ADMIN → `admin`; USER → `user`.
 
 Normal account creation cannot create SUPERADMIN unless owner explicitly changes the rule.
 
@@ -175,7 +167,7 @@ Legacy S11 local-first SQLite behavior remains important, but transport authorit
 
 Current M2 Android behavior:
 
-- dynamic Service discovery through the stable GAS endpoint; no hardcoded mutable Service URL in app behavior;
+- dynamic Service discovery through the stable GAS endpoint;
 - Service-primary mutations while authority is Service-primary;
 - durable offline outbox;
 - WorkManager replay;
@@ -185,9 +177,7 @@ Current M2 Android behavior:
 - normal local sync keeps recent N/N-1 projections and fetches older retained dates on demand;
 - vulnerable Beta15/Beta16 SQLite recovery guards must not be casually removed.
 
-Important historical incident preserved:
-
-Beta15/Beta16 had `SQLiteDatabaseLockedException / SQLITE_BUSY` crash loops on real Android 11 PDA. Beta17 fixed process-wide SQLite coordination, serialized DB access, non-UI-thread reconciliation and failure containment. Preserve those guards.
+Historical incident preserved: Beta15/Beta16 had `SQLiteDatabaseLockedException / SQLITE_BUSY` crash loops on real Android 11 PDA. Beta17 fixed process-wide SQLite coordination, serialized DB access, non-UI-thread reconciliation and failure containment. Preserve those guards.
 
 ## 9. Realtime, fallback and failback — M2
 
@@ -199,7 +189,7 @@ Beta15/Beta16 had `SQLiteDatabaseLockedException / SQLITE_BUSY` crash loops on r
 
 Production cutover already converged successfully: Service and GAS agree on `PRODUCTION / SERVICE_PRIMARY` and the same authority epoch at the final observer gate.
 
-Controlled production failover/failback acceptance is still pending final project closure and must be executed safely before declaring full M2 DoD complete.
+Controlled production failover/failback acceptance is still pending final project closure.
 
 ## 10. Shared history and reporting rules
 
@@ -210,19 +200,7 @@ Shared History remains operational MNV-session history, not device-local app his
 - admin-account actions must not appear in MNV operational history;
 - Google `LỊCH SỬ NGHIỆP VỤ` is an operational projection, not an independent canonical event authority after M2.
 
-Report canonical manpower row order remains:
-
-1. Trưởng nhóm
-2. Chuyên viên
-3. Tổ trưởng
-4. Điều phối khu pack
-5. Điều phối khu chờ xuất
-6. Kéo hàng
-7. 5S
-8. Picker
-9. Packer
-10. Phúc Long
-11. Tổng
+Report canonical manpower row order remains: Trưởng nhóm; Chuyên viên; Tổ trưởng; Điều phối khu pack; Điều phối khu chờ xuất; Kéo hàng; 5S; Picker; Packer; Phúc Long; Tổng.
 
 Supplier order when present: `Inhouse, NLV, VW, MP, MGL, HGP, HAD, Tổng`.
 
@@ -236,34 +214,19 @@ Shift scopes remain `Ca 1 + Ca HC`, `Ca 2`, `Cả ngày`.
 
 Read `docs/UI_UX_SYSTEM.md` before visual changes.
 
-Persistent bottom tabs exact order:
-
-`Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`
+Persistent bottom tabs exact order: `Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`.
 
 Header target identity: `Chào buổi <sáng/trưa/chiều/tối>, <Họ tên>` using PDA local clock. Avoid API/revision/protocol jargon in user-facing chips.
 
 Scan/search controls remain compact and hardware Enter/OK must trigger scanner actions.
 
-Navigation fixes from Beta18 remain required:
+Navigation fixes from Beta18 remain required: dual-edge swipe-back; tapping active parent bottom-tab resets child screen to tab root; explicit History Detail back returns to History root.
 
-- dual-edge swipe-back;
-- tapping active parent bottom-tab resets child screen to the tab root;
-- explicit History Detail back returns to History root.
-
-Sync direction semantics remain real runtime state, not decoration:
-
-- `↑` outbound mutation;
-- `↓` snapshot/revision download;
-- `↕` concurrent transfer;
-- `✓` idle/ready.
+Sync direction semantics remain real runtime state, not decoration: `↑` outbound; `↓` download; `↕` concurrent; `✓` idle/ready.
 
 ## 12. Logging / diagnostics
 
-Categories remain:
-
-- MANUAL → `BÁO LỖI THỦ CÔNG`
-- CRASH → `BÁO LỖI TỰ ĐỘNG`
-- DAILY → `NHẬT KÝ ANDROID`
+Categories remain MANUAL → `BÁO LỖI THỦ CÔNG`; CRASH → `BÁO LỖI TỰ ĐỘNG`; DAILY → `NHẬT KÝ ANDROID`.
 
 Manual report requires confirmation. Pending logs retry after valid session/connectivity. Local logs are deleted only after successful acknowledgement. Never expose secrets/private credentials in logs.
 
@@ -271,37 +234,21 @@ Manual report requires confirmation. Pending logs retry after valid session/conn
 
 Web/PWA is already live on the production Worker URL listed in section 1.
 
-Implemented behavior includes:
+Implemented behavior includes same-origin Worker hosting, M2 authentication, IndexedDB local state/outbox, offline replay, realtime WebSocket reconnect and operational/admin UI.
 
-- same-origin Worker hosting;
-- authentication compatible with the M2 credential model;
-- IndexedDB local state/outbox;
-- offline replay;
-- realtime WebSocket reconnect;
-- operational/admin UI.
-
-Do not treat Web as merely a mock/shadow site anymore. It is on the production Service path, but real owner/device acceptance of Web + Beta19 concurrent workflows is still pending final DoD.
+Do not treat Web as merely mock/shadow. It is on the production Service path, but real owner/device acceptance of Web + Beta19 concurrent workflows remains pending final DoD.
 
 ## 14. OTA / signing / release — OWNER LOCK
 
-OTA authority remains:
-
-`Android → GAS update_check → Google Drive channel folder`
+OTA authority remains `Android → GAS update_check → Google Drive channel folder`.
 
 Beta reads Beta channel only. Stable reads Stable channel only.
 
-Fixed signing certificate SHA-256:
-
-`d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
+Fixed signing certificate SHA-256: `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`.
 
 Never generate or substitute a signer.
 
-Permanent signing secret **names** may be documented; values must never be exposed:
-
-- `ANDROID_SIGNING_KEY_B64`
-- `ANDROID_SIGNING_STORE_PASSWORD`
-- `ANDROID_SIGNING_KEY_PASSWORD`
-- `ANDROID_SIGNING_ALIAS`
+Permanent signing secret names may be documented, never values: `ANDROID_SIGNING_KEY_B64`, `ANDROID_SIGNING_STORE_PASSWORD`, `ANDROID_SIGNING_KEY_PASSWORD`, `ANDROID_SIGNING_ALIAS`.
 
 Latest published Beta:
 
@@ -316,28 +263,28 @@ Stable remains **UNPUBLISHED / UNTOUCHED**. A Stable validation artifact is not 
 
 ## 15. S12 Service migration implementation — completed milestones
 
-S12 completed these production milestones:
+S12 completed:
 
 1. Google OAuth scope issue resolved and required Google APIs enabled.
 2. Cloudflare authentication verified.
 3. Production D1 created and migrations applied.
 4. Worker/PWA deployed and runtime health stabilized.
-5. Google production bootstrap converted from monolithic HTTP request to resumable/chunked, idempotent phases.
+5. Google production bootstrap converted to resumable/chunked idempotent phases.
 6. Production bootstrap completed against real 45-day dataset.
 7. Resource mapping anomaly and one-to-many mapping issue fixed with migration/schema update.
-8. Final bootstrap completed with no `RUNNING` bootstrap state.
-9. D1 → Google staging outbox replication live test passed with replication health `HEALTHY` and pending `0`.
-10. Mutating/redeploying verifier workflows were retired/skipped before authority cutover to eliminate CI race conditions.
+8. Final bootstrap completed with no `RUNNING` state.
+9. D1 → Google staging outbox replication live test passed; replication `HEALTHY`, pending `0`.
+10. Mutating/redeploying verifier workflows retired/skipped before authority cutover to eliminate CI races.
 11. Production Service authority promoted and GAS converged to `SERVICE_PRIMARY`.
 12. Web/PWA production observer passed.
 13. Beta19 signed candidate verified with fixed signer.
-14. OTA publisher path was repaired through several failed iterations; final V5 publisher succeeded.
-15. Final OTA observer passed complete Beta18 → Beta19 download/package/SHA/signer verification.
+14. OTA publisher path repaired through failed iterations; final V5 publisher succeeded.
+15. Final OTA observer passed complete Beta18 → Beta19 verification.
 16. Stable channel remained untouched.
 
 ## 16. Verified CI/live gates at S12 close
 
-On the S12 closing branch state, the following final relevant gates were verified successful:
+Final relevant successful gates:
 
 - `Service M2 Cutover Observer`
 - `Service M2 Runtime Diagnostic`
@@ -351,23 +298,17 @@ On the S12 closing branch state, the following final relevant gates were verifie
 
 Historical publisher V1–V4 failures are debugging history only; V5 and final OTA observer are authoritative current release evidence.
 
-Some bootstrap/replication/precutover workflows are intentionally retired/skipped after cutover to avoid unintended mutation/redeployment races. Do not interpret those intentional skips as production failure.
+Some bootstrap/replication/precutover workflows are intentionally retired/skipped after cutover to avoid unintended mutation/redeployment races. Intentional skips are not production failures.
 
 ## 17. GitHub state — DO NOT MERGE YET
 
-Repository: `tam95supra-source/pick-pack-1291`
+Repository: `tam95supra-source/pick-pack-1291`.
 
-M2 branch: `agent/service-migration-m2`
+M2 branch: `agent/service-migration-m2`.
 
-PR #38:
+PR #38 remains open, draft, unmerged, base `main`.
 
-- state: open
-- draft: true
-- merged: false
-- base: `main`
-- S12 closing head observed: `6b23b69d5ed5e3c4dc1fca2bbc2193426a015418`
-
-Always re-fetch PR state/head before modifying or merging because head is time-sensitive.
+Implementation head immediately before S12 handover-document commits was `6b23b69d5ed5e3c4dc1fca2bbc2193426a015418`. `HANDOVER_CURRENT` commit was `f3244ebc8ad93d9f4acac90964b8b66f29aad071`; immutable S12 snapshot commit was `f1c0831e7b529ea3e3ce3db8b1e90cbaf572a772`. Always re-fetch PR #38 before any modification or merge.
 
 Do not merge PR #38 until full M2 Definition of Done passes.
 
@@ -389,55 +330,41 @@ Do not merge PR #38 until full M2 Definition of Done passes.
 
 ## 19. Remaining work before full M2 Definition of Done
 
-Web and OTA Beta19 are already live. Remaining items are acceptance/closure, not blockers to creating Web/OTA:
+Web and OTA Beta19 are already live. Remaining work is acceptance/closure:
 
-1. **Real PDA smoke** of Beta19 on an actual device:
-   - Beta18 detects/updates to Beta19;
-   - launch/login succeeds;
-   - Vào/Ra, Công nhật, PICK/PACK/resource change operate correctly;
-   - SQLite crash loop does not recur;
-   - offline → reconnect replay behaves correctly.
-2. **Real Web + Beta19 concurrent test** against production Service/realtime.
-3. **Controlled Service-down/flapping failover** to GAS fallback with split-brain fencing verified.
-4. **Controlled failback** with reconciliation and authority epoch validation.
-5. **DR both directions** in safe recovery/staging flow:
-   - Google → fresh Service rebuild;
-   - D1 → Google staging rebuild;
-   - exact visible-tab/schema integrity checks.
-6. Final Google replication/integrity verification after failover/failback/DR exercises.
-7. Update final production-complete handover when all DoD items pass.
+1. Real PDA smoke of Beta19: update, launch/login, Vào/Ra, Công nhật, PICK/PACK/resource change, no SQLite crash recurrence, offline→reconnect replay.
+2. Real Web + Beta19 concurrent test against production Service/realtime.
+3. Controlled Service-down/flapping failover to GAS fallback with split-brain fencing.
+4. Controlled failback with reconciliation and authority epoch validation.
+5. DR both directions in safe recovery/staging flow: Google → fresh Service; D1 → Google staging; exact tab/schema checks.
+6. Final Google replication/integrity verification after failover/failback/DR.
+7. Produce final production-complete handover after all DoD items pass.
 8. Merge PR #38 only after full DoD.
 
 ## 20. M2 Definition of Done — mandatory closure bar
 
-Only call M2 complete when this production path is demonstrated:
-
-`ANDROID APP ↔ WEB/PWA ↔ SERVICE/D1 ↔ GOOGLE SHEETS`
-
-and all are true:
+Only call M2 complete when `ANDROID APP ↔ WEB/PWA ↔ SERVICE/D1 ↔ GOOGLE SHEETS` is demonstrated and all are true:
 
 - realtime PASS;
 - offline PASS;
 - failover PASS;
 - failback PASS;
 - DR both directions PASS;
-- Beta19 Service-first OTA verified on production path — **already PASS**;
-- real PDA smoke PASS — **pending owner/device validation**;
+- Beta19 Service-first OTA production verification PASS — already done;
+- real PDA smoke PASS — pending owner/device validation;
 - Google Sheet preserved/reconciled;
 - Stable unpublished unless separately commanded;
-- final file `HANDOVER_SERVICE_MIGRATION_M2_PRODUCTION_COMPLETE.md` produced;
+- `HANDOVER_SERVICE_MIGRATION_M2_PRODUCTION_COMPLETE.md` produced;
 - `docs/HANDOVER_CURRENT.md` updated to completion state;
-- PR #38 merged only after above closure.
+- PR #38 merged only after closure.
 
 ## 21. S13 required start order
-
-When owner opens next chat:
 
 1. Read `docs/HANDOVER_CURRENT.md`.
 2. Read `docs/handovers/HANDOVER_S12_2026-08-19.md`.
 3. Read `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/ADMIN_ACCOUNT_RULES.md`, `docs/BUILD_RELEASE_PLAYBOOK.md`, `docs/SERVICE_MIGRATION_M2.md`, `docs/HANDOVER_POLICY.md`.
 4. Re-fetch PR #38 and current Service/OTA state only where temporal verification is needed.
-5. State that the project context is understood.
+5. State that project context is understood.
 6. **WAIT FOR OWNER COMMAND.** Do not automatically start tests, publish Stable, merge PR, change authority, or edit production data.
 
 ## 22. Session-close state
@@ -447,7 +374,7 @@ S12 closes with:
 - M2 production cutover: **DONE**
 - Web/PWA production: **LIVE / READY**
 - Beta19 OTA: **PUBLISHED / VERIFIED**
-- Google replication at final gate: **HEALTHY**
+- Google replication final gate: **HEALTHY**
 - Stable: **UNPUBLISHED / UNTOUCHED**
 - PR #38: **DRAFT / UNMERGED**
 - Full M2 DoD: **NOT YET CLOSED** because real PDA acceptance, controlled failover/failback and DR exercises remain.
