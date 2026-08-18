@@ -81,6 +81,7 @@ android {
 
 dependencies {
     implementation("androidx.work:work-runtime:2.11.2")
+    implementation("com.squareup.okhttp3:okhttp:5.3.0")
 }
 
 tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
