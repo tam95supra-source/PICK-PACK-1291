@@ -42,11 +42,14 @@ jobs:
           echo "$EXPECTED_OWNER_ICON_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
           grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           grep -q 'private fun businessHome()' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple("▦","Nghiệp vụ","BUSINESS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple("♙","Nhân sự","STAFF")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple("◷","Lịch sử","HISTORY")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple("↻","Đồng bộ","SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple("⚙","Cài đặt","SETTINGS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Triple(R.drawable.ic_pp_business,"Nghiệp vụ","BUSINESS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Triple(R.drawable.ic_pp_history,"Lịch sử","HISTORY")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Triple(R.drawable.ic_pp_sync,"Đồng bộ","SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Triple(R.drawable.ic_pp_settings,"Cài đặt","SETTINGS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'position=role.toLowerCase()' google-apps-script/PICK_PACK_API.gs
+          grep -q 'val allowedPositions=if(isSuper())arrayOf("USER","ADMIN")else arrayOf("USER")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'catalogValues("DANH SÁCH ADMIN_Vị trí")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q "delivery:'ACCOUNT_EMAIL'" google-apps-script/PICK_PACK_API.gs
           grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
           grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
