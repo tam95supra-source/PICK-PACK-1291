@@ -79,7 +79,7 @@ chmod 600 /tmp/m2-secrets.json
 npx wrangler deploy --config wrangler.external.jsonc --secrets-file /tmp/m2-secrets.json 2>&1 | tee /tmp/m2-deploy.log
 SERVICE_URL=$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' /tmp/m2-deploy.log | tail -1 || true)
 test -n "$SERVICE_URL"; export SERVICE_URL
-curl -fsS --retry 5 --retry-delay 2 "$SERVICE_URL/health" >/tmp/m2-health.json
+curl -fsS --retry 15 --retry-delay 2 --retry-all-errors "$SERVICE_URL/health" >/tmp/m2-health.json
 node -e 'const j=require("/tmp/m2-health.json");if(!j.ok||j.environment!=="staging-shadow"||j.authority?.scope!=="STAGING_SHADOW")throw new Error(JSON.stringify(j))'
 curl -fsS "$SERVICE_URL/" >/tmp/m2-pwa.html; grep -qi '<html' /tmp/m2-pwa.html
 curl -fsS "$SERVICE_URL/manifest.webmanifest" >/tmp/m2-pwa-manifest.json
