@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#3156d3"><meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/styles.css">
+  <title>Pick Pack 1291</title>
+</head>
+<body>
+  <main id="login" class="login-wrap">
+    <section class="card login-card"><h1>Pick Pack 1291</h1><p class="muted">Đăng nhập hệ thống nghiệp vụ</p>
+      <label>Tài khoản<input id="loginId" autocomplete="username"></label>
+      <label>Mật khẩu<input id="password" type="password" autocomplete="current-password"></label>
+      <button id="loginBtn" class="primary">ĐĂNG NHẬP</button><p id="loginError" class="error"></p>
+    </section>
+  </main>
+  <div id="app" hidden>
+    <header><div><strong id="greeting">Pick Pack 1291</strong><div class="statusline"><span id="netChip">Mạng</span><span id="syncChip">Đồng bộ</span><span id="serviceChip">Service</span></div></div><button id="logoutBtn" class="textbtn">Đăng xuất</button></header>
+    <section id="notice" class="notice" hidden></section>
+    <main id="content"></main>
+    <nav id="tabs">
+      <button data-tab="business" class="active">Nghiệp vụ</button><button data-tab="staff">Nhân sự</button><button data-tab="history">Lịch sử</button><button data-tab="sync">Đồng bộ</button><button data-tab="settings">Cài đặt</button>
+    </nav>
+  </div>
+  <dialog id="conflictDialog"><h3>Cần xử lý xung đột</h3><pre id="conflictText"></pre><button id="conflictClose" class="primary">ĐÃ HIỂU</button></dialog>
+  <script type="module" src="/app.js"></script>
+</body></html>
