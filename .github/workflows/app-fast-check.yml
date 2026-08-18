@@ -5,12 +5,14 @@ on:
     branches: [ main ]
     paths:
       - 'app/**'
+      - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
       - 'ARCHITECTURE_GUARDRAILS.md'
       - 'AGENTS.md'
       - 'docs/UI_UX_SYSTEM.md'
+      - 'docs/BUILD_RELEASE_PLAYBOOK.md'
       - '.github/workflows/app-fast-check.yml'
   workflow_dispatch:
 
@@ -36,6 +38,7 @@ jobs:
           set -euo pipefail
           test -f ARCHITECTURE_GUARDRAILS.md
           test -f app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          test -f google-apps-script/PICK_PACK_API.gs
           echo "$EXPECTED_OWNER_ICON_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
           grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           grep -q 'private fun businessHome()' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
@@ -44,10 +47,16 @@ jobs:
           grep -q 'Triple("◷","Lịch sử","HISTORY")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple("↻","Đồng bộ","SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple("⚙","Cài đặt","SETTINGS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q "delivery:'ACCOUNT_EMAIL'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
+          grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
           ! grep -R -n 'TransitionManager.beginDelayedTransition' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -n 'overridePendingTransition(android.R.anim.fade_in' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          node --check /tmp/PICK_PACK_API.js
 
       - uses: actions/setup-java@v4
         with:
@@ -88,4 +97,4 @@ jobs:
           gradle --no-daemon --build-cache :app:assembleBetaDebug :app:assembleStableDebug
 
       - name: Fast check result
-        run: echo 'PASS - static guards + Beta Debug + Stable Debug.'
+        run: echo 'PASS - static guards + GAS syntax + Beta Debug + Stable Debug.'
