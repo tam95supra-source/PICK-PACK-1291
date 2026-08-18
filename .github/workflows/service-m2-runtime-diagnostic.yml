@@ -5,13 +5,18 @@ on:
     branches: [ agent/service-migration-m2 ]
     paths:
       - 'ops/m2-runtime-diagnostic-trigger.txt'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/m2-runtime-diagnostic-trigger.txt'
+      - '.github/workflows/service-m2-runtime-diagnostic.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: service-m2-runtime-diagnostic
+  group: service-m2-runtime-diagnostic-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -21,6 +26,7 @@ env:
 
 jobs:
   diagnose:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
