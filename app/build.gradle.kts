@@ -90,3 +90,4 @@ tasks.named("preBuild").configure {
 // GSHEET_API_URL may be overridden only for controlled builds/tests.
 // Signing material must remain outside this public repository.
 // S10 + S11 + S12 + S13 + S14 + S15 apply assertion-based source transforms only inside the ephemeral build workspace.
+// OBSERVE: Beta16 Fast Check only; do not merge this branch.
