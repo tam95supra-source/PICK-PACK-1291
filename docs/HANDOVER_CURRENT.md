@@ -1,8 +1,8 @@
 # HANDOVER CURRENT — Pick Pack 1291
 
 Status: **ACTIVE / cumulative / authoritative**  
-Last updated: **2026-08-18 11:08 +07:00 (Asia/Bangkok)**  
-Latest implementation checkpoint: **S08 — approved visual system implemented and Beta 0.4.2-beta.8 released by Drive OTA**
+Last updated: **2026-08-18 11:48 +07:00 (Asia/Bangkok)**  
+Latest implementation checkpoint: **S09 — actual-device UI corrections, strict catalog namespaces, Admin role lock, Beta 0.4.2-beta.9 released by Drive OTA**
 
 > **NEW-CHAT RULE:** Read this file together with `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. Do not infer a new architecture or resurrect superseded UI/release decisions. On a new chat, after reading authoritative state, wait for a new owner command before mutation/release work.
 
@@ -44,6 +44,8 @@ Main tabs:
 - `Danh sách Admin`
 
 `Danh sách Admin` now has a **Mail** field. Existing accounts were initialized to the owner-approved reset address. Each account may change its own reset-mail address through the app; forgot-password delivery uses the configured email for that account.
+
+`Danh sách Admin` is a specialized account namespace. Its `Vị trí` is owner-locked to exactly `superadmin`, `admin`, `user`; no cross-sheet/catalog fallback is allowed. Android/GAS derive Admin position from account role. Existing rows were normalized to this mapping in S09. See `docs/ADMIN_ACCOUNT_RULES.md`.
 
 Never store plaintext normal passwords in Sheets/repo/handover.
 
@@ -130,7 +132,7 @@ Header identity area uses separate constrained lines:
 
 1. Họ tên
 2. Vị trí
-3. `Tài khoản: <login>`
+3. Tên user/login ID, hiển thị trực tiếp; không tiền tố `Tài khoản:`
 
 Compact right-side status area is reserved for user-facing:
 
@@ -186,6 +188,22 @@ S08 applied the owner-approved visual system to the working Android UI and relea
 - inner workflows inherit the same shared surface/control system
 
 This is the implemented Beta baseline. Real-PDA acceptance may still identify spacing/fit defects that require targeted fixes, but future work must refine this approved system rather than redesigning it without owner instruction.
+
+
+### S09 actual-device corrections — RELEASED IN BETA9
+
+Owner review of real-device Beta8 screenshots identified implementation drift from the approved mockup. S09 corrected the implementation rather than changing the approved design family:
+
+- root tabs no longer show duplicate page titles such as `Nghiệp vụ`, `Nhân sự`, `Lịch sử`, `Đồng bộ`, `Cài đặt` inside the gradient header
+- authenticated header has no avatar placeholder; identity is left aligned as exactly three constrained lines: display name, position, login ID
+- no `Tài khoản:` prefix in the header
+- connection status is persistent Activity state; tab switches do not reset the header to a transient `Mạng: Đang nối/Đang kết nối` state
+- Nhân sự renders incrementally instead of constructing thousands of cards on the UI thread; search still uses the complete local master cache
+- `Danh mục` is exposed in master snapshot as `catalog_fields`; each `SHEET_FIELD` is a strict namespace for the matching editable field
+- cross-sheet fallback is forbidden; similarly named fields do not authorize value reuse
+- system-owned status catalogs are not offered in operational assignment flows; e.g. `DANH SÁCH PDA_Tình trạng` is not selectable when assigning a PDA to PICK
+- `Danh sách Admin_Vị trí` is not catalog-driven and is fixed to `superadmin/admin/user` per owner lock
+- Nghiệp vụ cards, staff list actions, header status areas and shared controls were refined toward the approved semantic-icon/rounded enterprise layout
 
 ## 8. Notifications / interaction — CHỐT
 
@@ -279,29 +297,37 @@ Steady-state:
 
 ## 14. Current release state
 
-### Published Beta — `0.4.2-beta.8`
+### Published Beta — `0.4.2-beta.9`
 
 - Package: `vn.pickpack1291.app.beta.publicbeta`
-- VersionCode: `14`
-- APK: `pick-pack-1291-public-beta-v0.4.2-beta.8.apk`
-- SHA-256: `dbb86e8d3edcadc4ce4138410427f97d93279cb047cce45fb7e41d68578a7d5e`
-- Fixed signer SHA-256 remains:
-  `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
+- VersionCode: `15`
+- APK: `pick-pack-1291-public-beta-v0.4.2-beta.9.apk`
+- Drive file ID: `112PGd6cWOnKER_NFxhz7huq8apXG5x2f`
+- SHA-256: `6c96a9415299bd11f73ed21e314fb354c530c093f30ae1e23bfa7332d0ff3b6b`
+- Fixed signer SHA-256 remains: `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
 - OTA authority/source: `GOOGLE_DRIVE`, Beta channel only.
 
-Beta8 release gates passed:
+Beta9 release gates passed:
 
-- S08 visual source applied and Beta Debug + Stable Debug compile PASS
-- Release Preflight PASS: architecture/UX guards, live GAS health, BETA/STABLE Drive isolation, Beta Release + Stable Release, package/version metadata
-- APK signed with the existing official signing identity; no replacement key was created
-- Beta6 -> Beta8 live `update_check` returns the new Beta
-- actual OTA APK download SHA-256 matches the published SHA
-- downloaded APK signer matches the fixed signer
-- downloaded package/version metadata matches package + VersionCode 14 + `0.4.2-beta.8`
-- Beta8 does not offer an update to itself
-- Stable does not see the Beta8 build
+- S09 source patch + strict Admin rule applied; Beta Debug + Stable Debug PASS
+- GAS syntax PASS and explicit live `Deploy Current GAS` PASS
+- Fast Check PASS with semantic-icon/Admin guards
+- Release Preflight PASS: architecture/UX gates, live GAS health, BETA/STABLE Drive isolation, Beta Release + Stable Release, package/version metadata
+- unsigned release artifact signed from the official encrypted recovery bundle using the existing fixed Android signing identity; no replacement key was created
+- signed APK was verified against the fixed signer before upload
+- Beta8 -> Beta9 live `update_check` returns the new Beta
+- actual OTA download SHA-256 matches the published APK
+- Beta9 does not offer an update to itself
+- Stable does not see Beta9
+- APK has Drive `anyone/reader` download permission established through the live OTA path
 
-The first recovery bridge upload attempt was abandoned because large APK transfer through the temporary Apps Script bridge stalled. The obsolete run was cancelled and cleanup passed. Final APK upload used the approved Google Drive connector directly, then independent read-only OTA gates verified the live bytes. This does not change steady-state OTA authority: Android still discovers updates only through GAS `update_check` -> the official Drive channel folder.
+S09 also normalized `Danh sách Admin_Vị trí` values to the owner-locked mapping: `superadmin`, `admin`, `user`.
+
+### Previous published Beta — `0.4.2-beta.8`
+
+- VersionCode: `14`
+- SHA-256: `dbb86e8d3edcadc4ce4138410427f97d93279cb047cce45fb7e41d68578a7d5e`
+- Superseded by Beta9 after real-device UI review.
 
 ### Superseded unpublished candidate — `0.4.2-beta.7`
 

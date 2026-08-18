@@ -341,3 +341,7 @@ Current permanent workflow set is intentionally small:
 - `Verify Google Apps Script Credentials`
 
 Do not accumulate a new one-shot workflow for every ordinary edit.
+
+## S09 build rule
+
+- This repository does not rely on a checked-in `gradlew` wrapper. CI must use `gradle/actions/setup-gradle` and invoke `gradle ...`; do not add one-shot jobs that assume `./gradlew` exists.

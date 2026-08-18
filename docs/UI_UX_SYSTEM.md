@@ -42,7 +42,7 @@ The compact identity area contains three user-facing lines:
 
 - Họ tên
 - Vị trí
-- `Tài khoản: <login>`
+- Tên user / login ID, hiển thị trực tiếp, không tiền tố `Tài khoản:`
 
 Each item stays on its own line. Text must be constrained/ellipsized so long values never break the header or overlap the status area.
 
