@@ -1,1 +1,1 @@
-release-preflight=2026-08-18T16:03:00+07:00
+release-preflight=2026-08-18-S12-beta12-signed-candidate
