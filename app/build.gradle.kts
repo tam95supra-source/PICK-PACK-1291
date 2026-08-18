@@ -25,6 +25,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s13_shared_history_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s14_device_cache_scan_patch.py"))
     inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch.py"))
+    inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch_wrapper.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_s10_ui_patch_in_place.py")
