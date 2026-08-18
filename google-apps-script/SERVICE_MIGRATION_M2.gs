@@ -1,0 +1,112 @@
+/* Pick Pack 1291 M2 Service migration control plane.
+ * Loaded beside PICK_PACK_API.gs. Production defaults preserve the current GAS writer until an
+ * explicit cutover configuration changes PP_M2_AUTHORITY_MODE to SERVICE_PRIMARY.
+ */
+
+function ppM2Props_(){return PropertiesService.getScriptProperties();}
+function ppM2Mode_(){return String(ppM2Props_().getProperty('PP_M2_AUTHORITY_MODE')||'GOOGLE_FALLBACK');}
+function ppM2Epoch_(){return Number(ppM2Props_().getProperty('PP_M2_AUTHORITY_EPOCH')||'1');}
+function ppM2Generation_(){return String(ppM2Props_().getProperty('PP_M2_SERVICE_GENERATION')||'legacy-gas-production');}
+function ppM2ServiceUrl_(){return String(ppM2Props_().getProperty('PP_M2_SERVICE_URL')||'').replace(/\/+$/,'');}
+function ppM2BridgeSecret_(){return String(ppM2Props_().getProperty('PP_M2_GAS_BRIDGE_SECRET')||'');}
+function ppM2ValidServiceUrl_(v){return /^https:\/\/[A-Za-z0-9._-]+(?:\.workers\.dev|\.pages\.dev)(?:\/.*)?$/.test(String(v||''));}
+
+function ppM2Discovery_(body){
+  const mode=ppM2Mode_(),url=ppM2ServiceUrl_(),epoch=ppM2Epoch_(),generation=ppM2Generation_();
+  return {
+    ok:true,
+    discovery_version:1,
+    service_url:ppM2ValidServiceUrl_(url)?url:'',
+    authority_mode:mode,
+    authority:{authority_epoch:epoch,authority_seq:Number(ppM2Props_().getProperty('PP_M2_FALLBACK_SEQ')||'0'),mode:mode,scope:String(ppM2Props_().getProperty('PP_M2_AUTHORITY_SCOPE')||'PRODUCTION'),service_generation:generation},
+    service_generation:generation,
+    gas_fallback:true,
+    legacy_bridge:true,
+    cutover_configured:mode==='SERVICE_PRIMARY'&&ppM2ValidServiceUrl_(url)&&!!ppM2BridgeSecret_(),
+    business_date:ppBusinessIso_(),
+    app_channel:String((body||{})._app_channel||''),
+  };
+}
+
+function ppM2ServiceFetch_(path,payload){
+  const url=ppM2ServiceUrl_(),secret=ppM2BridgeSecret_();
+  if(!ppM2ValidServiceUrl_(url)||!secret)throw new Error('SERVICE_PRIMARY_NOT_CONFIGURED');
+  const response=UrlFetchApp.fetch(url+path,{
+    method:'post',contentType:'application/json',muteHttpExceptions:true,
+    headers:{'x-gas-bridge-secret':secret},payload:JSON.stringify(payload||{})
+  });
+  const code=response.getResponseCode(),text=response.getContentText()||'{}';let json={};
+  try{json=JSON.parse(text);}catch(_){json={ok:false,error:'SERVICE_BAD_JSON'};}
+  return {code:code,json:json};
+}
+
+function ppM2BridgeActor_(auth,body){return {login_id:String(auth.login_id||auth.login||''),role:String(auth.role||'USER'),display_name:String(auth.display_name||auth.login_id||''),device_id:String((body||{})._device_id||'gas-legacy')};}
+function ppM2BridgeMutation_(auth,body,action){
+  const eventId=String(body.event_id||Utilities.getUuid());
+  const req={actor:ppM2BridgeActor_(auth,body),mutation:{action:action,event_id:eventId,business_date:String(body.business_date||ppBusinessIso_()),device_id:String(body._device_id||'gas-legacy'),payload:body}};
+  const r=ppM2ServiceFetch_('/internal/legacy-bridge',req);
+  if(r.code>=200&&r.code<300&&r.json&&r.json.ok){ppM2ClearServiceFailure_();return r.json;}
+  const err=(r.json&&r.json.error&&(r.json.error.code||r.json.error))||('HTTP_'+r.code);throw new Error('SERVICE_BRIDGE:'+err);
+}
+
+function ppM2ClearServiceFailure_(){ppM2Props_().deleteProperty('PP_M2_SERVICE_FAIL');ppM2Props_().deleteProperty('PP_M2_SERVICE_FAIL_AT');}
+function ppM2RegisterServiceFailure_(){
+  const p=ppM2Props_(),now=Date.now(),oldAt=Number(p.getProperty('PP_M2_SERVICE_FAIL_AT')||'0'),old=Number(p.getProperty('PP_M2_SERVICE_FAIL')||'0');
+  const count=(oldAt&&now-oldAt<15000)?old+1:1;p.setProperty('PP_M2_SERVICE_FAIL',String(count));p.setProperty('PP_M2_SERVICE_FAIL_AT',String(now));return count;
+}
+
+function ppM2ClaimFallback_(reason){
+  const lock=LockService.getScriptLock();if(!lock.tryLock(5000))throw new Error('FAILOVER_BUSY_RETRY');
+  try{
+    const p=ppM2Props_(),mode=String(p.getProperty('PP_M2_AUTHORITY_MODE')||'GOOGLE_FALLBACK');
+    if(mode==='GOOGLE_FALLBACK')return {mode:mode,authority_epoch:ppM2Epoch_()};
+    if(mode!=='SERVICE_PRIMARY')throw new Error('FAILOVER_MODE_INVALID:'+mode);
+    const next=ppM2Epoch_()+1;p.setProperty('PP_M2_AUTHORITY_EPOCH',String(next));p.setProperty('PP_M2_AUTHORITY_MODE','GOOGLE_FALLBACK');p.setProperty('PP_M2_FALLBACK_SEQ','0');p.setProperty('PP_M2_FALLBACK_STARTED_AT',new Date().toISOString());p.setProperty('PP_M2_FALLBACK_REASON',String(reason||'SERVICE_UNAVAILABLE').slice(0,300));
+    return {mode:'GOOGLE_FALLBACK',authority_epoch:next};
+  } finally {lock.releaseLock();}
+}
+
+function ppM2FallbackSheet_(){
+  const ss=ppSs_(),name='__PP_M2_FALLBACK_EVENTS';let sh=ss.getSheetByName(name);
+  const header=['event_id','authority_epoch','authority_seq','service_generation','action','business_date','actor','role','device_id','occurred_at','payload_json','checksum','ingest_status'];
+  if(!sh){sh=ss.insertSheet(name);sh.getRange(1,1,1,header.length).setValues([header]);sh.hideSheet();}
+  else {const got=sh.getRange(1,1,1,header.length).getDisplayValues()[0];if(JSON.stringify(got)!==JSON.stringify(header))throw new Error('FALLBACK_SCHEMA_DRIFT');}
+  return sh;
+}
+function ppM2Hex_(bytes){return bytes.map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');}
+function ppM2RecordFallback_(auth,body,action,result){
+  const lock=LockService.getScriptLock();if(!lock.tryLock(10000))throw new Error('FALLBACK_LEDGER_BUSY');
+  try{
+    const p=ppM2Props_(),seq=Number(p.getProperty('PP_M2_FALLBACK_SEQ')||'0')+1;p.setProperty('PP_M2_FALLBACK_SEQ',String(seq));
+    const eventId=String(body.event_id||(result&&result.result&&result.result.event_id)||Utilities.getUuid()),date=String(body.business_date||ppBusinessIso_()),at=new Date().toISOString(),payload=JSON.stringify(body||{}),raw=[eventId,ppM2Epoch_(),seq,ppM2Generation_(),action,date,String(auth.login_id||''),String(auth.role||'USER'),String(body._device_id||''),at,payload].join('|');
+    const checksum=ppM2Hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,raw,Utilities.Charset.UTF_8));
+    ppM2FallbackSheet_().appendRow([eventId,ppM2Epoch_(),seq,ppM2Generation_(),action,date,String(auth.login_id||''),String(auth.role||'USER'),String(body._device_id||''),at,payload,checksum,'PENDING']);
+    return {event_id:eventId,authority_epoch:ppM2Epoch_(),authority_seq:seq,checksum:checksum};
+  } finally {lock.releaseLock();}
+}
+
+function ppM2OperationalRoute_(auth,body,action,fallbackFn){
+  const mode=ppM2Mode_();
+  if(mode==='RECONCILING')return {ok:false,error:'RECONCILING_RETRY',retryable:true};
+  if(mode==='OFFLINE_LOCAL')return {ok:false,error:'OFFLINE_LOCAL_NO_SERVER_WRITES',retryable:true};
+  if(mode==='SERVICE_PRIMARY'){
+    if(!ppM2ValidServiceUrl_(ppM2ServiceUrl_())||!ppM2BridgeSecret_())return {ok:false,error:'SERVICE_PRIMARY_NOT_CONFIGURED',retryable:false};
+    try{return ppM2BridgeMutation_(auth,body,action);}catch(err){
+      const failures=ppM2RegisterServiceFailure_();
+      if(failures<2)return {ok:false,error:'SERVICE_TEMP_UNAVAILABLE_RETRY',retryable:true};
+      ppM2ClaimFallback_(String(err));
+    }
+  }
+  if(ppM2Mode_()!=='GOOGLE_FALLBACK')return {ok:false,error:'WRITE_AUTHORITY_UNAVAILABLE',retryable:true};
+  const result=fallbackFn();
+  if(result&&result.ok!==false){const fence=ppM2RecordFallback_(auth,body,action,result);result.authority=fence;result.projection='GOOGLE_FALLBACK';}
+  return result;
+}
+
+function ppM2FlushFallbackInbox_(){
+  if(ppM2Mode_()!=='GOOGLE_FALLBACK'||!ppM2ValidServiceUrl_(ppM2ServiceUrl_())||!ppM2BridgeSecret_())return {ok:false,error:'FALLBACK_FLUSH_NOT_READY'};
+  const sh=ppM2FallbackSheet_(),last=sh.getLastRow();if(last<2)return {ok:true,sent:0};
+  const rows=sh.getRange(2,1,last-1,13).getDisplayValues();let sent=0;
+  rows.forEach(function(r,i){if(String(r[12]||'')!=='PENDING')return;const payload={event_id:r[0],authority_epoch:Number(r[1]),authority_seq:Number(r[2]),service_generation:r[3],event:{action:r[4],business_date:r[5],actor:r[6],role:r[7],device_id:r[8],occurred_at:r[9],payload_json:r[10]},checksum:r[11]};try{const x=ppM2ServiceFetch_('/internal/fallback/ingest',payload);if(x.code>=200&&x.code<300&&x.json&&x.json.ok){sh.getRange(i+2,13).setValue('INGESTED');sent++;}}catch(_){}});
+  return {ok:true,sent:sent};
+}
