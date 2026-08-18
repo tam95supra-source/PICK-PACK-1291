@@ -1,37 +1,37 @@
-# HANDOVER CURRENT — Pick Pack 1291
+# HANDOVER CURRENT — PICK PACK 1291
 
 Status: **ACTIVE / cumulative / authoritative**  
-Last updated: **2026-08-18 16:27 +07:00 (Asia/Bangkok)**  
-Last closed snapshot: **S09**  
-Current working session: **S10**  
-Latest release: **Beta 0.4.2-beta.10 / versionCode 16**
+Last updated: **2026-08-18 17:03 +07:00 (Asia/Bangkok)**  
+Closed working session: **S10**  
+Next session: **S11**  
+Latest published Beta: **0.4.2-beta.11 / versionCode 17**
 
-> **NEW-CHAT STOP RULE:** first read this file, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/ADMIN_ACCOUNT_RULES.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. After reporting that the state is understood, **WAIT FOR A NEW OWNER COMMAND**. Do not build, deploy, edit Sheet, publish OTA, promote Stable or change architecture merely because this handover was opened.
+> **NEW-CHAT STOP RULE:** S11 must first read this file, `docs/handovers/HANDOVER_S10_2026-08-18.md`, `AGENTS.md`, `ARCHITECTURE_GUARDRAILS.md`, `docs/UI_UX_SYSTEM.md`, `docs/ADMIN_ACCOUNT_RULES.md`, `docs/BUILD_RELEASE_PLAYBOOK.md` and `docs/HANDOVER_POLICY.md`. After reporting that the state is understood, **WAIT FOR A NEW OWNER COMMAND**. Do not build, deploy, edit Sheet, publish OTA, promote Stable or change architecture merely because the session opened.
 
-## 1. Architecture — OWNER LOCK
+## 1. Project objective and architecture — OWNER LOCK
 
-Official operational architecture:
+Android APK for Pick Pack 1291 operational workflows.
+
+Official architecture:
 
 `Android App ↔ Google Apps Script Web App ↔ Google Sheets`
 
-- Google Sheets is the operational source of truth.
-- Google Apps Script is the transaction/API bridge tied directly to the workbook.
+- Google Sheets is operational source of truth.
+- Google Apps Script is the transaction/API bridge tied to the workbook.
 - GitHub is source/CI/release infrastructure only.
-- Do not add/migrate authority to Supabase, Firebase, Neon/Postgres, Cloudflare backend/storage, another DB/backend/auth/sync/service without an explicit owner command.
-- Beta is full-function and uses real business rules/data paths for acceptance testing.
-- Drive mutation stays inside the official `PICK PACK 1291 - CHÍNH THỨC` tree.
+- No Supabase/Firebase/Neon/Postgres/Cloudflare backend/storage/another DB/auth/sync authority without explicit owner approval.
+- Beta is full-function and uses real business rules/data.
+- Drive mutations remain inside the official Pick Pack 1291 project tree.
 
 ## 2. Owner workstation constraint — OWNER LOCK
 
-The owner's company-managed computer cannot run CMD/PowerShell/Terminal/CLI.
+Owner's company-managed workstation cannot run local CLI.
 
-- Never instruct owner to run git/gh/clasp/adb/Gradle/Node/npm/npx/Java/keytool/OpenSSL or similar local CLI.
-- Move CLI work to GitHub Actions or assistant-controlled tooling.
-- Owner-facing setup uses browser/UI only where possible.
+Never ask owner to run CMD/PowerShell/Terminal/bash/git/gh/clasp/adb/Gradle/npm/npx/Java/keytool/OpenSSL or similar commands. CLI/build/sign/deploy work is handled by GitHub Actions or assistant-controlled tooling. Browser/UI-only owner setup is preferred.
 
 ## 3. Authoritative workbook and catalogs
 
-Workbook: `DỮ LIỆU THEO NGÀY`.
+Workbook: **`DỮ LIỆU THEO NGÀY`**.
 
 Main tabs:
 
@@ -47,281 +47,239 @@ Main tabs:
 
 ### `Danh mục` namespace rule
 
-Headers follow `SHEET_FIELD` semantics and are used as catalogs only for the **matching sheet + matching editable field**.
+Headers follow **`SHEET_FIELD` semantics**.
 
-- Do not borrow values across sheets because names look similar.
-- System-owned/status values are not offered in operational contexts where users cannot edit them.
-- Example: `DANH SÁCH PDA_Tình trạng` is a PDA-management state and is **not selectable when assigning a PDA to PICK**.
-- If a catalog does not exist for a field, do not invent or borrow one unless owner explicitly defines a fallback.
-- Required select fields do not expose a decorative blank/dash option; they must resolve to a valid matching catalog value before save.
-- Preserve explicit business-rule exceptions such as optional User Pick.
+- Use only the matching sheet + editable-field catalog.
+- Never borrow across sheets because labels look similar.
+- System-owned statuses are not selectable in contexts where the user cannot edit them.
+- Required selects do not expose a decorative blank/dash option.
+- Required selects must resolve to a valid matching catalog before save.
+- Preserve explicit business exceptions such as optional User Pick.
 
 ## 4. Admin account namespace — OWNER LOCK
 
-`Danh sách Admin` is specialized and **not** an employee-position catalog.
+`Danh sách Admin` is specialized and not a staff-position catalog.
 
-`Vị trí` is fixed system-wide to exactly:
+Allowed Admin `Vị trí` values exactly:
 
 - `superadmin`
 - `admin`
 - `user`
 
-Rules:
+Mapping:
 
-- Never read Admin `Vị trí` from `Danh mục`.
-- Never fall back to `DANH SÁCH NHÂN SỰ_Vị trí chính` or any other catalog.
-- Backend derives/validates Admin position from role rather than trusting arbitrary client values.
-- Existing mapping: SUPERADMIN -> `superadmin`, ADMIN -> `admin`, USER -> `user`.
-- Normal account creation through the app cannot create another `SUPERADMIN` unless owner explicitly changes this rule.
-- The allowed set may change only after an explicit owner decision.
+- SUPERADMIN → `superadmin`
+- ADMIN → `admin`
+- USER → `user`
 
-`Danh sách Admin` also has a `Mail` field for reset-password delivery.
+Never populate Admin position from `Danh mục` or staff catalogs. Backend derives/validates position from role. Normal account creation cannot create another SUPERADMIN unless owner explicitly changes the rule. Account reset Mail remains supported.
 
 ## 5. Business invariants
 
 - `MNV` is the business key.
 - Session key: `MNV + business_date`.
-- State machine: `NOT_ENTERED -> ACTIVE -> ENDED`.
-- Once `ENDED`, normal flow cannot re-enter on the same business date.
+- State machine: `NOT_ENTERED → ACTIVE → ENDED`.
+- Once ENDED, normal flow cannot re-enter on the same business date.
 - Mutations use immutable/idempotent `event_id`.
-- Exclusive resources are race-safe; one winner only.
+- Exclusive resources are race-safe; exactly one winner.
 - Resource changes are atomic; failure retains the previous resource.
-- Google Sheet/API remains authoritative for active session/resource state.
-- Master/static data may be cached by revision; operational state remains server-authoritative.
+- Operational state remains server/Sheet authoritative.
 
 ### PICK / PACK
 
 - PICK requires PDA.
-- User Pick is **optional** and may be blank.
-- PDA entry uses last 5 serial digits + validated suggestions; ambiguous duplicate suffixes are not accepted as unique.
-- PACK keeps shift mapping to Bàn Pack + User Pack and exclusivity rules.
-- New PDA assignment requires master state `HOẠT_ĐỘNG`; an already assigned PDA may continue if later set BẢO_TRÌ/KHÓA, but cannot be newly assigned.
-- Used User Pick/User Pack stays consumed for the business day after release/change/EXIT unless authorized reuse applies.
+- User Pick is optional.
+- PDA uses last 5 serial digits + validated suggestions; ambiguous duplicate suffixes cannot be accepted as unique.
+- New PDA assignment obeys master availability/active state rules.
+- PACK preserves Bàn Pack + mapped User Pack bundle/exclusivity.
+- Daily User Pick/User Pack consumption remains used after release/change/EXIT unless authorized reuse applies.
 
 ### ENTER / EXIT
 
-- Business timezone: Asia/Bangkok.
-- Shifts: `Ca 1`, `Ca 2`, `HC`.
-- ENTER work choice: `PICK | PACK | KHÔNG`.
+- Business timezone Asia/Bangkok.
+- Shift choices remain `Ca 1`, `Ca 2`, `HC`/`Ca HC` according to route/UI mapping.
+- Work choice `PICK | PACK | KHÔNG`.
 - PICK requires PDA; User Pick optional.
-- PACK requires valid Bàn Pack + mapped User Pack bundle.
+- PACK requires valid Bàn Pack + mapped User Pack.
 - KHÔNG uses no operational resource.
 - OPEN Công nhật blocks EXIT.
-- EXIT releases resources still owned; prior PDA return must not make EXIT fail.
+- EXIT releases resources still owned; previously returned PDA does not block EXIT.
 
 ### Công nhật
 
 - USER/Điều phối cannot operate Công nhật.
-- ADMIN/SUPERADMIN can operate according to correction-age permissions.
-- States: OPEN / COMPLETED / CANCELLED.
-- Create requires ACTIVE work session, valid category and no overlap.
-- Resource policy on create supports `GIỮ` / `TRẢ`.
+- ADMIN/SUPERADMIN operate under correction-age permissions.
+- Create requires ACTIVE session, valid category and no overlap.
+- Resource policy supports `GIỮ` / `TRẢ`.
 - OPEN Công nhật blocks EXIT.
-- MNV of accepted record is immutable.
-- Google projection remains the locked 12-column schema documented in `05_BUSINESS_CONG_NHAT.md`.
+- Accepted MNV is immutable.
+- Locked projection/schema remains in `05_BUSINESS_CONG_NHAT.md`.
 
-## 6. Auth / role / session
+## 6. Authentication / role / session
 
-Roles:
-
-- `SUPERADMIN`
-- `ADMIN`
-- `USER`
-
-Backend enforces permissions; hiding UI alone is never sufficient.
+Roles: SUPERADMIN, ADMIN, USER. Backend enforcement is mandatory.
 
 Credential model:
 
 - salted PBKDF2-HMAC-SHA256 verifier
 - challenge/HMAC login proof
 - plaintext password is not sent directly to GAS
-- do not store passwords, verifiers, OAuth credentials, signing material or private tokens in public repo/handover
+- no actual passwords/verifiers/private tokens/signing private material in public repo/handover
 
-Session model: `SINGLE_ACTIVE_DEVICE_V1`.
+Session model: **`SINGLE_ACTIVE_DEVICE_V1`**.
 
 - Session survives normal app/process closure on the same installation.
 - No routine 12-hour forced logout.
-- Successful login on another installation/device replaces the same account's active server session.
-- Old device is rejected on next protected API/sync opportunity.
-- Logout/password-reset/security changes may invalidate session.
+- Login on another installation replaces the same account's active server session.
+- Old device is rejected at next protected API/sync opportunity.
+- Logout/password reset/security changes may invalidate session.
 
-### Forgot password / Mail
+Forgot-password remains generic externally, rate-limited and routed to configured account Mail.
 
-- Public action: `forgot_password`.
-- External response remains generic; no account-existence leak.
-- Rate limit remains 5 minutes per login + device.
-- Temporary reset credential remains valid for 2 hours.
-- Reset email goes to that account's configured `Mail`.
-- Successful temp-password login upgrades back to normal PBKDF2 verifier.
-- Reset invalidates previous active session.
+## 7. UI / UX — latest authoritative state
 
-## 7. UI / UX — authoritative S10 state
+Read `docs/UI_UX_SYSTEM.md`.
 
-Authoritative details: `docs/UI_UX_SYSTEM.md`.
+### Visual family
 
-Current family remains the owner-approved modern enterprise blue/indigo/violet system with centralized 7-color theming.
+- Modern enterprise blue / indigo / violet gradient system.
+- Exactly 7 theme swatches through centralized `ThemeManager`.
+- No grey elevation/shadow haze on routine rounded surfaces; use clean white/soft theme surfaces and subtle outlines.
 
-### Global shell
+### Persistent shell
 
-Bottom tabs, exact order:
+Bottom tabs exact order:
 
 `Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`
 
-- One persistent authenticated Activity shell.
-- Tab changes swap content in place.
-- No Activity start/finish per root tab.
-- No artificial fade/cross-fade transition delay.
-- Bottom navigation remains mounted.
+One persistent authenticated Activity. Root-tab switches update in place with no artificial transition delay.
 
-### Header — S10 supersedes S09 three-line identity rule
+### Header
 
-Top identity now shows **only**:
+Current identity shows only:
 
 `Chào buổi <sáng/trưa/chiều/tối>, <Họ tên>`
 
-- Greeting is based on the actual local clock on the PDA.
-- Do not show user/login ID in the top header.
-- Do not show position/role in the top header.
-- No avatar placeholder without a real photo.
-- No duplicate root-tab title in the gradient header.
-- Right-side status remains compact Mạng / Đồng bộ / Service.
-- Connection state persists across tab changes.
+Greeting is based on the PDA's actual local clock. Do not show login ID, role, position or avatar placeholder. `Mạng / Đồng bộ / Service` stays compact and persistent.
 
-### Real-PDA surface correction
+### Inner screens — latest owner correction
 
-- Routine rounded cards/inputs/navigation use clean white/soft theme surfaces and subtle theme-tinted outlines.
-- Avoid grey elevation/shadow haze around rounded surfaces.
+- Keep back navigation where needed.
+- Do not show a second text title (`BÁO CÁO`, `CÔNG NHẬT`, `QUÉT QR NHÂN SỰ`, etc.) beneath the greeting/status area.
+- Compact header/body spacing to increase usable PDA viewport.
+- Scanner/search fields carry contextual instructions and are deliberately taller; current target ~72dp minimum height.
+- Remove redundant `Mã nhân viên` / scan instruction labels outside the scan input when placeholder already explains the purpose.
 
-### Nghiệp vụ cards
+Current contextual placeholders include:
 
-Equal component for:
+- `Scan / Nhập mã nhân viên để ghi nhận ra ca / vào ca`
+- `Scan / Nhập mã nhân viên để ghi nhận công nhật`
+- `Scan / Nhập mã nhân viên để quản lý tài nguyên`
+- `Scan / Nhập mã nhân viên, họ tên để tìm kiếm`
 
-- Quét QR nhân sự — Vào ca / ra ca
-- Công nhật — Bắt đầu / hoàn thành
-- Báo cáo nhân sự — Theo ca / theo ngày
-- Tài nguyên — PDA / Pick / Pack
+Hardware Enter/OK executes scanner flows; no redundant `Kiểm tra` button.
 
-### Lịch sử — S10 redesign
+### Staff / phone
 
-- Summary counters: total / completed / needs attention.
-- Filter: all / completed / needs attention.
-- Recent activity grouped by date/time.
-- Semantic action icons and status chips.
-- Raw `PP_*` backend errors are translated into ordinary-user explanations instead of being the primary visible detail.
+S10 normalized existing staff phone values so known legacy 9-digit values regained leading `0`; Sheet column is kept as text. App normalizes legacy values and validates 10 digits beginning with `0` on save.
 
-### Đồng bộ — S10 redesign
+### History
 
-- Operational connectivity/sync dashboard rather than sparse raw key/value output.
-- Shows network/sync/pending state, useful refresh information, channel/version and Service state.
-- Explicit `LÀM MỚI TRẠNG THÁI` action while automatic foreground sync remains active.
-- No internal protocol/revision jargon.
+Operational History view with total/completed/needs-attention summary, filter, grouped activity, semantic status/icons and friendly errors instead of raw `PP_*` codes.
 
-### Staff / phone correction — S10
+### Sync
 
-- Full staff master remains searchable from local cache and lazily rendered.
-- Existing `DANH SÁCH NHÂN SỰ` phone data was normalized on 2026-08-18: **100/100 existing 9-digit values received the leading `0`**.
-- Phone column is formatted as text to preserve leading zero.
-- App normalizes legacy 9-digit numbers and requires 10 digits beginning with `0` on save.
+Operational Sync dashboard with network/sync/pending status, useful refresh info, channel/version and `LÀM MỚI TRẠNG THÁI`; no protocol/revision jargon.
 
-### User-facing copy
+## 8. Report layout — Beta11 owner correction
 
-Only ordinary-user useful text. Do not expose ACK/protocol/cache/revision/design/developer commentary in routine UI.
+### Bordered tables
 
-## 8. Notifications / input
+Report matrices must have visible borders between cells. No floating unseparated numbers.
 
-- Routine top notifications auto-hide after about 3 seconds.
-- Maximum 3 notifications; new items evict oldest over the limit.
-- Routine not-found/success/status states do not use blocking OK dialogs.
-- Yes/No confirmations are reserved for consequential actions and manual diagnostic log send.
-- MNV/PDA scanner Enter/OK executes immediately; no redundant `Kiểm tra` button.
+### Main manpower matrix row order
+
+1. Trưởng nhóm
+2. Chuyên viên
+3. Tổ trưởng
+4. Điều phối khu pack
+5. Điều phối khu chờ xuất
+6. Kéo hàng
+7. 5S
+8. Picker
+9. Packer
+10. Phúc Long
+11. Tổng
+
+Supplier columns are dynamic by relevant data, canonical order when present:
+
+`Inhouse, NLV, VW, MP, MGL, HGP, HAD, Tổng`
+
+**SUPERSEDED:** older rule `Phúc Long before Kéo hàng` is no longer valid. Latest owner reference places **Phúc Long after Packer and immediately before Tổng**.
+
+### Tenure
+
+Separate bordered matrices:
+
+- `Thâm niên Picker`
+- `Thâm niên Packer`
+
+`Nhân sự mới` = tenure ≤ 30 days. `Nhân sự cũ` = tenure > 30 days.
+
+### Hỗ trợ bộ phận khác
+
+- Only Công nhật explicitly marked **Khấu trừ nhân sự = Có** in selected shift scope.
+- Same person/support type de-duplicated in matrix.
+- Deducted staff removed from effective Picker/Packer tenure counts.
+- Entire support block hidden when deducted total = 0.
+- When support exists, show post-deduction Picker/Packer remainder with old/new split.
+
+Shift scopes:
+
+- `Ca 1 + Ca HC`
+- `Ca 2`
+- `Cả ngày`
+
+Beta11 implementation composes `report_daily` + `list_sessions`; ADMIN/SUPERADMIN also loads permission-restricted `list_labor` for deducted-support details. No GAS change/deploy was required for Beta11.
 
 ## 9. Logging
 
 Categories:
 
-- MANUAL -> `BÁO LỖI THỦ CÔNG`
-- CRASH -> `BÁO LỖI TỰ ĐỘNG`
-- DAILY -> `NHẬT KÝ ANDROID`
+- MANUAL → `BÁO LỖI THỦ CÔNG`
+- CRASH → `BÁO LỖI TỰ ĐỘNG`
+- DAILY → `NHẬT KÝ ANDROID`
 
-Rules:
+Manual send requires confirmation. Local logs delete only after successful acknowledgement for their upload/event. Pending crash/daily logs retry after restored session. Redact secrets/private data where applicable.
 
-- Secrets/private data are redacted as applicable.
-- Manual send requires confirmation.
-- MANUAL/CRASH/DAILY local file is deleted only after successful server acknowledgement for that upload/event.
-- Pending crash/daily logs are attempted after restored session, not only fresh login.
-- User-facing copy does not expose ACK jargon.
+## 10. OTA / signing / release infrastructure
 
-## 10. Reports
+OTA authority:
 
-Keep active rules:
+`Android → GAS update_check → Google Drive channel folder`
 
-- no redundant `NGUỒN LỰC` / `THÂM NIÊN` title rows
-- support block hidden when deducted support total is 0
-- `Phúc Long` before `Kéo hàng`
-- compact PDA-friendly spacing
-- zero/all-zero display optimizations remain
-- tables form one coherent block; avoid heavy rounded borders around every subtable
+Beta only reads Beta channel; Stable only reads Stable channel. GitHub Releases are not steady-state OTA authority.
 
-## 11. GAS live state
+### Fixed signer
 
-Live architecture remains `0.4.2 / APP_GSHEET` with:
+SHA-256:
 
-- Sheet-read health
-- `SINGLE_ACTIVE_DEVICE_V1`
-- Drive-based `update_check`
-- account-email forgot-password routing
-- MailApp authorization
-- strict catalog fields exposed to Android master snapshot
-- Admin position backend lock
+`d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
 
-No GAS source change was required for Beta10; the existing live GAS remained authoritative. GAS source changes still require explicit `Deploy Current GAS` and post-deploy gates.
+Never generate a replacement signer.
 
-## 12. OTA release state
+### Four GitHub signing secrets — confirmed permanent setup
 
-### Published Beta — `0.4.2-beta.10`
+- `ANDROID_SIGNING_KEY_B64`
+- `ANDROID_SIGNING_STORE_PASSWORD`
+- `ANDROID_SIGNING_KEY_PASSWORD`
+- `ANDROID_SIGNING_ALIAS`
 
-- Package: `vn.pickpack1291.app.beta.publicbeta`
-- VersionCode: `16`
-- APK: `pick-pack-1291-public-beta-v0.4.2-beta.10.apk`
-- Drive file ID: `1x7DhEohCDuF2R7rUFDT5y1OI9KwtkD6n`
-- Signed APK SHA-256: `690771122d7b597a19aaa3399bcc3ed6d84626e97db33c02ce58739f7353165f`
-- Fixed signer SHA-256: `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
-- Authority/source: GAS `update_check` -> Google Drive Beta folder.
+Confirmed working during S10. Do not recreate/rotate per release. Emergency encrypted Drive recovery is fallback only if secrets are lost/corrupted.
 
-Beta10 scope delivered:
+Release Preflight builds/signs Beta + Stable technical candidates using the fixed signer; a signed Stable validation artifact is **not permission to publish Stable**.
 
-1. remove grey rounded-surface/elevation haze on real PDA
-2. header now `Chào buổi ..., Họ tên` based on PDA local time; no user/position lines
-3. required staff catalog selects no longer show decorative dash/blank option
-4. staff phone leading zero fixed in existing Sheet data and app input/save flow
-5. Lịch sử redesigned into useful summary/filter/grouped activity UI with friendly errors
-6. Đồng bộ redesigned into useful operational dashboard
-
-Beta10 release gates passed:
-
-- live GAS/Drive Beta+Stable channel isolation
-- Beta Release + Stable Release compile/package/version validation
-- all four GitHub signing secrets detected
-- automated signing of exact validated Beta + Stable artifacts
-- fixed signer validation on both signed artifacts
-- Beta9 -> Beta10 live discovery from GAS/Drive
-- live downloaded Beta10 APK SHA match
-- package/version match
-- fixed signer match
-- Beta10 self-update false
-- Stable channel isolation
-
-The permanent OTA verifier was corrected during S10 to accept the live GAS response contract `available / version_name / apk_url` while remaining backward-compatible with legacy field names.
-
-### Stable
-
-**Not promoted.** Stable release artifact may be built/signed for technical validation, but Stable publish requires owner-approved Beta soak/business acceptance and an explicit owner command.
-
-## 13. Build / release — S10 automated signing state
-
-Authoritative playbook: `docs/BUILD_RELEASE_PLAYBOOK.md`.
-
-Permanent workflows:
+### Permanent workflows
 
 1. `App Fast Check`
 2. `Release Preflight - Beta and Stable`
@@ -329,69 +287,122 @@ Permanent workflows:
 4. `Verify Google Apps Script Credentials`
 5. `Verify OTA - Beta and Stable`
 
-### Four signing secrets — confirmed working
+Android-only Beta path:
 
-- `ANDROID_SIGNING_KEY_B64`
-- `ANDROID_SIGNING_STORE_PASSWORD`
-- `ANDROID_SIGNING_KEY_PASSWORD`
-- `ANDROID_SIGNING_ALIAS`
-
-They were proven in successful Beta10 Preflight. Normal releases no longer need the old manual recovery-signing flow.
-
-Normal Android-only Beta path:
-
-`source -> Fast Check -> Release Preflight(build + fixed signing) -> exact signed Beta artifact -> Drive Beta upload -> Verify OTA -> RELEASED`
+`source → Fast Check → Release Preflight(build + signing) → exact signed Beta artifact → Drive Beta upload → Verify OTA → RELEASED`
 
 Android + GAS path:
 
-`source -> Fast Check -> Deploy Current GAS -> Release Preflight(build + fixed signing) -> exact signed Beta artifact -> Drive Beta upload -> Verify OTA -> RELEASED`
+`source → Fast Check → Deploy Current GAS → Release Preflight → exact signed Beta artifact → Drive Beta upload → Verify OTA → RELEASED`
 
-Rules:
+No rebuild/re-sign between successful Preflight and publish.
 
-- no rebuild/re-sign between Preflight and publish
-- never generate a replacement signer
-- Stable signed artifact is not permission to publish Stable
-- emergency encrypted Drive signing recovery remains fallback only if GitHub secrets are lost/corrupted
-- no temporary Apps Script signing bridge, external signing service, observer/status workflow or per-release signing workflow
+## 11. Latest published Beta — 0.4.2-beta.11
 
-## 14. Known failures already learned — DO NOT REPEAT
+- VersionCode: **17**
+- Package: `vn.pickpack1291.app.beta.publicbeta`
+- APK: `pick-pack-1291-public-beta-v0.4.2-beta.11.apk`
+- Signed SHA-256: `95385b7929dcbdded8e09ad7f402b93e6a2b780a97449698ade17f538243d4f1`
+- Fixed signer verified
+- Source release-preparation commit: `a76267a72f5e24bf2c9f621d3ec2737fb274c0cf`
+- OTA trigger commit: `759bfa10b0f0eb155f8a87870128c5c249937bcd`
 
-- Do not assume `./gradlew`; use setup-gradle + `gradle`.
-- Do not embed giant multiline source patches in workflow YAML.
-- Standalone source transforms/direct edits must use unique asserted anchors; fix the first/root error, not cascades.
-- Do not dispatch a workflow in the same commit that first creates it.
-- Do not create observer/status workflows writing `main`.
-- Do not let CI self-edit workflow files.
-- Do not hardcode old Beta versions.
-- Do not run full release/live probes for tiny normal edits.
-- Do not repeatedly bootstrap SDK when exact hosted tools exist.
-- Do not assume GAS OAuth has Drive upload scope.
-- Do not explore unapproved external backends during release troubleshooting.
-- Do not put handover/docs finalization on OTA critical path.
-- If OTA verifier fails, inspect the actual live GAS response contract before rebuilding/re-signing; Beta10 proved a verifier schema mismatch can occur while the published APK itself is correct.
+Beta11 gates passed:
 
-## 15. Current acceptance priorities
+- live GAS health + Beta/Stable isolation
+- Beta Release + Stable Release compile
+- package/version validation
+- four signing secrets detected
+- automated signing of exact validated candidates
+- fixed signer validation
+- Beta10 → Beta11 live discovery
+- live downloaded APK SHA match
+- package/version match
+- fixed signer match
+- Beta11 self-update false
+- Stable isolation
 
-After installing/testing Beta10 on the real PDA, owner-driven checks should focus on:
+### Stable
 
-- confirm grey haze is gone across cards/inputs/nav on-device
-- confirm greeting period changes correctly with PDA local clock and only name is shown
-- confirm required staff selects have real values and no dash placeholder
-- confirm leading `0` remains visible/editable/saved for phone numbers
-- review redesigned Lịch sử readability and friendly failure text
-- review redesigned Đồng bộ usefulness and refresh behavior
+**NOT PROMOTED.** Stable publish requires owner-approved Beta soak/business acceptance and an explicit Stable-publish command.
+
+## 12. S10 completed work
+
+### Beta10
+
+- removed grey rounded-surface haze
+- one-line local-time greeting header
+- removed user/position from header
+- required staff selects without decorative dash
+- fixed phone leading zero in Sheet/app
+- redesigned History
+- redesigned Sync
+- completed one-time GitHub signing-secret setup
+
+### Beta11
+
+- removed redundant inner-screen title text
+- enlarged contextual scan/search fields
+- removed redundant external scan labels/instructions
+- tightened spacing for PDA viewport
+- report cell borders
+- report layout based on owner reference
+- separate Picker/Packer tenure matrices
+- deducted-support matrix/summary with hide-on-zero
+- new report row order with Phúc Long after Packer before Tổng
+
+Temporary observability PRs used to retrieve CI runs were closed without merge after successful verification; no per-release observer workflow was added.
+
+## 13. Current state / next-session priorities
+
+No release task is half-complete. Beta11 is published and OTA-verified; Stable remains unpublished.
+
+Next owner-driven real-PDA acceptance should check:
+
+- inner titles gone while back control remains usable
+- scan/search placeholder readability and field height
+- compact spacing without clipping
+- report borders legible on PDA
+- report row/column order
+- Picker/Packer new/old counts
+- deducted support includes only `Khấu trừ nhân sự = Có`
+- support block disappears completely at zero
+- post-deduction Picker/Packer summary is correct
 - continue QR/Công nhật/PICK/PACK/report business acceptance
 
-Do not promote Stable without explicit owner approval.
+## 14. Known risks / technical debt
 
-## 16. Authoritative references
+- S10/S11 UI changes are applied through assertion-based build-time transforms: `tools/apply_s10_ui_patch.py` then `tools/apply_s11_compact_report_patch.py`. They currently pass CI but anchors can be fragile if base Kotlin changes. Future edits must preserve unique anchors or deliberately fold patches into source through a controlled change.
+- Report composition now combines multiple API calls; test slow/unstable PDA networks for confusing mixed freshness.
+- Detailed deducted-support composition uses permission-restricted `list_labor`; do not weaken backend authorization merely to expose it to unauthorized roles.
+- Beta11 passed CI/OTA but still awaits owner real-device visual/business acceptance.
+
+## 15. Known failures not to repeat
+
+- Do not assume `./gradlew`; use setup-gradle + `gradle`.
+- Do not embed giant source patches in workflow YAML.
+- Use coherent standalone transform scripts/direct edits with unique asserted anchors.
+- Fix first/root compile error, not cascades.
+- Do not create per-release observer/status/finalizer workflows.
+- Do not let CI self-edit workflow definitions.
+- Do not hardcode stale Beta versions.
+- Do not run full release/live gates for ordinary small non-release edits.
+- Do not regenerate signing identity.
+- Do not return to manual recovery signing while the four GitHub secrets are healthy.
+- Do not assume GAS OAuth has Drive upload scope.
+- Do not explore unapproved external backends.
+- Handover/docs housekeeping remains after OTA PASS, not on release critical path.
+
+## 16. Authoritative references for S11
 
 Read together:
 
+- `docs/HANDOVER_CURRENT.md`
+- `docs/handovers/HANDOVER_S10_2026-08-18.md`
 - `AGENTS.md`
 - `ARCHITECTURE_GUARDRAILS.md`
 - `docs/UI_UX_SYSTEM.md`
 - `docs/ADMIN_ACCOUNT_RULES.md`
 - `docs/BUILD_RELEASE_PLAYBOOK.md`
 - `docs/HANDOVER_POLICY.md`
-- latest immutable session snapshot under `docs/handovers/`
+- business docs for Vào/Ra, resources, Công nhật and roles/accounts
