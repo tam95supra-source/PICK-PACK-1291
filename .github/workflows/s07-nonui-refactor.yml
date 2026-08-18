@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 ops/s07_nonui_refactor.py
+          python3 ops/s07_nonui_refactor_v2.py
           grep -q 'versionCode = 13' app/build.gradle.kts
           grep -q 'versionName = "0.4.2-beta.7"' app/build.gradle.kts
           ! grep -q 'TransitionManager.beginDelayedTransition' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
