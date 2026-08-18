@@ -1,11 +1,11 @@
 name: Service M2 Final Shadow Bootstrap
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [ main ]
     paths:
       - '.github/workflows/service-m2-final-shadow-bootstrap.yml'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,80 +14,9 @@ concurrency:
   group: service-m2-final-shadow-bootstrap-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  D1_NAME: pick-pack-1291-service-prod
-  WORKER_NAME: pick-pack-1291-service
-  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
-  SERVICE_GENERATION: m2-prod-20260819-001
-
 jobs:
   bootstrap-final:
-    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/service-migration-m2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Verify shadow authority and run one bounded final bootstrap
-        shell: bash
-        run: |
-          set -euo pipefail
-          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
-          echo "::add-mask::$ADMIN"; export M2_ADMIN_TOKEN="$ADMIN"
-          H=$(curl -fsS --connect-timeout 5 --max-time 20 "$SERVICE_URL/health")
-          node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||j.environment!=="staging-shadow"||j.authority?.scope!=="STAGING_SHADOW"||j.authority?.mode!=="SERVICE_PRIMARY"||j.generation!==process.env.SERVICE_GENERATION||j.replication?.state!=="HEALTHY"||Number(j.replication?.pending_count||0)!==0)throw new Error(JSON.stringify(j))' "$H"
-          START=$(curl -fsS --connect-timeout 5 --max-time 30 --retry 3 --retry-delay 2 --retry-all-errors -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" "$SERVICE_URL/internal/bootstrap-google/start")
-          RUN=$(node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||!j.run_id)process.exit(2);process.stdout.write(j.run_id)' "$START")
-          echo "FINAL_BOOTSTRAP_RUN_ID=$RUN" >> "$GITHUB_ENV"
-          BODY=$(node -e 'process.stdout.write(JSON.stringify({run_id:process.argv[1]}))' "$RUN")
-          for i in $(seq 1 700); do
-            curl -fsS --connect-timeout 5 --max-time 30 --retry 3 --retry-delay 2 --retry-all-errors -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" -H 'content-type: application/json' -d "$BODY" "$SERVICE_URL/internal/bootstrap-google/step" >/tmp/final-step.json
-            if node -e 'const j=require("/tmp/final-step.json");process.exit(j.ok&&j.done===true?0:1)'; then
-              cp /tmp/final-step.json /tmp/final-bootstrap.json
-              echo "FINAL_BOOTSTRAP_COMPLETE steps=$i run_id=$RUN"
-              break
-            fi
-            PHASE=$(node -e 'const j=require("/tmp/final-step.json");process.stdout.write(String(j.phase||j.state?.phase||"UNKNOWN"))')
-            echo "FINAL_BOOTSTRAP_STEP=$i phase=$PHASE"
-            if [[ "$i" == 700 ]]; then echo FINAL_BOOTSTRAP_STEP_LIMIT_EXCEEDED >&2; exit 1; fi
-          done
-          node -e 'const j=require("/tmp/final-bootstrap.json");if(!j.ok||!j.done||!j.projection_counts)throw new Error(JSON.stringify(j))'
-      - name: Verify final D1 completeness and no running bootstrap
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST"); test -n "$ID"; export PROD_D1_ID="$ID"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          s=Path('wrangler.jsonc').read_text().replace('"name": "pick-pack-1291-service-m1-staging"','"name": "'+os.environ['WORKER_NAME']+'"').replace('"SERVICE_GENERATION": "m2-precutover-20260819-001"','"SERVICE_GENERATION": "'+os.environ['SERVICE_GENERATION']+'"').replace('"database_name": "pick-pack-1291-m1-staging"','"database_name": "'+os.environ['D1_NAME']+'"').replace('__M1_D1_DATABASE_ID__',os.environ['PROD_D1_ID'])
-          Path('/tmp/wrangler.final.jsonc').write_text(s)
-          PY
-          Q=$(npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.final.jsonc --command "SELECT (SELECT COUNT(*) FROM bootstrap_runs WHERE status='RUNNING') AS running, (SELECT COUNT(*) FROM source_rows) AS source_rows, (SELECT COUNT(*) FROM resource_pack_map WHERE pack_table='HP' AND shift='Ca HC') AS hp_ca_hc, (SELECT COUNT(*) FROM resource_pack_map WHERE pack_table='D18' AND shift='Ca 1' AND user_pack='hy1.obpack18') AS d18_valid, (SELECT COUNT(*) FROM resource_pack_map WHERE pack_table='D29') AS d29_invalid;" --json)
-          printf '%s' "$Q" >/tmp/final-d1.json
-          node -e 'const x=JSON.parse(process.argv[1]),r=x?.[0]?.results?.[0];if(Number(r?.running)!==0||Number(r?.source_rows)<=0||Number(r?.hp_ca_hc)!==6||Number(r?.d18_valid)!==1||Number(r?.d29_invalid)!==0)throw new Error("FINAL_D1_INCOMPLETE:"+JSON.stringify(r))' "$Q"
-          H=$(curl -fsS "$SERVICE_URL/health"); printf '%s' "$H" >/tmp/final-health.json
-          node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||j.environment!=="staging-shadow"||j.authority?.scope!=="STAGING_SHADOW"||j.replication?.state!=="HEALTHY"||Number(j.replication?.pending_count||0)!==0)throw new Error(JSON.stringify(j))' "$H"
-      - name: Emit final bootstrap evidence
-        shell: bash
-        run: |
-          mkdir -p m2-final-shadow-evidence
-          cp /tmp/final-bootstrap.json m2-final-shadow-evidence/final-bootstrap.json
-          cp /tmp/final-d1.json m2-final-shadow-evidence/final-d1.json
-          cp /tmp/final-health.json m2-final-shadow-evidence/final-health.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: m2-final-shadow-evidence-${{ github.run_id }}
-          path: m2-final-shadow-evidence/
-          retention-days: 30
+      - run: echo 'Retired after final M2 shadow bootstrap passed.'
