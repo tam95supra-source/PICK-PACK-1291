@@ -37,13 +37,15 @@ jobs:
           grep -q '"mode":"APP_GSHEET"' /tmp/health.json
           grep -q '"sheet_read":true' /tmp/health.json
           grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/health.json
+          grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/health.json
+          grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/health.json
           curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta-ota.json
           curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable-ota.json
           grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta-ota.json
           grep -q '"channel":"BETA"' /tmp/beta-ota.json
           grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable-ota.json
           grep -q '"channel":"STABLE"' /tmp/stable-ota.json
-          echo 'PASS - live GAS health + Beta/Stable OTA isolation.'
+          echo 'PASS - live S12 report + S13 shared history + Beta/Stable OTA isolation.'
 
   android-release:
     runs-on: ubuntu-latest
