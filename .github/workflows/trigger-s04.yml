@@ -7,14 +7,27 @@ on:
       - 'ops/s04-trigger.txt'
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Dispatch S04 implementation workflow
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run apply-s04-layout2.yml --repo "${{ github.repository }}" --ref main
+        shell: bash
+        run: |
+          set +e
+          gh workflow run apply-s04-layout2.yml --repo "${{ github.repository }}" --ref main
+          RC=$?
+          echo "dispatch_rc=$RC" > ops/s04-dispatch-receipt.txt
+          echo "run_id=${{ github.run_id }}" >> ops/s04-dispatch-receipt.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/s04-dispatch-receipt.txt
+          git commit -m 'chore: record S04 dispatch receipt' || true
+          git push origin HEAD:main || true
+          exit $RC
