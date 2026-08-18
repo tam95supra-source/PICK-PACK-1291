@@ -1,0 +1,55 @@
+name: Pre-Service Migration Artifact Export
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/pre-service-migration-artifact-export.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      SNAPSHOT_SHA: 76db60dd10f49c24b0e17f3c1561e3409537b28d
+    steps:
+      - name: Checkout full repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build exact rollback package
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$SNAPSHOT_SHA^{commit}"
+          mkdir -p backup-dist
+          git archive --format=zip --output=backup-dist/pick-pack-1291-source-${SNAPSHOT_SHA}.zip "$SNAPSHOT_SHA"
+          git branch -f pre-migration-snapshot "$SNAPSHOT_SHA"
+          git bundle create backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle pre-migration-snapshot
+          git bundle verify backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle
+          cat > backup-dist/BACKUP_METADATA.txt <<EOF
+          project=PICK PACK 1291
+          repository=tam95supra-source/pick-pack-1291
+          snapshot_sha=$SNAPSHOT_SHA
+          source_branch=main
+          pristine_backup_branch=backup/pre-service-migration-2026-08-18-2318
+          backup_purpose=pre-Service-first-migration rollback point
+          created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          restore_note=Source ZIP restores exact source tree; Git bundle restores reachable history through snapshot commit.
+          EOF
+          (cd backup-dist && sha256sum pick-pack-1291-source-${SNAPSHOT_SHA}.zip pick-pack-1291-history-${SNAPSHOT_SHA}.bundle BACKUP_METADATA.txt > SHA256SUMS.txt)
+          (cd backup-dist && zip -q pick-pack-1291-github-backup-${SNAPSHOT_SHA}.zip pick-pack-1291-source-${SNAPSHOT_SHA}.zip pick-pack-1291-history-${SNAPSHOT_SHA}.bundle BACKUP_METADATA.txt SHA256SUMS.txt)
+          sha256sum backup-dist/pick-pack-1291-github-backup-${SNAPSHOT_SHA}.zip > backup-dist/PACKAGE_SHA256.txt
+          ls -lh backup-dist
+
+      - name: Upload rollback package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-pre-service-migration-2026-08-18-2318
+          path: backup-dist/*
+          retention-days: 90
+          if-no-files-found: error
