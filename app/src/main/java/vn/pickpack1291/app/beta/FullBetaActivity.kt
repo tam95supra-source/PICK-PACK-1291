@@ -31,6 +31,7 @@ class FullBetaActivity : Activity() {
     private val green = Color.rgb(36, 153, 85)
     private val orange = Color.rgb(217, 119, 6)
     private val teal:Int get() = ThemeManager.primary(this)
+    private val accent:Int get() = ThemeManager.accent(this)
     private val bg:Int get() = ThemeManager.background(this)
     private val surface = Color.WHITE
     private val ink = Color.rgb(24, 44, 42)
@@ -69,10 +70,10 @@ class FullBetaActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        window.statusBarColor = Color.WHITE
+        window.statusBarColor = ThemeManager.primaryDark(this)
         window.navigationBarColor = Color.WHITE
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         LocalLogManager.installCrashHandler(this)
         LocalLogManager.createDailyIfNeeded(this)
         MasterDataCache.hydrate(this)
@@ -187,21 +188,63 @@ class FullBetaActivity : Activity() {
         liveEmployeeMnv = ""
         val root=column(bg)
         root.addView(appBar("PICK PACK 1291",false))
-        val body=column(bg).apply{setPadding(dp(12),dp(10),dp(12),dp(92))}
-        body.addView(txt("Nghiệp vụ",15f,ink,true));body.addView(txt("${accountName.ifBlank{accountLogin}} • ${roleText(accountRole)}",9.8f,muted,false));body.addView(gap(9))
-        val hero=column(surface).apply{
-  setPadding(dp(14),dp(14),dp(14),dp(14));background=outlineBg(surface,12);setOnClickListener{employeeScan()}
-  addView(row(surface).apply{
-      addView(txt("▣",27f,teal,true).apply{gravity=Gravity.CENTER},size(dp(52),dp(58)))
-      addView(column(surface).apply{addView(txt("QUÉT QR NHÂN SỰ",15f,teal,true));addView(txt("Quét hoặc nhập MNV, Enter/OK để xử lý",10f,muted,false))},LinearLayout.LayoutParams(0,-2,1f))
-      addView(txt("›",25f,teal,false).apply{gravity=Gravity.CENTER},size(dp(30),dp(58)))
-  },matchWrap())
+        val body=column(bg).apply{setPadding(dp(12),dp(12),dp(12),dp(92))}
+        body.addView(txt("Nghiệp vụ",15.5f,ink,true))
+        body.addView(txt("${accountName.ifBlank{accountLogin}} • ${roleText(accountRole)}",9.8f,muted,false))
+        body.addView(gap(10))
+
+        val hero=column(Color.TRANSPARENT).apply{
+            setPadding(dp(16),dp(16),dp(16),dp(14))
+            background=gradient(blue,accent,18)
+            elevation=dp(6).toFloat()
+            setOnClickListener{employeeScan()}
+            addView(row(Color.TRANSPARENT).apply{
+                addView(column(Color.TRANSPARENT).apply{
+                    addView(txt("QUÉT QR\nNHÂN SỰ",22f,Color.WHITE,true))
+                    addView(gap(5))
+                    addView(txt("Quét hoặc nhập MNV • Enter/OK để xử lý ngay",10f,Color.argb(225,255,255,255),false))
+                },LinearLayout.LayoutParams(0,-2,1f))
+                addView(txt("▦",42f,Color.WHITE,true).apply{
+                    gravity=Gravity.CENTER
+                    background=round(Color.argb(38,255,255,255),16)
+                },size(dp(86),dp(86)))
+            },matchWrap())
+            addView(gap(12))
+            addView(Button(this@FullBetaActivity).apply{
+                text="▣  BẮT ĐẦU QUÉT"
+                textSize=12.5f
+                setTextColor(navy)
+                typeface=Typeface.DEFAULT_BOLD
+                isAllCaps=false
+                minHeight=dp(48)
+                background=round(Color.WHITE,10)
+                setOnClickListener{employeeScan()}
+            },matchWrap())
         }
-        body.addView(hero,matchWrap());body.addView(gap(8))
-        if(accountRole=="ADMIN"||accountRole=="SUPERADMIN") body.addView(menuRow("◉","Công nhật","Bắt đầu / hoàn thành công nhật") { openModule("LABOR") })
-        body.addView(menuRow("▥","Báo cáo nhân sự","Báo cáo vận hành theo ca / ngày") { openModule("REPORT") })
-        body.addView(menuRow("☷","Theo dõi ca","Phiên làm việc và công nhật hôm nay") { openModule("LISTS") })
-        body.addView(menuRow("↔","Tài nguyên","PDA, User Pick, Bàn Pack / User Pack") { openModule("RESOURCES") })
+        body.addView(hero,matchWrap())
+        body.addView(gap(11))
+
+        val cards=mutableListOf<View>()
+        if(accountRole=="ADMIN"||accountRole=="SUPERADMIN") {
+            cards.add(businessTile("◉","Công nhật","Bắt đầu / hoàn thành",green){openModule("LABOR")})
+        } else {
+            cards.add(businessTile("▥","Báo cáo","Theo ca / ngày",orange){openModule("REPORT")})
+        }
+        if(accountRole=="ADMIN"||accountRole=="SUPERADMIN") {
+            cards.add(businessTile("▥","Báo cáo","Theo ca / ngày",orange){openModule("REPORT")})
+        } else {
+            cards.add(businessTile("☷","Theo dõi ca","Phiên hôm nay",teal){openModule("LISTS")})
+        }
+        cards.add(businessTile("↔","Tài nguyên","PDA • Pick • Pack",accent){openModule("RESOURCES")})
+        cards.add(if(accountRole=="ADMIN"||accountRole=="SUPERADMIN")
+            businessTile("☷","Theo dõi ca","Phiên hôm nay",teal){openModule("LISTS")}
+        else businessTile("◉","Nhân sự","Tra cứu danh sách",green){openModule("STAFF")})
+        body.addView(cardRow(cards[0],cards[1]))
+        body.addView(gap(8))
+        body.addView(cardRow(cards[2],cards[3]))
+        body.addView(gap(10))
+        body.addView(txt("Màu giao diện được đổi trong tab Cài đặt • 7 màu đồng bộ toàn ứng dụng",9.2f,muted,false).apply{gravity=Gravity.CENTER})
+
         root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f))
         setScreen(root);refreshStatus()
     }
@@ -210,6 +253,8 @@ class FullBetaActivity : Activity() {
         startActivity(Intent(this, OperationsActivity::class.java).apply {
             putExtra("module", module); putExtra("login", accountLogin); putExtra("name", accountName); putExtra("role", accountRole); putExtra("position", accountPosition); putExtra("email", accountEmail); putExtra("mnv", mnv)
         })
+        @Suppress("DEPRECATION")
+        overridePendingTransition(android.R.anim.fade_in,android.R.anim.fade_out)
     }
 
     private fun employeeScan() {
@@ -314,11 +359,15 @@ class FullBetaActivity : Activity() {
     private fun employeeCard(e: JSONObject)=column(surface).apply{setPadding(dp(14),dp(12),dp(14),dp(12));background=outlineBg(surface,9);addView(txt("${e.optString("mnv")} • ${e.optString("full_name")}",15.5f,navy,true));addView(gap(3));addView(txt("${dash(e.optString("main_position"))} • ${dash(e.optString("supplier"))}",10.5f,ink,false));addView(txt("${dash(e.optString("department"))} • Site ${dash(e.optString("site"))} • Kho ${dash(e.optString("warehouse"))}",10f,muted,false))}
     private fun details(items:List<Pair<String,String>>)=column(surface).apply{setPadding(dp(13),dp(9),dp(13),dp(9));background=outlineBg(surface,9);items.forEach{(k,v)->addView(row(surface).apply{addView(txt(k,10.5f,muted,false),LinearLayout.LayoutParams(0,-2,.45f));addView(txt(if(v.isBlank())"—" else v,10.7f,ink,true).apply{gravity=Gravity.END},LinearLayout.LayoutParams(0,-2,.55f));setPadding(0,dp(4),0,dp(4))})}}
 
-    private fun appBar(title:String,back:Boolean)=row(navy).apply{
-        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(6),dp(8),dp(6))
+    private fun appBar(title:String,back:Boolean)=row(Color.TRANSPARENT).apply{
+        gravity=Gravity.CENTER_VERTICAL
+        setPadding(dp(8),dp(7),dp(8),dp(7))
+        background=gradient(navy,accent,0)
         addView(txt(if(back)"‹" else "",if(back)30f else 20f,Color.WHITE,false).apply{gravity=Gravity.CENTER;if(back)setOnClickListener{navigateBack()}},size(dp(40),dp(44)))
-        addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
-        syncText=txt("↻ Đang nối",8.8f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(4),dp(4),dp(4),dp(4))}
+        addView(txt(title,17f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        syncText=txt("↻ Đang nối",8.5f,Color.WHITE,true).apply{
+            gravity=Gravity.CENTER;maxLines=2;setPadding(dp(5),dp(4),dp(5),dp(4));background=round(Color.argb(35,255,255,255),12)
+        }
         addView(syncText,size(dp(102),dp(40)))
     }
     private fun menuRow(icon:String,title:String,sub:String,click:()->Unit)=row(surface).apply{
@@ -327,6 +376,19 @@ class FullBetaActivity : Activity() {
         addView(column(surface).apply{addView(txt(title,12.8f,ink,true));addView(txt(sub,9.7f,muted,false))},LinearLayout.LayoutParams(0,-2,1f))
         addView(txt("›",22f,teal,false).apply{gravity=Gravity.CENTER},size(dp(26),dp(48)))
         setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(7)}
+    }
+
+    private fun businessTile(icon:String,title:String,sub:String,color:Int,click:()->Unit)=row(Color.TRANSPARENT).apply{
+        gravity=Gravity.CENTER_VERTICAL
+        setPadding(dp(11),dp(11),dp(9),dp(11))
+        background=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(Color.WHITE,ThemeManager.soft(this@FullBetaActivity))).apply{
+            cornerRadius=dp(14).toFloat();setStroke(dp(1),Color.argb(80,Color.red(color),Color.green(color),Color.blue(color)))
+        }
+        elevation=dp(2).toFloat()
+        addView(txt(icon,23f,color,true).apply{gravity=Gravity.CENTER;background=round(Color.argb(25,Color.red(color),Color.green(color),Color.blue(color)),18)},size(dp(48),dp(48)))
+        addView(column(Color.TRANSPARENT).apply{addView(txt(title,12.6f,ink,true));addView(gap(2));addView(txt(sub,9.5f,muted,false))},LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(8)})
+        addView(txt("›",22f,color,true).apply{gravity=Gravity.CENTER},size(dp(24),dp(48)))
+        setOnClickListener{click()}
     }
 
     private fun fullCard(symbol:String,title:String,color:Int,height:Int,click:()->Unit)=row(color).apply{gravity=Gravity.CENTER_VERTICAL;background=round(color,12);setPadding(dp(12),0,dp(12),0);addView(txt(symbol,25f,Color.WHITE,true).apply{gravity=Gravity.CENTER},size(dp(48),-1));addView(txt(title,14f,Color.WHITE,true).apply{gravity=Gravity.CENTER_VERTICAL},LinearLayout.LayoutParams(0,-2,1f));addView(txt("›",24f,Color.WHITE,false).apply{gravity=Gravity.CENTER},size(dp(30),-1));setOnClickListener{click()};layoutParams=LinearLayout.LayoutParams(-1,height)}
@@ -359,10 +421,11 @@ class FullBetaActivity : Activity() {
         root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM))
         root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i};root.requestApplyInsets();return root
     }
-    private fun bottomNav(active:String): LinearLayout = row(surface).apply {
+    private fun bottomNav(active:String): LinearLayout = row(Color.TRANSPARENT).apply {
         gravity = Gravity.CENTER
-        setPadding(dp(3),dp(3),dp(3),dp(3))
-        background = GradientDrawable().apply { setColor(surface); setStroke(dp(1),line) }
+        setPadding(dp(4),dp(4),dp(4),dp(4))
+        background = gradient(navy,accent,0)
+        val inactive=Color.argb(185,255,255,255)
         val items = listOf(
             Triple("▦","Nghiệp vụ","BUSINESS"),
             Triple("◉","Nhân sự","STAFF"),
@@ -371,15 +434,15 @@ class FullBetaActivity : Activity() {
             Triple("⚙","Cài đặt","SETTINGS")
         )
         items.forEach { item ->
-            val cell = column(surface).apply {
+            val chosen=item.third==active
+            val cell = column(Color.TRANSPARENT).apply {
                 gravity = Gravity.CENTER
-                addView(txt(item.first,17f,if(item.third==active)teal else muted,true).apply { gravity=Gravity.CENTER })
-                addView(txt(item.second,8.4f,if(item.third==active)teal else muted,item.third==active).apply { gravity=Gravity.CENTER; maxLines=1 })
-                setOnClickListener { _ ->
-                    if(item.third=="BUSINESS") dashboard() else openModule(item.third)
-                }
+                if(chosen) background=round(Color.argb(35,255,255,255),10)
+                addView(txt(item.first,17f,if(chosen)Color.WHITE else inactive,true).apply { gravity=Gravity.CENTER })
+                addView(txt(item.second,8.4f,if(chosen)Color.WHITE else inactive,chosen).apply { gravity=Gravity.CENTER; maxLines=1 })
+                setOnClickListener { _ -> if(item.third=="BUSINESS") dashboard() else openModule(item.third) }
             }
-            addView(cell,LinearLayout.LayoutParams(0,-1,1f))
+            addView(cell,LinearLayout.LayoutParams(0,-1,1f).apply{marginStart=dp(1);marginEnd=dp(1)})
         }
     }
 
@@ -394,6 +457,7 @@ class FullBetaActivity : Activity() {
     private fun row(c:Int)=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setBackgroundColor(c)}
     private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(h))}
     private fun round(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
+    private fun gradient(a:Int,b:Int,r:Int)=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(a,b)).apply{cornerRadius=dp(r).toFloat()}
     private fun outline()=GradientDrawable().apply{setColor(surface);cornerRadius=dp(7).toFloat();setStroke(dp(1),line)}
     private fun outlineBg(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat();setStroke(dp(1),line)}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()

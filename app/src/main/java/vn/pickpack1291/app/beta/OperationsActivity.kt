@@ -6,6 +6,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.transition.Fade
+import android.transition.TransitionManager
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
@@ -33,6 +35,7 @@ class OperationsActivity : Activity() {
     private val green = Color.rgb(36,153,85)
     private val orange = Color.rgb(217,119,6)
     private val teal:Int get()=ThemeManager.primary(this)
+    private val accent:Int get()=ThemeManager.accent(this)
     private val bg:Int get()=ThemeManager.background(this)
     private val surface = Color.WHITE
     private val ink = Color.rgb(24,44,42)
@@ -51,6 +54,8 @@ class OperationsActivity : Activity() {
     private var initialMnv = ""
     private var screenState = "ROOT"
     private var syncText: TextView? = null
+    private var contentHost: FrameLayout? = null
+    private var navHost: FrameLayout? = null
     private val foregroundSync by lazy {
         ForegroundSyncCoordinator(this, syncApi, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
@@ -74,10 +79,10 @@ class OperationsActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        window.statusBarColor = Color.WHITE
+        window.statusBarColor = ThemeManager.primaryDark(this)
         window.navigationBarColor = Color.WHITE
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         module = intent.getStringExtra("module") ?: "LISTS"
         login = intent.getStringExtra("login") ?: ""
         name = intent.getStringExtra("name") ?: login
@@ -389,14 +394,27 @@ class OperationsActivity : Activity() {
     private fun simpleMessage(title:String,message:String){val root=baseRoot(title);val body=body();body.addView(info("ⓘ $message"));attach(root,body)}
     private fun baseRoot(title:String)=column(bg).apply{addView(appBar(title))}
     private fun body()=column(bg).apply{setPadding(dp(12),dp(11),dp(12),dp(88))}
-    private fun attach(root:LinearLayout,body:LinearLayout){root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setContentView(host(root))}
-    private fun appBar(title:String)=row(navy).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(6),dp(8),dp(6));addView(txt("‹",30f,Color.WHITE,false).apply{gravity=Gravity.CENTER;setOnClickListener{navigateBack()}},size(dp(40),dp(44)));addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f));syncText=txt("↻ Đang nối",8.8f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(4),dp(4),dp(4),dp(4))};addView(syncText,size(dp(102),dp(40)))}
+    private fun attach(root:LinearLayout,body:LinearLayout){
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f))
+        val frame=contentHost
+        if(frame==null){setContentView(host(root));return}
+        TransitionManager.beginDelayedTransition(frame,Fade().apply{duration=150})
+        frame.removeAllViews();frame.addView(root,FrameLayout.LayoutParams(-1,-1))
+        navHost?.let{nav->nav.removeAllViews();nav.addView(bottomNav(),FrameLayout.LayoutParams(-1,-1))}
+    }
+    private fun appBar(title:String)=row(Color.TRANSPARENT).apply{
+        gravity=Gravity.CENTER_VERTICAL;setPadding(dp(8),dp(7),dp(8),dp(7));background=gradient(navy,accent,0)
+        addView(txt("‹",30f,Color.WHITE,false).apply{gravity=Gravity.CENTER;setOnClickListener{navigateBack()}},size(dp(40),dp(44)))
+        addView(txt(title,16.5f,Color.WHITE,true),LinearLayout.LayoutParams(0,-2,1f))
+        syncText=txt("↻ Đang nối",8.5f,Color.WHITE,true).apply{gravity=Gravity.CENTER;maxLines=2;setPadding(dp(5),dp(4),dp(5),dp(4));background=round(Color.argb(35,255,255,255),12)}
+        addView(syncText,size(dp(102),dp(40)))
+    }
     private fun activeTab()=when(module){"STAFF"->"STAFF";"HISTORY"->"HISTORY";"SYNC"->"SYNC";"SETTINGS"->"SETTINGS";else->"BUSINESS"}
-    private fun bottomNav(): LinearLayout = row(surface).apply {
+    private fun bottomNav(): LinearLayout = row(Color.TRANSPARENT).apply {
         gravity=Gravity.CENTER
-        setPadding(dp(3),dp(3),dp(3),dp(3))
-        background=GradientDrawable().apply { setColor(surface); setStroke(dp(1),line) }
-        val active=activeTab()
+        setPadding(dp(4),dp(4),dp(4),dp(4))
+        background=gradient(navy,accent,0)
+        val active=activeTab();val inactive=Color.argb(185,255,255,255)
         val items=listOf(
             Triple("▦","Nghiệp vụ","BUSINESS"),
             Triple("◉","Nhân sự","STAFF"),
@@ -405,17 +423,34 @@ class OperationsActivity : Activity() {
             Triple("⚙","Cài đặt","SETTINGS")
         )
         items.forEach { item ->
-            val cell=column(surface).apply {
+            val chosen=item.third==active
+            val cell=column(Color.TRANSPARENT).apply {
                 gravity=Gravity.CENTER
-                addView(txt(item.first,17f,if(item.third==active)teal else muted,true).apply { gravity=Gravity.CENTER })
-                addView(txt(item.second,8.4f,if(item.third==active)teal else muted,item.third==active).apply { gravity=Gravity.CENTER; maxLines=1 })
+                if(chosen)background=round(Color.argb(35,255,255,255),10)
+                addView(txt(item.first,17f,if(chosen)Color.WHITE else inactive,true).apply { gravity=Gravity.CENTER })
+                addView(txt(item.second,8.4f,if(chosen)Color.WHITE else inactive,chosen).apply { gravity=Gravity.CENTER; maxLines=1 })
                 setOnClickListener { _ -> navigateTab(item.third) }
             }
-            addView(cell,LinearLayout.LayoutParams(0,-1,1f))
+            addView(cell,LinearLayout.LayoutParams(0,-1,1f).apply{marginStart=dp(1);marginEnd=dp(1)})
         }
     }
 
-    private fun navigateTab(target:String){if(target==activeTab())return;if(target=="BUSINESS"){finish();return};startActivity(Intent(this,OperationsActivity::class.java).apply{putExtra("module",target);putExtra("login",login);putExtra("name",name);putExtra("role",role);putExtra("position",position);putExtra("email",email)});finish()}
+    private fun navigateTab(target:String){
+        if(target==activeTab())return
+        if(target=="BUSINESS"){
+            finish()
+            @Suppress("DEPRECATION")
+            overridePendingTransition(android.R.anim.fade_in,android.R.anim.fade_out)
+            return
+        }
+        module=target;initialMnv=""
+        when(target){
+            "STAFF"->staffScreen()
+            "HISTORY"->historyScreen()
+            "SYNC"->syncScreen()
+            "SETTINGS"->settingsScreen()
+        }
+    }
 
     private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}
     private fun showError(raw:String){val msg=when{raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"MNV đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"MNV không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("EMAIL_INVALID")->"Địa chỉ mail không hợp lệ.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy nhân sự.";raw.contains("STAFF_ACTIVE_SESSION")->"Nhân sự đang có phiên ACTIVE, chưa thể xóa.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}
@@ -438,7 +473,17 @@ class OperationsActivity : Activity() {
     private fun spinner(items:Array<String>)=Spinner(this).apply{adapter=ArrayAdapter(this@OperationsActivity,android.R.layout.simple_spinner_dropdown_item,items);setPadding(dp(7),dp(3),dp(7),dp(3));minimumHeight=dp(46);background=outline()}
     private fun primary(t:String,c:Int,click:()->Unit)=Button(this).apply{text=t;textSize=12.2f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;isAllCaps=false;minHeight=dp(48);background=round(c,7);setOnClickListener{click()}}
     private fun smallButton(t:String,c:Int)=Button(this).apply{text=t;textSize=9.5f;setTextColor(Color.WHITE);typeface=Typeface.DEFAULT_BOLD;isAllCaps=false;background=round(c,6);setPadding(dp(3),0,dp(3),0)}
-    private fun host(content:View):View{val root=EdgeSwipeBackLayout(this){navigateBack()}.apply{setBackgroundColor(bg)};root.addView(content,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(82)});root.addView(bottomNav(),FrameLayout.LayoutParams(-1,dp(60),Gravity.BOTTOM).apply{bottomMargin=dp(20)});root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM));root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i};root.requestApplyInsets();return root}
+    private fun host(content:View):View{
+        val root=EdgeSwipeBackLayout(this){navigateBack()}.apply{setBackgroundColor(bg)}
+        val contentFrame=FrameLayout(this).apply{addView(content,FrameLayout.LayoutParams(-1,-1))}
+        val navFrame=FrameLayout(this).apply{addView(bottomNav(),FrameLayout.LayoutParams(-1,-1))}
+        contentHost=contentFrame;navHost=navFrame
+        root.addView(contentFrame,FrameLayout.LayoutParams(-1,-1).apply{bottomMargin=dp(82)})
+        root.addView(navFrame,FrameLayout.LayoutParams(-1,dp(60),Gravity.BOTTOM).apply{bottomMargin=dp(20)})
+        root.addView(txt(FOOTER,8f,Color.rgb(113,122,136),false).apply{gravity=Gravity.CENTER;maxLines=1},FrameLayout.LayoutParams(-1,dp(20),Gravity.BOTTOM))
+        root.setOnApplyWindowInsetsListener{v,i->val top:Int;val bottom:Int;if(Build.VERSION.SDK_INT>=30){top=i.getInsets(WindowInsets.Type.statusBars()).top;bottom=i.getInsets(WindowInsets.Type.navigationBars()).bottom}else{@Suppress("DEPRECATION")val tt=i.systemWindowInsetTop;@Suppress("DEPRECATION")val bb=i.systemWindowInsetBottom;top=tt;bottom=bb};v.setPadding(0,top+dp(5),0,bottom+dp(2));i}
+        root.requestApplyInsets();return root
+    }
     private fun jsonStrings(a:JSONArray?):MutableList<String>{val out=mutableListOf<String>();if(a!=null)for(i in 0 until a.length()){val v=a.optString(i);if(v.isNotBlank())out.add(v)};return out}
     private fun selectByValue(sp:Spinner,values:List<String>,target:String){val i=values.indexOf(target);if(i>=0)sp.setSelection(i)}
     private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Bangkok")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}catch(_:Throwable){v}}
@@ -451,6 +496,7 @@ class OperationsActivity : Activity() {
     private fun row(c:Int)=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setBackgroundColor(c)}
     private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(h))}
     private fun round(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat()}
+    private fun gradient(a:Int,b:Int,r:Int)=GradientDrawable(GradientDrawable.Orientation.TL_BR,intArrayOf(a,b)).apply{cornerRadius=dp(r).toFloat()}
     private fun outline()=GradientDrawable().apply{setColor(surface);cornerRadius=dp(7).toFloat();setStroke(dp(1),line)}
     private fun outlineBg(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerRadius=dp(r).toFloat();setStroke(dp(1),line)}
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
