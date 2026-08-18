@@ -25,9 +25,10 @@ jobs:
           gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-release-beta8-recovery.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/release.json
           gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-release-beta8-recovery-v2.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/releasev2.json
           gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-cancel-stuck-release.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/cancel.json
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow s08-finalize-direct-beta8.yml --limit 5 --json databaseId,status,conclusion,headSha,displayTitle > /tmp/final.json
           python3 - <<'PY'
           import json
-          out={'s08':json.load(open('/tmp/s08.json')),'preflight':json.load(open('/tmp/preflight.json')),'release':json.load(open('/tmp/release.json')),'release_v2':json.load(open('/tmp/releasev2.json')),'cancel':json.load(open('/tmp/cancel.json'))}
+          out={'s08':json.load(open('/tmp/s08.json')),'preflight':json.load(open('/tmp/preflight.json')),'release':json.load(open('/tmp/release.json')),'release_v2':json.load(open('/tmp/releasev2.json')),'cancel':json.load(open('/tmp/cancel.json')),'final':json.load(open('/tmp/final.json'))}
           open('ops/s08-status.json','w').write(json.dumps(out,separators=(',',':'))+'\n')
           PY
           git config user.name 'github-actions[bot]'
