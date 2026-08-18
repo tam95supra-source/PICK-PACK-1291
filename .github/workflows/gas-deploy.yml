@@ -6,6 +6,10 @@ on:
     branches: [ main ]
     paths:
       - 'ops/gas-deploy-trigger.txt'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/gas-deploy-trigger.txt'
 
 concurrency:
   group: gas-live-deploy
