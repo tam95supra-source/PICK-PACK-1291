@@ -32,6 +32,7 @@ jobs:
           files=[Path(f'.m1-source/chunk-{i:02d}.b64') for i in range(4)]
           text=''.join(p.read_text(encoding='utf-8-sig') for p in files)
           compact=re.sub(r'\s+', '', text)
+          compact += '=' * (-len(compact) % 4)
           data=base64.b64decode(compact, validate=True)
           digest=hashlib.sha256(data).hexdigest()
           expected='8082900892389b11333caa08b50cd37a02b2864391ff64d40d36e7d750f0e176'
