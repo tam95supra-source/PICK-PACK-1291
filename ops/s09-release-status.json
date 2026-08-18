@@ -11,12 +11,12 @@
   ],
   "app-fast-check.yml": [
     {
-      "conclusion": "",
+      "conclusion": "success",
       "createdAt": "2026-08-18T04:27:52Z",
       "databaseId": 32099239199,
       "displayTitle": "ci: align fast guards with semantic icons and Admin rules",
       "headSha": "33290bdb0a55f8b52178b89e83a534dff2e53d0a",
-      "status": "in_progress"
+      "status": "completed"
     },
     {
       "conclusion": "success",
@@ -36,6 +36,14 @@
     }
   ],
   "release-preflight.yml": [
+    {
+      "conclusion": "",
+      "createdAt": "2026-08-18T04:29:48Z",
+      "databaseId": 32099353669,
+      "displayTitle": "ops: run beta9 release preflight",
+      "headSha": "9ad4eba18e2af9e823a0f3f0e69ca67375420253",
+      "status": "in_progress"
+    },
     {
       "conclusion": "success",
       "createdAt": "2026-08-18T03:20:10Z",
