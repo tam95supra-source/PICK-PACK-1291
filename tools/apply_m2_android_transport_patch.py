@@ -33,7 +33,6 @@ old = '''      val result = when (action) {
           else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
       }
 '''
-# BetaApiClient intentionally has two leading spaces before try but six before this block.
 if s.count(old) != 1:
     start = s.find('      val result = when (action) {')
     end = s.find('      if (result.ok) {', start)
@@ -44,7 +43,11 @@ if s.count(old) != 1:
     if not all(x in candidate for x in required):
         raise SystemExit("M2 patch call structural contract mismatch")
     old = candidate
-new = '''      val m2 = if (action in M2ServiceTransport.OPERATIONAL) m2Transport.operational(action, payload) else null
+new = '''      val m2 = when {
+          action in M2ServiceTransport.OPERATIONAL -> m2Transport.operational(action, payload)
+          action in M2ServiceTransport.SYNC_ACTIONS -> m2Transport.sync(action, payload)
+          else -> null
+      }
       val result = if (m2?.handled == true) {
           Result(m2.ok, m2.code, m2.json, m2.error)
       } else when (action) {
