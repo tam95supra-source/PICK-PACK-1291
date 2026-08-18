@@ -1,14 +1,22 @@
-name: Verify Beta OTA
+name: Verify OTA - Beta and Stable
 
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: OTA channel
+        required: true
+        default: BETA
+        type: choice
+        options:
+          - BETA
+          - STABLE
       from_version:
-        description: Previous Beta version
+        description: Previous version on the selected channel
         required: true
         type: string
       target_version:
-        description: Published Beta version
+        description: Published target version
         required: true
         type: string
       expected_sha256:
@@ -19,9 +27,10 @@ on:
     branches: [ main ]
     paths:
       - 'ops/beta-ota-verify-trigger.txt'
+      - 'ops/stable-ota-verify-trigger.txt'
 
 concurrency:
-  group: beta-ota-verify
+  group: ota-verify
   cancel-in-progress: false
 
 permissions:
@@ -36,6 +45,8 @@ jobs:
       EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Resolve release target
         id: target
@@ -43,16 +54,43 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CHANNEL='${{ inputs.channel }}'
             FROM='${{ inputs.from_version }}'
             VERSION='${{ inputs.target_version }}'
             SHA='${{ inputs.expected_sha256 }}'
           else
-            test -f ops/beta-ota-verify-trigger.txt
-            FROM=$(sed -n 's/^from_version=//p' ops/beta-ota-verify-trigger.txt | tail -1)
-            VERSION=$(sed -n 's/^target_version=//p' ops/beta-ota-verify-trigger.txt | tail -1)
-            SHA=$(sed -n 's/^expected_sha256=//p' ops/beta-ota-verify-trigger.txt | tail -1)
+            CHANGED=$(git diff --name-only HEAD^ HEAD || true)
+            BETA_CHANGED=false
+            STABLE_CHANGED=false
+            grep -qx 'ops/beta-ota-verify-trigger.txt' <<<"$CHANGED" && BETA_CHANGED=true || true
+            grep -qx 'ops/stable-ota-verify-trigger.txt' <<<"$CHANGED" && STABLE_CHANGED=true || true
+            if [[ "$BETA_CHANGED" == true && "$STABLE_CHANGED" == true ]]; then
+              echo 'Exactly one OTA trigger file may change per verification commit.' >&2
+              exit 1
+            elif [[ "$STABLE_CHANGED" == true ]]; then
+              CHANNEL=STABLE
+              TRIGGER=ops/stable-ota-verify-trigger.txt
+            else
+              CHANNEL=BETA
+              TRIGGER=ops/beta-ota-verify-trigger.txt
+            fi
+            test -f "$TRIGGER"
+            FROM=$(sed -n 's/^from_version=//p' "$TRIGGER" | tail -1)
+            VERSION=$(sed -n 's/^target_version=//p' "$TRIGGER" | tail -1)
+            SHA=$(sed -n 's/^expected_sha256=//p' "$TRIGGER" | tail -1)
           fi
+          [[ "$CHANNEL" == BETA || "$CHANNEL" == STABLE ]]
           [[ -n "$FROM" && -n "$VERSION" && "$SHA" =~ ^[0-9a-fA-F]{64}$ ]]
+          if [[ "$CHANNEL" == BETA ]]; then
+            PACKAGE='vn.pickpack1291.app.beta.publicbeta'
+            OTHER_CHANNEL=STABLE
+          else
+            PACKAGE='vn.pickpack1291.app.stable'
+            OTHER_CHANNEL=BETA
+          fi
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "other_channel=$OTHER_CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
           echo "from=$FROM" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "sha=$(tr 'A-F' 'a-f' <<<"$SHA")" >> "$GITHUB_OUTPUT"
@@ -60,13 +98,14 @@ jobs:
       - name: Verify live update discovery and download
         shell: bash
         env:
+          CHANNEL: ${{ steps.target.outputs.channel }}
           FROM_VERSION: ${{ steps.target.outputs.from }}
           TARGET_VERSION: ${{ steps.target.outputs.version }}
           EXPECTED_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
           curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
-            -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$FROM_VERSION\"}" > /tmp/from.json
+            -d "{\"action\":\"update_check\",\"channel\":\"$CHANNEL\",\"current_version\":\"$FROM_VERSION\"}" > /tmp/from.json
           python3 - <<'PY'
           import json,os
           j=json.load(open('/tmp/from.json'))
@@ -75,13 +114,13 @@ jobs:
           assert str(j.get('version','')) == os.environ['TARGET_VERSION'], j
           assert str(j.get('sha256','')).lower() == os.environ['EXPECTED_SHA'].lower(), j
           assert str(j.get('source','')) == 'GOOGLE_DRIVE', j
-          assert str(j.get('channel','')) == 'BETA', j
+          assert str(j.get('channel','')) == os.environ['CHANNEL'], j
           url=j.get('download_url') or j.get('url') or ''
           assert url, j
           open('/tmp/url.txt','w').write(url)
           PY
-          curl -fL --retry 4 --retry-delay 2 "$(cat /tmp/url.txt)" -o /tmp/beta.apk
-          ACTUAL=$(sha256sum /tmp/beta.apk | awk '{print $1}')
+          curl -fL --retry 4 --retry-delay 2 "$(cat /tmp/url.txt)" -o /tmp/ota.apk
+          ACTUAL=$(sha256sum /tmp/ota.apk | awk '{print $1}')
           [[ "$ACTUAL" == "$EXPECTED_SHA" ]]
 
       - uses: actions/setup-java@v4
@@ -114,35 +153,41 @@ jobs:
         shell: bash
         env:
           TARGET_VERSION: ${{ steps.target.outputs.version }}
+          EXPECTED_PACKAGE: ${{ steps.target.outputs.package }}
         run: |
           set -euo pipefail
           BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
-          "$BT/aapt" dump badging /tmp/beta.apk > /tmp/badge.txt
-          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          "$BT/aapt" dump badging /tmp/ota.apk > /tmp/badge.txt
+          grep -q "package: name='$EXPECTED_PACKAGE'" /tmp/badge.txt
           grep -q "versionName='$TARGET_VERSION'" /tmp/badge.txt
-          "$BT/apksigner" verify --verbose --print-certs /tmp/beta.apk > /tmp/cert.txt
+          "$BT/apksigner" verify --verbose --print-certs /tmp/ota.apk > /tmp/cert.txt
           CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
           [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
 
-      - name: Verify self-update false and Stable isolation
+      - name: Verify self-update false and opposite-channel isolation
         shell: bash
         env:
+          CHANNEL: ${{ steps.target.outputs.channel }}
+          OTHER_CHANNEL: ${{ steps.target.outputs.other_channel }}
           TARGET_VERSION: ${{ steps.target.outputs.version }}
         run: |
           set -euo pipefail
           curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
-            -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_VERSION\"}" > /tmp/self.json
+            -d "{\"action\":\"update_check\",\"channel\":\"$CHANNEL\",\"current_version\":\"$TARGET_VERSION\"}" > /tmp/self.json
           curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
-            -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+            -d "{\"action\":\"update_check\",\"channel\":\"$OTHER_CHANNEL\",\"current_version\":\"0.0.0\"}" > /tmp/other.json
           python3 - <<'PY'
           import json,os
-          s=json.load(open('/tmp/self.json')); t=json.load(open('/tmp/stable.json'))
+          s=json.load(open('/tmp/self.json')); o=json.load(open('/tmp/other.json'))
           assert s.get('ok') is True and s.get('update_available') is False, s
-          assert t.get('ok') is True, t
-          assert str(t.get('channel','')) == 'STABLE', t
-          assert str(t.get('version','')) != os.environ['TARGET_VERSION'], t
+          assert str(s.get('channel','')) == os.environ['CHANNEL'], s
+          assert o.get('ok') is True, o
+          assert str(o.get('channel','')) == os.environ['OTHER_CHANNEL'], o
+          assert str(o.get('version','')) != os.environ['TARGET_VERSION'], o
           PY
 
       - name: OTA gate result
+        env:
+          CHANNEL: ${{ steps.target.outputs.channel }}
         run: |
-          echo 'PASS - Beta OTA discovery, live download SHA, package/version, fixed signer, self-update and Stable isolation.'
+          echo "PASS - $CHANNEL OTA discovery, live download SHA, package/version, fixed signer, self-update and opposite-channel isolation."
