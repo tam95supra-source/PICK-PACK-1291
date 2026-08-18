@@ -103,10 +103,35 @@ function ppM2OperationalRoute_(auth,body,action,fallbackFn){
   return result;
 }
 
+function ppM2BeginReconcile_(auth,body){
+  if(!auth||String(auth.role)!=='SUPERADMIN')return {ok:false,error:'SUPERADMIN_REQUIRED'};
+  if(String(body.confirmation||'')!=='OWNER_LOCKED_M2_FAILBACK')return {ok:false,error:'FAILBACK_CONFIRMATION_REQUIRED'};
+  const lock=LockService.getScriptLock();if(!lock.tryLock(5000))return {ok:false,error:'RECONCILE_BUSY'};
+  try{
+    const p=ppM2Props_(),mode=ppM2Mode_();if(mode!=='GOOGLE_FALLBACK')return {ok:false,error:'RECONCILE_REQUIRES_GOOGLE_FALLBACK',mode:mode};
+    p.setProperty('PP_M2_AUTHORITY_MODE','RECONCILING');p.setProperty('PP_M2_RECONCILE_STARTED_AT',new Date().toISOString());p.setProperty('PP_M2_RECONCILE_BY',String(auth.login_id||''));
+    return {ok:true,authority_mode:'RECONCILING',authority_epoch:ppM2Epoch_(),fallback_seq:Number(p.getProperty('PP_M2_FALLBACK_SEQ')||'0')};
+  } finally {lock.releaseLock();}
+}
+
 function ppM2FlushFallbackInbox_(){
-  if(ppM2Mode_()!=='GOOGLE_FALLBACK'||!ppM2ValidServiceUrl_(ppM2ServiceUrl_())||!ppM2BridgeSecret_())return {ok:false,error:'FALLBACK_FLUSH_NOT_READY'};
-  const sh=ppM2FallbackSheet_(),last=sh.getLastRow();if(last<2)return {ok:true,sent:0};
-  const rows=sh.getRange(2,1,last-1,13).getDisplayValues();let sent=0;
-  rows.forEach(function(r,i){if(String(r[12]||'')!=='PENDING')return;const payload={event_id:r[0],authority_epoch:Number(r[1]),authority_seq:Number(r[2]),service_generation:r[3],event:{action:r[4],business_date:r[5],actor:r[6],role:r[7],device_id:r[8],occurred_at:r[9],payload_json:r[10]},checksum:r[11]};try{const x=ppM2ServiceFetch_('/internal/fallback/ingest',payload);if(x.code>=200&&x.code<300&&x.json&&x.json.ok){sh.getRange(i+2,13).setValue('INGESTED');sent++;}}catch(_){}});
-  return {ok:true,sent:sent};
+  const mode=ppM2Mode_();if((mode!=='GOOGLE_FALLBACK'&&mode!=='RECONCILING')||!ppM2ValidServiceUrl_(ppM2ServiceUrl_())||!ppM2BridgeSecret_())return {ok:false,error:'FALLBACK_FLUSH_NOT_READY',mode:mode};
+  const sh=ppM2FallbackSheet_(),last=sh.getLastRow();if(last<2)return {ok:true,sent:0,pending:0};
+  const rows=sh.getRange(2,1,last-1,13).getDisplayValues();let sent=0,pending=0;
+  rows.forEach(function(r,i){if(String(r[12]||'')!=='PENDING')return;pending++;const payload={event_id:r[0],authority_epoch:Number(r[1]),authority_seq:Number(r[2]),service_generation:r[3],event:{action:r[4],business_date:r[5],actor:r[6],role:r[7],device_id:r[8],occurred_at:r[9],payload_json:r[10]},checksum:r[11]};try{const x=ppM2ServiceFetch_('/internal/fallback/ingest',payload);if(x.code>=200&&x.code<300&&x.json&&x.json.ok){sh.getRange(i+2,13).setValue('INGESTED');sent++;pending--;}}catch(_){}});
+  return {ok:pending===0,sent:sent,pending:pending,authority_epoch:ppM2Epoch_()};
+}
+
+function ppM2CompleteFailback_(auth,body){
+  if(!auth||String(auth.role)!=='SUPERADMIN')return {ok:false,error:'SUPERADMIN_REQUIRED'};
+  if(String(body.confirmation||'')!=='OWNER_LOCKED_M2_FAILBACK')return {ok:false,error:'FAILBACK_CONFIRMATION_REQUIRED'};
+  const nextEpoch=Number(body.authority_epoch||0),generation=String(body.service_generation||''),url=String(body.service_url||ppM2ServiceUrl_());
+  if(ppM2Mode_()!=='RECONCILING')return {ok:false,error:'FAILBACK_COMPLETE_REQUIRES_RECONCILING',mode:ppM2Mode_()};
+  if(nextEpoch<=ppM2Epoch_()||!generation||!ppM2ValidServiceUrl_(url)||!ppM2BridgeSecret_())return {ok:false,error:'FAILBACK_TARGET_INVALID'};
+  const sh=ppM2FallbackSheet_(),last=sh.getLastRow();if(last>=2){const statuses=sh.getRange(2,13,last-1,1).getDisplayValues().flat();if(statuses.some(function(x){return String(x)==='PENDING';}))return {ok:false,error:'FALLBACK_EVENTS_NOT_INGESTED'};}
+  const lock=LockService.getScriptLock();if(!lock.tryLock(5000))return {ok:false,error:'FAILBACK_COMPLETE_BUSY'};
+  try{
+    const p=ppM2Props_();p.setProperty('PP_M2_SERVICE_URL',url.replace(/\/+$/,''));p.setProperty('PP_M2_AUTHORITY_EPOCH',String(nextEpoch));p.setProperty('PP_M2_AUTHORITY_MODE','SERVICE_PRIMARY');p.setProperty('PP_M2_SERVICE_GENERATION',generation);p.setProperty('PP_M2_FALLBACK_SEQ','0');p.setProperty('PP_M2_FAILBACK_COMPLETED_AT',new Date().toISOString());ppM2ClearServiceFailure_();
+    return {ok:true,authority_mode:'SERVICE_PRIMARY',authority_epoch:nextEpoch,service_generation:generation,service_url:url};
+  } finally {lock.releaseLock();}
 }
