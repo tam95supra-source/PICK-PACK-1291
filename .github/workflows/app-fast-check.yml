@@ -9,10 +9,6 @@ on:
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
-      - 'ARCHITECTURE_GUARDRAILS.md'
-      - 'AGENTS.md'
-      - 'docs/UI_UX_SYSTEM.md'
-      - 'docs/BUILD_RELEASE_PLAYBOOK.md'
       - '.github/workflows/app-fast-check.yml'
   workflow_dispatch:
 
@@ -24,14 +20,47 @@ permissions:
   contents: read
 
 jobs:
-  fast-check:
+  changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 3
+    outputs:
+      android: ${{ steps.scope.outputs.android }}
+      gas: ${{ steps.scope.outputs.gas }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo 'android=true' >> "$GITHUB_OUTPUT"
+            echo 'gas=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          BEFORE='${{ github.event.before }}'
+          if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then
+            FILES=$(git ls-files)
+          else
+            FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+          fi
+          ANDROID=false
+          GAS=false
+          if grep -Eq '^(app/|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
+          if grep -Eq '^(google-apps-script/|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
+          echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
+          echo "gas=$GAS" >> "$GITHUB_OUTPUT"
+          printf 'Changed files:\n%s\nAndroid build: %s | GAS syntax: %s\n' "$FILES" "$ANDROID" "$GAS"
+
+  static-guards:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       EXPECTED_OWNER_ICON_SHA256: 371d0e5ad552e3cf63eef60a3da270896946458a506252a7fa132a67747c7a5d
     steps:
       - uses: actions/checkout@v4
-
       - name: Static project guards
         shell: bash
         run: |
@@ -58,18 +87,26 @@ jobs:
           ! grep -R -n 'overridePendingTransition(android.R.anim.fade_in' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
-          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
-          node --check /tmp/PICK_PACK_API.js
+          if [[ "${{ needs.changes.outputs.gas }}" == "true" ]]; then
+            cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+            node --check /tmp/PICK_PACK_API.js
+          fi
+          echo 'PASS - static guards.'
 
+  android-debug:
+    needs: [changes, static-guards]
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
-
       - name: Resolve exact Android SDK
         shell: bash
         run: |
@@ -92,12 +129,10 @@ jobs:
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
-
       - name: Assemble Beta and Stable debug
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon --build-cache :app:assembleBetaDebug :app:assembleStableDebug
-
+          gradle --no-daemon --build-cache --parallel :app:assembleBetaDebug :app:assembleStableDebug
       - name: Fast check result
-        run: echo 'PASS - static guards + GAS syntax + Beta Debug + Stable Debug.'
+        run: echo 'PASS - Beta Debug + Stable Debug.'
