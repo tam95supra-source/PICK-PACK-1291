@@ -48,19 +48,12 @@ jobs:
           SUM_NAME: ${{ steps.meta.outputs.sum }}
         run: |
           set -euo pipefail
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
-            -H 'Content-Type: application/x-www-form-urlencoded' \
-            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
-            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
-            --data-urlencode 'grant_type=refresh_token')
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"
           Q="'${OTA_BETA_FOLDER_ID}' in parents and trashed=false and (name='${APK_NAME}' or name='${SUM_NAME}')"
-          curl -fsS -G -H "Authorization: Bearer $TOKEN" \
-            --data-urlencode "q=$Q" --data-urlencode 'fields=files(id,name)' \
-            'https://www.googleapis.com/drive/v3/files' > /tmp/existing.json
+          curl -fsS -G -H "Authorization: Bearer $TOKEN" --data-urlencode "q=$Q" --data-urlencode 'fields=files(id,name)' 'https://www.googleapis.com/drive/v3/files' > /tmp/existing.json
           COUNT=$(python3 -c 'import json; print(len(json.load(open("/tmp/existing.json")).get("files",[])))')
           test "$COUNT" = 0 || { cat /tmp/existing.json; echo 'Beta version already exists on Drive' >&2; exit 1; }
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
@@ -93,11 +86,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}"; test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}"
-          curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pick-pack-1291-signing" > "$RUNNER_TEMP/oidc.json"
+          curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=pick-pack-1291-signing" > "$RUNNER_TEMP/oidc.json"
           OIDC_TOKEN=$(jq -er '.value' "$RUNNER_TEMP/oidc.json")
-          curl -fsS --retry 3 --retry-all-errors -X POST "$SIGNING_BROKER_URL" \
-            -H "Authorization: Bearer $OIDC_TOKEN" > "$RUNNER_TEMP/signing.json"
+          curl -fsS --retry 3 --retry-all-errors -X POST "$SIGNING_BROKER_URL" -H "Authorization: Bearer $OIDC_TOKEN" > "$RUNNER_TEMP/signing.json"
           jq -e '.ok == true and .repository == "tam95supra-source/pick-pack-1291" and .alias == "pickpack1291"' "$RUNNER_TEMP/signing.json" >/dev/null
           jq -er '.keystore_b64' "$RUNNER_TEMP/signing.json" | base64 -d > "$RUNNER_TEMP/release.jks"
           jq -er '.store_password' "$RUNNER_TEMP/signing.json" > "$RUNNER_TEMP/store.pass"
@@ -120,10 +111,7 @@ jobs:
           UNSIGNED=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           test -s "$UNSIGNED"
           mkdir -p dist
-          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign \
-            --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$(cat "$RUNNER_TEMP/key.alias")" \
-            --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" \
-            --out "dist/$APK_NAME" "$UNSIGNED"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$(cat "$RUNNER_TEMP/key.alias")" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "dist/$APK_NAME" "$UNSIGNED"
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "dist/$APK_NAME" | tee /tmp/cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_CERT_SHA256" /tmp/cert.txt
           "$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt" dump badging "dist/$APK_NAME" > /tmp/badge.txt
@@ -144,26 +132,15 @@ jobs:
           set -euo pipefail
           upload_file() {
             local NAME="$1" MIME="$2" PATHNAME="$3" OUT="$4"
-            python3 - "$NAME" "$OTA_BETA_FOLDER_ID" "$VERSION" <<'PY' > /tmp/meta.json
-import json,sys
-print(json.dumps({'name':sys.argv[1],'parents':[sys.argv[2]],'description':'Pick Pack 1291 Beta OTA '+sys.argv[3]+' - full function validation build'},ensure_ascii=False))
-PY
-            curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" \
-              -F "metadata=@/tmp/meta.json;type=application/json;charset=UTF-8" \
-              -F "file=@${PATHNAME};type=${MIME}" \
-              'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,md5Checksum' > "$OUT"
-            python3 - "$OUT" <<'PY'
-import json,sys
-j=json.load(open(sys.argv[1])); assert j.get('id') and j.get('name') and int(j.get('size',0))>0, j
-PY
+            python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"parents":[sys.argv[2]],"description":"Pick Pack 1291 Beta OTA "+sys.argv[3]+" - full function validation build"},ensure_ascii=False))' "$NAME" "$OTA_BETA_FOLDER_ID" "$VERSION" > /tmp/meta.json
+            curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -F "metadata=@/tmp/meta.json;type=application/json;charset=UTF-8" -F "file=@${PATHNAME};type=${MIME}" 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,md5Checksum' > "$OUT"
+            python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); assert j.get("id") and j.get("name") and int(j.get("size",0))>0, j' "$OUT"
           }
           upload_file "$APK_NAME" 'application/vnd.android.package-archive' "dist/$APK_NAME" /tmp/apk.json
           upload_file "$SUM_NAME" 'text/plain' "dist/$SUM_NAME" /tmp/sum.json
           APK_ID=$(python3 -c 'import json; print(json.load(open("/tmp/apk.json"))["id"])')
           SUM_ID=$(python3 -c 'import json; print(json.load(open("/tmp/sum.json"))["id"])')
-          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' \
-            -d '{"role":"reader","type":"anyone"}' \
-            "https://www.googleapis.com/drive/v3/files/$APK_ID/permissions?fields=id" > /tmp/perm.json
+          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"role":"reader","type":"anyone"}' "https://www.googleapis.com/drive/v3/files/$APK_ID/permissions?fields=id" > /tmp/perm.json
           echo "apk_id=$APK_ID" >> "$GITHUB_OUTPUT"
           echo "sum_id=$SUM_ID" >> "$GITHUB_OUTPUT"
 
@@ -177,24 +154,12 @@ PY
         run: |
           set -euo pipefail
           LOCAL_SHA=$(sha256sum "dist/$APK_NAME" | awk '{print $1}')
-          curl -fsSL -H "Authorization: Bearer $ACCESS_TOKEN" \
-            "https://www.googleapis.com/drive/v3/files/$APK_ID?alt=media" -o /tmp/drive.apk
+          curl -fsSL -H "Authorization: Bearer $ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files/$APK_ID?alt=media" -o /tmp/drive.apk
           DRIVE_SHA=$(sha256sum /tmp/drive.apk | awk '{print $1}')
           test "$LOCAL_SHA" = "$DRIVE_SHA"
           API='https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec'
-          curl -fsSL -H 'content-type: application/json' "$API" \
-            -d '{"action":"update_check","channel":"BETA","current_version":"0.0.0"}' > /tmp/ota.json
-          python3 - "$VERSION" "$LOCAL_SHA" <<'PY'
-import json,sys
-j=json.load(open('/tmp/ota.json'))
-assert j.get('ok') is True, j
-assert j.get('available') is True, j
-assert j.get('channel')=='BETA', j
-assert j.get('version_name')==sys.argv[1], j
-assert j.get('sha256','').lower()==sys.argv[2].lower(), j
-assert j.get('apk_url'), j
-print(json.dumps({'version':j['version_name'],'size':j.get('size'),'source':j.get('source'),'published_at':j.get('published_at')},ensure_ascii=False))
-PY
+          curl -fsSL -H 'content-type: application/json' "$API" -d '{"action":"update_check","channel":"BETA","current_version":"0.0.0"}' > /tmp/ota.json
+          python3 -c 'import json,sys; j=json.load(open("/tmp/ota.json")); assert j.get("ok") is True and j.get("available") is True and j.get("channel")=="BETA" and j.get("version_name")==sys.argv[1] and j.get("sha256","").lower()==sys.argv[2].lower() and j.get("apk_url"), j; print(json.dumps({"version":j["version_name"],"size":j.get("size"),"source":j.get("source"),"published_at":j.get("published_at")},ensure_ascii=False))' "$VERSION" "$LOCAL_SHA"
 
       - uses: actions/upload-artifact@v4
         with:
