@@ -1,0 +1,73 @@
+name: Service M2 Cutover Observer
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/service-m2-cutover-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-cutover-observer-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_GENERATION: m2-prod-20260819-001
+  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+
+jobs:
+  observe:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for Service and GAS to agree on production authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 120); do
+            set +e
+            curl -fsS --connect-timeout 5 --max-time 15 "$SERVICE_URL/health" >/tmp/service-health.json
+            S=$?
+            curl -fsSL --connect-timeout 5 --max-time 20 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery.json
+            G=$?
+            set -e
+            if [[ $S -eq 0 && $G -eq 0 ]]; then
+              if node - <<'NODE'
+              const fs=require('fs');
+              const s=JSON.parse(fs.readFileSync('/tmp/service-health.json','utf8'));
+              const g=JSON.parse(fs.readFileSync('/tmp/gas-discovery.json','utf8'));
+              const epoch=Number(s.authority?.authority_epoch||0);
+              const good=s.ok&&s.environment==='production'&&s.authority?.scope==='PRODUCTION'&&s.authority?.mode==='SERVICE_PRIMARY'&&s.generation===process.env.SERVICE_GENERATION&&epoch>=2&&g.ok&&g.authority_mode==='SERVICE_PRIMARY'&&g.service_url===process.env.SERVICE_URL&&g.cutover_configured===true&&Number(g.authority?.authority_epoch||0)===epoch;
+              process.exit(good?0:1);
+              NODE
+              then OK=true; break; fi
+            fi
+            if (( i % 10 == 0 )); then echo "CUTOVER_OBSERVER attempt=$i"; cat /tmp/service-health.json 2>/dev/null || true; cat /tmp/gas-discovery.json 2>/dev/null || true; fi
+            sleep 5
+          done
+          [[ "$OK" == true ]] || { echo CUTOVER_NOT_CONVERGED >&2; cat /tmp/service-health.json 2>/dev/null || true; cat /tmp/gas-discovery.json 2>/dev/null || true; exit 1; }
+          curl -fsS "$SERVICE_URL/" >/tmp/pwa.html; grep -qi '<html' /tmp/pwa.html
+          curl -fsS "$SERVICE_URL/manifest.webmanifest" >/tmp/manifest.json; grep -q 'Pick Pack 1291' /tmp/manifest.json
+          node - <<'NODE'
+          const fs=require('fs'),s=JSON.parse(fs.readFileSync('/tmp/service-health.json')),g=JSON.parse(fs.readFileSync('/tmp/gas-discovery.json'));
+          fs.writeFileSync('/tmp/cutover-observer-state.json',JSON.stringify({ok:true,service_url:process.env.SERVICE_URL,generation:s.generation,authority:s.authority,replication:s.replication,gas:{authority_mode:g.authority_mode,authority:g.authority,service_url:g.service_url,cutover_configured:g.cutover_configured}},null,2));
+          NODE
+      - name: Emit observer evidence
+        shell: bash
+        run: |
+          mkdir -p m2-cutover-observer-evidence
+          cp /tmp/service-health.json m2-cutover-observer-evidence/service-health.json
+          cp /tmp/gas-discovery.json m2-cutover-observer-evidence/gas-discovery.json
+          cp /tmp/cutover-observer-state.json m2-cutover-observer-evidence/state.json
+          cp /tmp/manifest.json m2-cutover-observer-evidence/manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m2-cutover-observer-evidence-${{ github.run_id }}
+          path: m2-cutover-observer-evidence/
+          retention-days: 30
