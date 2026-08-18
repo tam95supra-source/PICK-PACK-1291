@@ -22,7 +22,7 @@ import java.util.UUID
  * Android App <-> Google Apps Script <-> Google Sheets.
  *
  * Google Apps Script is the only API endpoint used by this transport.
- * the Android process: authentication uses PBKDF2 + challenge/HMAC proof.
+ * Password plaintext never leaves the Android process: authentication uses PBKDF2 + challenge/HMAC proof.
  */
 class BetaApiClient(context: Context) {
     data class Result(val ok: Boolean, val code: Int, val json: JSONObject?, val error: String?)
