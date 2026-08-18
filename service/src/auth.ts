@@ -4,9 +4,13 @@ import { b64u, b64uDecode, constantTimeEqual, hmacB64u, nowIso, randomB64u, sha2
 interface AccountRow { login_id:string; verifier:string; verifier_hash:string; role:"SUPERADMIN"|"ADMIN"|"USER"; display_name:string; position:string; email:string; status:string; }
 
 function verifierParts(value: string): {iterations:number;salt:string;key:string}|null {
-  const p=String(value||"").split("$"); const n=Number(p[1]);
-  if(p.length!==4||p[0]!=="pbkdf2_sha256"||!Number.isInteger(n)||n<100000||n>1000000) return null;
-  return {iterations:n,salt:p[2],key:p[3]};
+  const p=String(value||"").split("$");
+  if(p.length!==4) return null;
+  const prefix=p[0], iterRaw=p[1], salt=p[2], key=p[3];
+  if(prefix!=="pbkdf2_sha256"||!iterRaw||!salt||!key) return null;
+  const n=Number(iterRaw);
+  if(!Number.isInteger(n)||n<100000||n>1000000) return null;
+  return {iterations:n,salt,key};
 }
 
 export async function createChallenge(db: D1Database, loginId: string): Promise<Record<string,unknown>> {
@@ -38,9 +42,10 @@ export async function createSession(db: D1Database, env: Env, input: {login_id:s
 export async function authenticate(db: D1Database, env: Env, request: Request): Promise<AuthContext|null> {
   const auth=request.headers.get("authorization")||""; if(!auth.startsWith("Bearer ")) return null;
   const token=auth.slice(7), parts=token.split("."); if(parts.length!==2) return null;
-  const expected=await hmacB64u(new TextEncoder().encode(env.SERVICE_TOKEN_SECRET),parts[0]); if(!constantTimeEqual(expected,parts[1])) return null;
+  const encoded=parts[0], signature=parts[1]; if(!encoded||!signature) return null;
+  const expected=await hmacB64u(new TextEncoder().encode(env.SERVICE_TOKEN_SECRET),encoded); if(!constantTimeEqual(expected,signature)) return null;
   let payload:{l:string;r:"SUPERADMIN"|"ADMIN"|"USER";v:string;s:string;d:string};
-  try{payload=JSON.parse(new TextDecoder().decode(b64uDecode(parts[0])));}catch{return null;}
+  try{payload=JSON.parse(new TextDecoder().decode(b64uDecode(encoded))) as typeof payload;}catch{return null;}
   const account=await db.prepare("SELECT login_id,role,display_name,verifier_hash,status FROM accounts WHERE login_id=?1").bind(payload.l).first<{login_id:string;role:"SUPERADMIN"|"ADMIN"|"USER";display_name:string;verifier_hash:string;status:string}>();
   const session=await db.prepare("SELECT session_id,device_id FROM auth_sessions WHERE login_id=?1").bind(payload.l).first<{session_id:string;device_id:string}>();
   if(!account||account.status!=="ACTIVE"||account.role!==payload.r||account.verifier_hash!==payload.v||!session||session.session_id!==payload.s||session.device_id!==payload.d) return null;
@@ -50,7 +55,5 @@ export async function authenticate(db: D1Database, env: Env, request: Request): 
 export async function logout(db:D1Database, auth:AuthContext):Promise<void>{await db.prepare("DELETE FROM auth_sessions WHERE login_id=?1 AND session_id=?2 AND device_id=?3").bind(auth.login_id,auth.session_id,auth.device_id).run();}
 
 export async function internalAuthorized(request: Request, env: Env): Promise<boolean> {
-  const token=request.headers.get("x-m1-admin-token")||"";
-  const a=await sha256Hex(token), b=await sha256Hex(env.M1_ADMIN_TOKEN);
-  return constantTimeEqual(a,b);
+  const token=request.headers.get("x-m1-admin-token")||""; const a=await sha256Hex(token), b=await sha256Hex(env.M1_ADMIN_TOKEN); return constantTimeEqual(a,b);
 }
