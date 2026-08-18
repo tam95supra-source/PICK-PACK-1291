@@ -21,4 +21,6 @@ runpy.run_path(str(ROOT / "tools/apply_s12_real_pda_patch.py"), run_name="__main
 runpy.run_path(str(ROOT / "tools/apply_s12_compile_hotfix.py"), run_name="__main__")
 # S13 enlarges scan/MNV entry and replaces device-local history with shared MNV session timelines.
 runpy.run_path(str(ROOT / "tools/apply_s13_shared_history_ui_patch.py"), run_name="__main__")
-print(f"Applied S10 + S11 + S12 + S13 runtime patches in build workspace: {source}")
+# S14 balances scanner sizes and adds device-side stale-while-revalidate report/history snapshots.
+runpy.run_path(str(ROOT / "tools/apply_s14_device_cache_scan_patch.py"), run_name="__main__")
+print(f"Applied S10 + S11 + S12 + S13 + S14 runtime patches in build workspace: {source}")
