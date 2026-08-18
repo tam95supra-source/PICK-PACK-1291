@@ -1,0 +1,106 @@
+name: S09 Verify Beta9 OTA
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/s09-ota-trigger.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      VERSION: 0.4.2-beta.9
+      EXPECTED_SHA: 6c96a9415299bd11f73ed21e314fb354c530c093f30ae1e23bfa7332d0ff3b6b
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify beta8 sees beta9
+        id: update
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$API_URL" \
+            -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.8"}' > /tmp/update.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/update.json'))
+          assert j.get('ok') is True, j
+          assert j.get('source')=='GOOGLE_DRIVE', j
+          assert j.get('channel')=='BETA', j
+          assert j.get('available') is True, j
+          assert j.get('version_name')==os.environ['VERSION'], j
+          assert j.get('sha256')==os.environ['EXPECTED_SHA'], j
+          assert j.get('apk_url'), j
+          open('/tmp/apk_url','w').write(j['apk_url'])
+          PY
+
+      - name: Download real OTA APK and verify bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL=$(cat /tmp/apk_url)
+          curl -fL --retry 5 --retry-delay 2 "$URL" -o /tmp/beta9.apk
+          GOT=$(sha256sum /tmp/beta9.apk | awk '{print $1}')
+          [[ "$GOT" == "$EXPECTED_SHA" ]]
+          test -s /tmp/beta9.apk
+
+      - name: Verify beta9 does not update itself
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$API_URL" \
+            -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.9"}' > /tmp/self.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/self.json'))
+          assert j.get('ok') is True, j
+          assert j.get('channel')=='BETA', j
+          assert j.get('version_name')==os.environ['VERSION'], j
+          assert j.get('available') is False, j
+          PY
+
+      - name: Verify Stable isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$API_URL" \
+            -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/stable.json'))
+          assert j.get('ok') is True, j
+          assert j.get('channel')=='STABLE', j
+          assert j.get('version_name')!=os.environ['VERSION'], j
+          PY
+
+      - name: Record PASS receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,hashlib
+          out={
+            'ok':True,
+            'version':'0.4.2-beta.9',
+            'sha256':os.environ['EXPECTED_SHA'],
+            'beta8_to_beta9':True,
+            'download_sha_match':True,
+            'self_update':False,
+            'stable_isolated':True,
+          }
+          open('ops/s09-ota-result.json','w').write(json.dumps(out,ensure_ascii=False,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/s09-ota-result.json
+          git commit -m 'ops: record beta9 OTA E2E PASS'
+          git pull --rebase origin main
+          git push origin HEAD:main
