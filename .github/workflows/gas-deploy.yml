@@ -46,6 +46,18 @@ jobs:
           node --check /tmp/PICK_PACK_API.js
           echo 'Current GAS source gates: PASS'
 
+      - name: Apply S12 current-day report optimization
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_s12_gas_patch.py
+          grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
+          grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
+          grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S12.js
+          node --check /tmp/PICK_PACK_API_S12.js
+          echo 'S12 GAS transform + syntax: PASS'
+
       - name: Exchange OAuth and normalize IDs
         id: auth
         shell: bash
@@ -55,11 +67,11 @@ jobs:
           RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW"
           if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
+          RESP=$(printf '%s' "$GOOGLE_OAUTH_REFRESH_TOKEN" | curl -fsS https://oauth2.googleapis.com/token \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
             --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode "refresh_token@-" \
             --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
           [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
