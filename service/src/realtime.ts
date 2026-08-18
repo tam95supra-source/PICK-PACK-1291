@@ -3,11 +3,13 @@ import { json, nowIso } from "./util";
 import type { EventRow } from "./domain";
 
 export class RealtimeHub extends DurableObject<Env> {
-  async fetch(request: Request): Promise<Response> {
+  override async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") return json({ ok: false, error: "WEBSOCKET_REQUIRED" }, 426);
     const url = new URL(request.url);
-    const webSocketPair = new WebSocketPair();
-    const [client, server] = Object.values(webSocketPair);
+    const pair = new WebSocketPair();
+    const sockets = Object.values(pair);
+    const client = sockets[0], server = sockets[1];
+    if (!client || !server) return json({ ok:false, error:"WEBSOCKET_PAIR_FAILED" }, 500);
     const device = url.searchParams.get("device_id") || "unknown";
     this.ctx.acceptWebSocket(server, [`device:${device.slice(0, 180)}`]);
     server.serializeAttachment({ device_id: device.slice(0, 180), connected_at: nowIso() });
@@ -26,11 +28,11 @@ export class RealtimeHub extends DurableObject<Env> {
 
   async connectionCount(): Promise<number> { return this.ctx.getWebSockets().length; }
 
-  webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+  override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
     if (typeof message === "string" && message === "ping") ws.send("pong");
   }
 
-  webSocketClose(_ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
-    // Close handshake is handled by the runtime on current compatibility dates.
+  override webSocketClose(_ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): void {
+    // Current compatibility dates auto-complete the close handshake.
   }
 }
