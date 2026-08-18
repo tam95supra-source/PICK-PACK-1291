@@ -1,0 +1,100 @@
+name: S08 Verify Direct Beta8 OTA
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'ops/s08-verify-direct-trigger.txt'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LIVE_API: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      VERSION: 0.4.2-beta.8
+      VERSION_CODE: '14'
+      EXPECTED_SHA: dbb86e8d3edcadc4ce4138410427f97d93279cb047cce45fb7e41d68578a7d5e
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify live update discovery and download SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          post(){ curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$LIVE_API" -d "$1"; }
+          OK=false
+          for i in $(seq 1 12); do
+            post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.6"}' > /tmp/from6.json || true
+            if python3 - <<'PY' 2>/dev/null
+          import json,os
+          j=json.load(open('/tmp/from6.json'))
+          assert j.get('ok') is True and j.get('source')=='GOOGLE_DRIVE' and j.get('channel')=='BETA',j
+          assert j.get('available') is True and j.get('version_name')==os.environ['VERSION'],j
+          assert j.get('sha256')==os.environ['EXPECTED_SHA'] and j.get('apk_url'),j
+          PY
+            then OK=true; break; fi
+            sleep 5
+          done
+          [[ "$OK" == true ]] || { cat /tmp/from6.json; exit 1; }
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/from6.json')); open('/tmp/url.txt','w').write(j['apk_url'])
+          PY
+          curl -fL --retry 4 --retry-delay 2 "$(cat /tmp/url.txt)" -o /tmp/beta8.apk
+          GOT=$(sha256sum /tmp/beta8.apk | awk '{print $1}')
+          [[ "$GOT" == "$EXPECTED_SHA" ]]
+
+      - name: Resolve Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Verify downloaded signer, package and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/apksigner" verify --verbose --print-certs /tmp/beta8.apk > /tmp/cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          "$BT/aapt" dump badging /tmp/beta8.apk > /tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionCode='$VERSION_CODE'" /tmp/badge.txt
+          grep -q "versionName='$VERSION'" /tmp/badge.txt
+
+      - name: Verify self-update false and Stable isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          post(){ curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$LIVE_API" -d "$1"; }
+          post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.8"}' > /tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json,os
+          a=json.load(open('/tmp/self.json')); s=json.load(open('/tmp/stable.json'))
+          assert a.get('ok') is True and a.get('source')=='GOOGLE_DRIVE' and a.get('channel')=='BETA',a
+          assert a.get('version_name')==os.environ['VERSION'] and a.get('available') is False,a
+          assert s.get('ok') is True and s.get('source')=='GOOGLE_DRIVE' and s.get('channel')=='STABLE',s
+          assert s.get('version_name')!=os.environ['VERSION'],s
+          out={'ok':True,'version':os.environ['VERSION'],'version_code':int(os.environ['VERSION_CODE']),'sha256':os.environ['EXPECTED_SHA'],'signer_sha256':os.environ['EXPECTED_SIGNER_SHA256'],'beta6_to_beta8':True,'download_sha_match':True,'download_signer_match':True,'package_ok':True,'self_update':False,'stable_isolated':True,'source':'GOOGLE_DRIVE'}
+          json.dump(out,open('/tmp/beta8-direct-ota-result.json','w'),separators=(',',':'))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beta8-direct-ota-result
+          path: /tmp/beta8-direct-ota-result.json
+          retention-days: 14
