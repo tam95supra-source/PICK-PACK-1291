@@ -17,6 +17,10 @@ jobs:
     env:
       SNAPSHOT_SHA: 76db60dd10f49c24b0e17f3c1561e3409537b28d
       AUTOMATION_BRANCH: backup-automation/pre-service-migration-2026-08-18-2318
+      DRIVE_FOLDER_ID: 13yXs4mM-CBoxhfqqHHQIVyJTsl7HGWNF
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
     steps:
       - name: Checkout automation branch with full history
         uses: actions/checkout@v4
@@ -29,6 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           git cat-file -e "$SNAPSHOT_SHA^{commit}"
+          rm -rf backup-dist
           mkdir -p backup-dist backup-generated
           git archive --format=zip --output=backup-dist/pick-pack-1291-source-${SNAPSHOT_SHA}.zip "$SNAPSHOT_SHA"
           git branch -f pre-migration-snapshot "$SNAPSHOT_SHA"
@@ -49,12 +54,66 @@ jobs:
           base64 -w 76 backup-dist/pick-pack-1291-source-${SNAPSHOT_SHA}.zip > backup-generated/pick-pack-1291-source-${SNAPSHOT_SHA}.zip.b64.txt
           base64 -w 76 backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle > backup-generated/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle.b64.txt
           cat > backup-generated/RECOVERY_README.txt <<'EOF'
-          These *.b64.txt files are Base64 recovery payloads created because the ChatGPT GitHub connector cannot directly transfer arbitrary repository binary archives to Google Drive.
-          To restore with ChatGPT: provide this backup folder and ask ChatGPT to decode the source ZIP or Git bundle, verify SHA256SUMS.txt, and restore the repository at the recorded snapshot SHA. The owner does not need to run local CLI.
+          These *.b64.txt files are Base64 recovery payloads kept as a second recovery path.
+          To restore with ChatGPT: provide the backup folder or this automation branch and ask ChatGPT to decode the source ZIP or Git bundle, verify SHA256SUMS.txt, and restore the repository at the recorded snapshot SHA. The owner does not need to run local CLI.
           EOF
+          PACKAGE="backup-dist/pick-pack-1291-github-backup-${SNAPSHOT_SHA}.zip"
+          (cd backup-dist && zip -q "$(basename "$PACKAGE")" pick-pack-1291-source-${SNAPSHOT_SHA}.zip pick-pack-1291-history-${SNAPSHOT_SHA}.bundle BACKUP_METADATA.txt SHA256SUMS.txt)
+          sha256sum "$PACKAGE" > backup-dist/PACKAGE_SHA256.txt
           ls -lh backup-dist backup-generated
 
-      - name: Persist connector-readable recovery payloads on automation branch
+      - name: Upload GitHub backup package to Google Drive
+        id: drive
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN DRIVE_FOLDER_ID; do
+            [[ -n "${!v:-}" ]] || { echo "Missing required backup credential/config: $v" >&2; exit 1; }
+          done
+          TOKEN_JSON=$(curl -fsS https://oauth2.googleapis.com/token \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          ACCESS_TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token", ""))' <<<"$TOKEN_JSON")
+          [[ -n "$ACCESS_TOKEN" ]]
+          echo "::add-mask::$ACCESS_TOKEN"
+          PACKAGE="backup-dist/pick-pack-1291-github-backup-${SNAPSHOT_SHA}.zip"
+          NAME=$(basename "$PACKAGE")
+          python3 - "$DRIVE_FOLDER_ID" "$NAME" > /tmp/metadata.json <<'PY'
+          import json,sys
+          print(json.dumps({"name": sys.argv[2], "parents": [sys.argv[1]]}))
+          PY
+          curl -fsS -D /tmp/create.headers -o /tmp/create.body \
+            -X POST 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,webViewLink,size,md5Checksum' \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H 'Content-Type: application/json; charset=UTF-8' \
+            -H 'X-Upload-Content-Type: application/zip' \
+            -H "X-Upload-Content-Length: $(stat -c%s "$PACKAGE")" \
+            --data-binary @/tmp/metadata.json
+          UPLOAD_URL=$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/\r$/,"",$0); sub(/^[^:]*:[[:space:]]*/,"",$0); print; exit}' /tmp/create.headers)
+          [[ -n "$UPLOAD_URL" ]]
+          curl -fsS -o /tmp/upload.json \
+            -X PUT "$UPLOAD_URL" \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            -H 'Content-Type: application/zip' \
+            --data-binary @"$PACKAGE"
+          python3 - "$SNAPSHOT_SHA" > backup-generated/DRIVE_UPLOAD_RESULT.txt <<'PY'
+          import json,sys
+          j=json.load(open('/tmp/upload.json'))
+          assert j.get('id'), j
+          print('status=SUCCESS')
+          print('snapshot_sha='+sys.argv[1])
+          print('drive_file_id='+j['id'])
+          print('drive_name='+str(j.get('name','')))
+          print('drive_web_view_link='+str(j.get('webViewLink','')))
+          print('drive_size='+str(j.get('size','')))
+          print('drive_md5='+str(j.get('md5Checksum','')))
+          PY
+          cat backup-generated/DRIVE_UPLOAD_RESULT.txt
+
+      - name: Persist connector-readable recovery metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -62,13 +121,13 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add backup-generated/
           if git diff --cached --quiet; then
-            echo 'Recovery payloads already committed.'
+            echo 'Recovery metadata already committed.'
           else
-            git commit -m 'backup: persist pre-service migration recovery payloads'
+            git commit -m 'backup: persist pre-service migration recovery metadata'
             git push origin "HEAD:$AUTOMATION_BRANCH"
           fi
 
-      - name: Upload immutable backup package
+      - name: Upload immutable backup package as Actions artifact
         uses: actions/upload-artifact@v4
         with:
           name: pick-pack-1291-pre-service-migration-2026-08-18-2318
