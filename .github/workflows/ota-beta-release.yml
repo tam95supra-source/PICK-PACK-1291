@@ -15,10 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      OTA_BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
       EXPECTED_CERT_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
     steps:
       - uses: actions/checkout@v4
@@ -38,25 +34,6 @@ jobs:
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "apk=$APK" >> "$GITHUB_OUTPUT"
           echo "sum=$SUM" >> "$GITHUB_OUTPUT"
-          echo "Beta $VERSION / versionCode $CODE"
-
-      - name: Exchange Google OAuth token and ensure version is not already on Drive
-        id: google
-        shell: bash
-        env:
-          APK_NAME: ${{ steps.meta.outputs.apk }}
-          SUM_NAME: ${{ steps.meta.outputs.sum }}
-        run: |
-          set -euo pipefail
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
-          TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
-          test -n "$TOKEN"
-          echo "::add-mask::$TOKEN"
-          Q="'${OTA_BETA_FOLDER_ID}' in parents and trashed=false and (name='${APK_NAME}' or name='${SUM_NAME}')"
-          curl -fsS -G -H "Authorization: Bearer $TOKEN" --data-urlencode "q=$Q" --data-urlencode 'fields=files(id,name)' 'https://www.googleapis.com/drive/v3/files' > /tmp/existing.json
-          COUNT=$(python3 -c 'import json; print(len(json.load(open("/tmp/existing.json")).get("files",[])))')
-          test "$COUNT" = 0 || { cat /tmp/existing.json; echo 'Beta version already exists on Drive' >&2; exit 1; }
-          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-java@v4
         with:
@@ -119,47 +96,6 @@ jobs:
           grep -q "versionCode='$CODE'" /tmp/badge.txt
           grep -q "versionName='$VERSION'" /tmp/badge.txt
           (cd dist && sha256sum "$APK_NAME" > "$SUM_NAME")
-
-      - name: Upload signed Beta and checksum to Drive OTA folder
-        id: upload
-        shell: bash
-        env:
-          ACCESS_TOKEN: ${{ steps.google.outputs.token }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          APK_NAME: ${{ steps.meta.outputs.apk }}
-          SUM_NAME: ${{ steps.meta.outputs.sum }}
-        run: |
-          set -euo pipefail
-          upload_file() {
-            local NAME="$1" MIME="$2" PATHNAME="$3" OUT="$4"
-            python3 -c 'import json,sys; print(json.dumps({"name":sys.argv[1],"parents":[sys.argv[2]],"description":"Pick Pack 1291 Beta OTA "+sys.argv[3]+" - full function validation build"},ensure_ascii=False))' "$NAME" "$OTA_BETA_FOLDER_ID" "$VERSION" > /tmp/meta.json
-            curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -F "metadata=@/tmp/meta.json;type=application/json;charset=UTF-8" -F "file=@${PATHNAME};type=${MIME}" 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,md5Checksum' > "$OUT"
-            python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); assert j.get("id") and j.get("name") and int(j.get("size",0))>0, j' "$OUT"
-          }
-          upload_file "$APK_NAME" 'application/vnd.android.package-archive' "dist/$APK_NAME" /tmp/apk.json
-          upload_file "$SUM_NAME" 'text/plain' "dist/$SUM_NAME" /tmp/sum.json
-          APK_ID=$(python3 -c 'import json; print(json.load(open("/tmp/apk.json"))["id"])')
-          SUM_ID=$(python3 -c 'import json; print(json.load(open("/tmp/sum.json"))["id"])')
-          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"role":"reader","type":"anyone"}' "https://www.googleapis.com/drive/v3/files/$APK_ID/permissions?fields=id" > /tmp/perm.json
-          echo "apk_id=$APK_ID" >> "$GITHUB_OUTPUT"
-          echo "sum_id=$SUM_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Verify Drive bytes and live OTA discovery
-        shell: bash
-        env:
-          ACCESS_TOKEN: ${{ steps.google.outputs.token }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          APK_NAME: ${{ steps.meta.outputs.apk }}
-          APK_ID: ${{ steps.upload.outputs.apk_id }}
-        run: |
-          set -euo pipefail
-          LOCAL_SHA=$(sha256sum "dist/$APK_NAME" | awk '{print $1}')
-          curl -fsSL -H "Authorization: Bearer $ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files/$APK_ID?alt=media" -o /tmp/drive.apk
-          DRIVE_SHA=$(sha256sum /tmp/drive.apk | awk '{print $1}')
-          test "$LOCAL_SHA" = "$DRIVE_SHA"
-          API='https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec'
-          curl -fsSL -H 'content-type: application/json' "$API" -d '{"action":"update_check","channel":"BETA","current_version":"0.0.0"}' > /tmp/ota.json
-          python3 -c 'import json,sys; j=json.load(open("/tmp/ota.json")); assert j.get("ok") is True and j.get("available") is True and j.get("channel")=="BETA" and j.get("version_name")==sys.argv[1] and j.get("sha256","").lower()==sys.argv[2].lower() and j.get("apk_url"), j; print(json.dumps({"version":j["version_name"],"size":j.get("size"),"source":j.get("source"),"published_at":j.get("published_at")},ensure_ascii=False))' "$VERSION" "$LOCAL_SHA"
 
       - uses: actions/upload-artifact@v4
         with:
