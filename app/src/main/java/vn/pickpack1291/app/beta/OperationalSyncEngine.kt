@@ -17,8 +17,6 @@ class OperationalSyncEngine(
     private val store: OperationalDataStore,
     private val listener: (Set<String>) -> Unit,
 ) {
-    private val appContext = context.applicationContext
-
     private data class Manifest(
         val businessDate: String,
         val retentionFloor: String,
@@ -45,8 +43,12 @@ class OperationalSyncEngine(
         }
         val manifest = Manifest(businessDate, retentionFloor, retentionEpoch, revisions)
         synchronized(lock) {
-            pending = manifest
-            if (inFlight) return
+            if (inFlight) {
+                // Keep only the newest manifest that arrived while a network reconciliation is active.
+                // The manifest currently being processed must never enqueue itself again.
+                pending = manifest
+                return
+            }
             inFlight = true
         }
         process(manifest)
@@ -65,7 +67,7 @@ class OperationalSyncEngine(
             .sortedDescending()
 
         if (missingOrChanged.isEmpty()) {
-            finish(setOf())
+            finish()
             return
         }
 
@@ -73,13 +75,13 @@ class OperationalSyncEngine(
         if (localEmpty) {
             val previous = previousDate(manifest.businessDate)
             val hot = listOf(manifest.businessDate, previous).filter { it in missingOrChanged }
-            syncDayQueue(hot, manifest, linkedSetOf()) { changed ->
+            syncDayQueue(hot, linkedSetOf()) { changed ->
                 val stillMissing = manifest.revisions
                     .filter { (date, rev) -> store.revision(date) != rev }
                     .keys
                     .sortedDescending()
-                if (stillMissing.isEmpty()) finish(changed)
-                else syncBootstrap(stillMissing, manifest, changed)
+                if (stillMissing.isEmpty()) finish()
+                else syncBootstrap(stillMissing, changed)
             }
             return
         }
@@ -87,15 +89,14 @@ class OperationalSyncEngine(
         // Normal steady state only N/N-1 should mutate. Fetch those dates independently so all
         // foreground PDAs converge after one revision poll without retransmitting immutable days.
         if (missingOrChanged.size <= 2) {
-            syncDayQueue(missingOrChanged, manifest, linkedSetOf()) { finish(it) }
+            syncDayQueue(missingOrChanged, linkedSetOf()) { finish() }
         } else {
-            syncBootstrap(missingOrChanged, manifest, linkedSetOf())
+            syncBootstrap(missingOrChanged, linkedSetOf())
         }
     }
 
     private fun syncDayQueue(
         dates: List<String>,
-        manifest: Manifest,
         changed: LinkedHashSet<String>,
         done: (LinkedHashSet<String>) -> Unit,
     ) {
@@ -111,16 +112,15 @@ class OperationalSyncEngine(
                 }
             }
             // If one date fails, leave its revision stale. The next foreground poll retries it.
-            syncDayQueue(dates.drop(1), manifest, changed, done)
+            syncDayQueue(dates.drop(1), changed, done)
         }
     }
 
     private fun syncBootstrap(
         dates: List<String>,
-        manifest: Manifest,
         changed: LinkedHashSet<String>,
     ) {
-        if (dates.isEmpty()) { finish(changed); return }
+        if (dates.isEmpty()) { finish(); return }
         val payload = JSONObject().put("dates", JSONArray().apply { dates.take(45).forEach { put(it) } })
         api.call("sync_bootstrap", payload) { result ->
             if (result.ok && result.json != null) {
@@ -136,19 +136,17 @@ class OperationalSyncEngine(
                 changed += synced
                 if (synced.isNotEmpty()) listener(synced)
             }
-            finish(changed)
+            finish()
         }
     }
 
-    private fun finish(changed: Set<String>) {
+    private fun finish() {
         val next: Manifest?
         synchronized(lock) {
-            val latest = pending
+            next = pending
             pending = null
             inFlight = false
-            next = latest
         }
-        if (changed.isNotEmpty()) listener(changed)
         if (next != null) reconcile(
             next.businessDate,
             next.retentionFloor,
