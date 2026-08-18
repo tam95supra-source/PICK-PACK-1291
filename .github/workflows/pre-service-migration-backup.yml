@@ -1,0 +1,53 @@
+name: Pre-Service Migration Backup
+
+on:
+  push:
+    branches:
+      - backup-automation/pre-service-migration-2026-08-18-2318
+    paths:
+      - '.github/workflows/pre-service-migration-backup.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SNAPSHOT_SHA: 76db60dd10f49c24b0e17f3c1561e3409537b28d
+    steps:
+      - name: Checkout exact pre-migration snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: 76db60dd10f49c24b0e17f3c1561e3409537b28d
+          fetch-depth: 0
+
+      - name: Package source and Git history
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SNAPSHOT_SHA"
+          mkdir -p backup-dist
+          git archive --format=zip --output=backup-dist/pick-pack-1291-source-${SNAPSHOT_SHA}.zip "$SNAPSHOT_SHA"
+          git bundle create backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle HEAD
+          git bundle verify backup-dist/pick-pack-1291-history-${SNAPSHOT_SHA}.bundle
+          cat > backup-dist/BACKUP_METADATA.txt <<EOF
+          project=PICK PACK 1291
+          repository=tam95supra-source/pick-pack-1291
+          snapshot_sha=$SNAPSHOT_SHA
+          source_branch=main
+          backup_purpose=pre-Service-first-migration rollback point
+          created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          restore_note=Source ZIP restores the tree; git bundle restores reachable Git history through the snapshot commit.
+          EOF
+          (cd backup-dist && sha256sum pick-pack-1291-source-${SNAPSHOT_SHA}.zip pick-pack-1291-history-${SNAPSHOT_SHA}.bundle BACKUP_METADATA.txt > SHA256SUMS.txt)
+          ls -lh backup-dist
+
+      - name: Upload immutable backup package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-pre-service-migration-2026-08-18-2318
+          path: backup-dist/*
+          retention-days: 90
+          if-no-files-found: error
