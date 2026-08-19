@@ -1,0 +1,5 @@
+checked_at=2026-08-19T16:20:11Z
+head_sha=d59665de35bb2e370e89ac9c54aa957e9620328b
+config=PASS
+failed_phase=BUILD
+failed_rc=1
