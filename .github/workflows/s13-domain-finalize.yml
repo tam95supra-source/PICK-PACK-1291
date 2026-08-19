@@ -1,0 +1,140 @@
+name: S13 Workers Dev Hostname Finalize
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/s13-domain-finalize-trigger.txt'
+      - '.github/workflows/s13-domain-finalize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s13-workers-dev-hostname-finalize
+  cancel-in-progress: false
+
+env:
+  GAS_WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  TARGET_ACCOUNT_SUBDOMAIN: pp1291
+  WORKER_NAME: pick-pack-1291-service
+  TARGET_SERVICE_URL: https://pick-pack-1291-service.pp1291.workers.dev
+  SERVICE_GENERATION: m2-prod-20260819-001
+
+jobs:
+  finalize-hostname:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+    steps:
+      - name: Validate credentials and derive bridge secret
+        id: secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_SECRET; do test -n "${!v:-}" || { echo "MISSING:$v"; exit 1; }; done
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"
+          echo "bridge=$BRIDGE" >> "$GITHUB_OUTPUT"
+
+      - name: Require propagated GAS control route and unchanged authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 40); do
+            curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"m2_service_url_prepare_internal","confirmation":"invalid"}' >/tmp/probe.json || true
+            if grep -q 'SERVICE_URL_CONFIRMATION_REQUIRED' /tmp/probe.json; then OK=true; break; fi
+            sleep 3
+          done
+          [[ "$OK" == true ]] || { echo 'GAS_CONTROL_ROUTE_NOT_PROPAGATED'; cat /tmp/probe.json; exit 1; }
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/before-discovery.json
+          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/before-discovery.json
+          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/before-discovery.json
+
+      - name: Verify account scope and current workers.dev subdomain
+        id: cf
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain-before.json
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" >/tmp/scripts.json
+          node - "$WORKER_NAME" <<'NODE'
+          const fs=require('fs'), expected=process.argv[2];
+          const sub=JSON.parse(fs.readFileSync('/tmp/subdomain-before.json')), scripts=JSON.parse(fs.readFileSync('/tmp/scripts.json'));
+          if(!sub.success||!scripts.success)throw new Error('Cloudflare API diagnostic failed');
+          const names=(scripts.result||[]).map(x=>x.id).sort();
+          if(names.length!==1||names[0]!==expected)throw new Error('Refusing account-wide subdomain change; unexpected Workers: '+names.join(','));
+          console.log('CURRENT_ACCOUNT_SUBDOMAIN='+sub.result.subdomain);
+          NODE
+
+      - name: Prepare GAS dual URL fence
+        env:
+          BRIDGE: ${{ steps.secrets.outputs.bridge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os
+          open('/tmp/prepare.json','w').write(json.dumps({'action':'m2_service_url_prepare_internal','confirmation':'OWNER_LOCKED_M2_SERVICE_URL_ONLY','bridge_secret':os.environ['BRIDGE'],'service_url':os.environ['TARGET_SERVICE_URL']}))
+          PY
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/prepare.json >/tmp/prepare.out
+          rm -f /tmp/prepare.json
+          grep -q '"ok":true' /tmp/prepare.out
+          grep -q '"prepared":true' /tmp/prepare.out
+          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/prepare.out
+          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/prepare.out
+
+      - name: Change workers.dev account subdomain only if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain-current.json
+          CURRENT=$(node -e 'const x=require("/tmp/subdomain-current.json");process.stdout.write(String(x.result?.subdomain||""))')
+          if [[ "$CURRENT" != "$TARGET_ACCOUNT_SUBDOMAIN" ]]; then
+            H=$(curl -sS -o /tmp/subdomain-set.json -w '%{http_code}' -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+              -d "{\"subdomain\":\"$TARGET_ACCOUNT_SUBDOMAIN\"}")
+            [[ "$H" == 200 ]] || { cat /tmp/subdomain-set.json; exit 1; }
+            grep -q '"success":true' /tmp/subdomain-set.json
+          fi
+
+      - name: Require new Worker URL healthy and Service-primary
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 30); do
+            curl -fsS "$TARGET_SERVICE_URL/health" >/tmp/new-health.json 2>/dev/null || true
+            curl -fsS "$TARGET_SERVICE_URL/v1/authority" >/tmp/new-authority.json 2>/dev/null || true
+            if grep -q '"ok":true' /tmp/new-health.json 2>/dev/null && grep -q '"mode":"SERVICE_PRIMARY"' /tmp/new-authority.json 2>/dev/null; then OK=true; break; fi
+            sleep 2
+          done
+          [[ "$OK" == true ]] || { cat /tmp/new-health.json || true; cat /tmp/new-authority.json || true; exit 1; }
+
+      - name: Finalize GAS discovery and verify no authority change
+        env:
+          BRIDGE: ${{ steps.secrets.outputs.bridge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os
+          open('/tmp/finalize.json','w').write(json.dumps({'action':'m2_service_url_update_internal','confirmation':'OWNER_LOCKED_M2_SERVICE_URL_ONLY','bridge_secret':os.environ['BRIDGE'],'service_url':os.environ['TARGET_SERVICE_URL']}))
+          PY
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/finalize.json >/tmp/finalize.out
+          rm -f /tmp/finalize.json
+          grep -q '"ok":true' /tmp/finalize.out
+          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/finalize.out
+          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/finalize.out
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/after-discovery.json
+          grep -q '"service_url":"https://pick-pack-1291-service.pp1291.workers.dev"' /tmp/after-discovery.json
+          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/after-discovery.json
+          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/after-discovery.json
+          echo "SERVICE_URL=$TARGET_SERVICE_URL"
