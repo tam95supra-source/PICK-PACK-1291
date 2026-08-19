@@ -1,10 +1,8 @@
 name: S13 Workers Dev Hostname Finalize
 
 on:
-  push:
-    branches: [ agent/service-migration-m2 ]
-    paths:
-      - 'ops/s13-domain-finalize-trigger.txt'
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -40,7 +38,24 @@ jobs:
           echo "::add-mask::$BRIDGE"
           echo "bridge=$BRIDGE" >> "$GITHUB_OUTPUT"
 
+      - name: Detect already-finalized state
+        id: state
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain.json
+          CF=$(node -e 'const x=require("/tmp/subdomain.json");process.stdout.write(String(x.result?.subdomain||""))')
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/discovery.json
+          if [[ "$CF" == "$TARGET_ACCOUNT_SUBDOMAIN" ]] && grep -q '"service_url":"https://pick-pack-1291-service.pp1291.workers.dev"' /tmp/discovery.json && grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/discovery.json && grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/discovery.json; then
+            echo "done=true" >> "$GITHUB_OUTPUT"
+            echo 'Hostname already finalized; verify only.'
+          else
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Require propagated GAS control route and unchanged authority
+        if: steps.state.outputs.done != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -56,6 +71,7 @@ jobs:
           if ! grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/before-discovery.json; then echo 'DISCOVERY_GENERATION_MISMATCH'; cat /tmp/before-discovery.json; exit 1; fi
 
       - name: Verify account scope and current workers.dev subdomain
+        if: steps.state.outputs.done != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -72,6 +88,7 @@ jobs:
           NODE
 
       - name: Prepare GAS dual URL fence
+        if: steps.state.outputs.done != 'true'
         env:
           BRIDGE: ${{ steps.secrets.outputs.bridge }}
         shell: bash
@@ -89,6 +106,7 @@ jobs:
           grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/prepare.out
 
       - name: Change workers.dev account subdomain only if needed
+        if: steps.state.outputs.done != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -117,6 +135,7 @@ jobs:
           [[ "$OK" == true ]] || { cat /tmp/new-health.json || true; cat /tmp/new-authority.json || true; exit 1; }
 
       - name: Finalize GAS discovery and verify no authority change
+        if: steps.state.outputs.done != 'true'
         env:
           BRIDGE: ${{ steps.secrets.outputs.bridge }}
         shell: bash
@@ -131,6 +150,14 @@ jobs:
           if ! grep -q '"ok":true' /tmp/finalize.out; then echo 'GAS_FINALIZE_FAILED'; cat /tmp/finalize.out; exit 1; fi
           grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/finalize.out
           grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/finalize.out
+
+      - name: Final verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/cf-final.json
+          grep -q '"subdomain":"pp1291"' /tmp/cf-final.json
           curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/after-discovery.json
           grep -q '"service_url":"https://pick-pack-1291-service.pp1291.workers.dev"' /tmp/after-discovery.json
           grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/after-discovery.json
