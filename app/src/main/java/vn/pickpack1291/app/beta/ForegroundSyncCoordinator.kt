@@ -78,6 +78,7 @@ class ForegroundSyncCoordinator(
                 if (state == State.ACTIVE) {
                     failureRetriesRemaining = 1
                     M2WorkScheduler.schedule(app)
+                    M2PushRegistration.flush(app)
                     requestSync()
                 }
             }
@@ -151,6 +152,7 @@ class ForegroundSyncCoordinator(
                     if (businessDate.isNotBlank()) dayRealtime.start(businessDate)
                     masterRealtime.start()
                     M2WorkScheduler.schedule(app)
+                    M2PushRegistration.flush(app)
 
                     if (state == State.ACTIVE && requestGeneration == generation) {
                         listener.onStatus(
