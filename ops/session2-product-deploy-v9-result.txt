@@ -1,0 +1,11 @@
+checked_at=2026-08-19T11:49:40Z
+head_sha=1f105bbdc90ca146c4ea2455006e8888f6cf3a8c
+source_and_credentials=PASS
+d1_resolve=PASS
+authority_gate=PASS
+fallback_gate=PASS
+d1_gate=PASS
+deploy=PASS
+live_verify=PASS
+fallback_recheck=PASS
+verdict=PASS
