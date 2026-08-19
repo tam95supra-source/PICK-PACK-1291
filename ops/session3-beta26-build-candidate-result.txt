@@ -1,4 +1,5 @@
-checked_at=2026-08-19T16:27:19Z
-head_sha=147a12f9b78f654c1db94bab8209daa533f725e8
-failed_phase=CONFIG
+checked_at=2026-08-19T16:31:55Z
+head_sha=9f75d362c3f94a0440aaef23305090910e88b101
+config=PASS
+failed_phase=BUILD
 failed_rc=1
