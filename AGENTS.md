@@ -11,25 +11,36 @@ These rules are authoritative for any agent, coding assistant, CI automation, or
 
 ## 2. Approved operational architecture
 
-`Android App ↔ Google Apps Script ↔ Google Sheets`
+`Android / Web-PWA ↔ Cloudflare Worker Service ↔ D1`
 
-- Google Sheets is the operational source of truth at this stage.
-- Google Apps Script is the transaction/API bridge for that Sheet.
-- GitHub is source/CI/release infrastructure only, not the operational datastore.
+with:
+
+- Cloudflare Worker as the production API/runtime;
+- Cloudflare D1 as the normal-mode operational primary datastore;
+- Durable Objects + WebSocket/Hibernation for realtime coordination/fanout;
+- Google Sheets as operational replica/compatibility/fallback/DR according to authority state;
+- Google Apps Script as discovery/compatibility/fallback bridge and OTA `update_check` authority;
+- Android SQLite/cache as local projection/offline state;
+- GitHub as source/CI/release infrastructure only.
+
+`ARCHITECTURE_GUARDRAILS.md` records the OWNER-approved 2026-08-18 supersession of the earlier GAS-only architecture. Older handovers may describe `Android ↔ GAS ↔ Google Sheets` as a historical state; they must not be used to roll production authority back implicitly.
 
 ## 3. No unauthorized service/backend changes
 
-Without an explicit owner instruction, do not add or migrate authority to:
+The Service-first stack above is already OWNER-approved. Do not add, replace, or migrate authority to a different backend, datastore, queue, auth authority, or synchronization authority without a new explicit owner instruction.
 
-- Supabase
-- Firebase
-- Neon/Postgres
-- Cloudflare backend/storage
-- another database/server/backend/service
-- another auth authority
-- another synchronization authority
+In particular, do not introduce or migrate to:
 
-If a technical limitation appears to require such a change, do not choose one automatically. Keep the approved architecture unchanged, document the blocker precisely, and require explicit owner authorization before changing architecture.
+- Supabase;
+- Firebase;
+- Neon/Postgres;
+- another Cloudflare datastore/service beyond the approved Worker/D1/Durable Objects design;
+- Queue, KV, R2, or another new infrastructure component;
+- another database/server/backend/service;
+- another auth authority;
+- another synchronization authority.
+
+If a technical limitation appears to require such a change, keep the approved Service-first architecture unchanged, document the blocker precisely, and require explicit owner authorization before changing architecture.
 
 ## 4. Do not act contrary to the stated goal
 
