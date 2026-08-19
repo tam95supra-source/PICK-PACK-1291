@@ -1,6 +1,6 @@
 /* Pick Pack 1291 M2 Service migration control plane.
- * Loaded beside PICK_PACK_API.gs. Production defaults preserve the current GAS writer until an
- * explicit cutover configuration changes PP_M2_AUTHORITY_MODE to SERVICE_PRIMARY.
+ * Service-first control plane: Worker/D1 is normal-mode authority; GAS provides discovery,
+ * compatibility, fallback and controlled recovery/failback fencing.
  */
 
 function ppM2Props_(){return PropertiesService.getScriptProperties();}
@@ -11,18 +11,34 @@ function ppM2ServiceUrl_(){return String(ppM2Props_().getProperty('PP_M2_SERVICE
 function ppM2BridgeSecret_(){return String(ppM2Props_().getProperty('PP_M2_GAS_BRIDGE_SECRET')||'');}
 function ppM2ValidServiceUrl_(v){return /^https:\/\/[A-Za-z0-9._-]+(?:\.workers\.dev|\.pages\.dev)(?:\/.*)?$/.test(String(v||''));}
 
+// Discovery is a hot path used by Android, CI and recovery observers. Read the Script
+// Properties store once per request so authority/generation/seq are from one coherent snapshot.
+// Do not add a TTL cache here: authority transitions must become visible immediately.
+function ppM2StateSnapshot_(){
+  const all=ppM2Props_().getProperties();
+  return {
+    mode:String(all.PP_M2_AUTHORITY_MODE||'GOOGLE_FALLBACK'),
+    epoch:Number(all.PP_M2_AUTHORITY_EPOCH||'1'),
+    generation:String(all.PP_M2_SERVICE_GENERATION||'legacy-gas-production'),
+    serviceUrl:String(all.PP_M2_SERVICE_URL||'').replace(/\/+$/,''),
+    fallbackSeq:Number(all.PP_M2_FALLBACK_SEQ||'0'),
+    scope:String(all.PP_M2_AUTHORITY_SCOPE||'PRODUCTION'),
+    bridgeConfigured:!!String(all.PP_M2_GAS_BRIDGE_SECRET||''),
+  };
+}
+
 function ppM2Discovery_(body){
-  const mode=ppM2Mode_(),url=ppM2ServiceUrl_(),epoch=ppM2Epoch_(),generation=ppM2Generation_();
+  const s=ppM2StateSnapshot_();
   return {
     ok:true,
-    discovery_version:1,
-    service_url:ppM2ValidServiceUrl_(url)?url:'',
-    authority_mode:mode,
-    authority:{authority_epoch:epoch,authority_seq:Number(ppM2Props_().getProperty('PP_M2_FALLBACK_SEQ')||'0'),mode:mode,scope:String(ppM2Props_().getProperty('PP_M2_AUTHORITY_SCOPE')||'PRODUCTION'),service_generation:generation},
-    service_generation:generation,
+    discovery_version:2,
+    service_url:ppM2ValidServiceUrl_(s.serviceUrl)?s.serviceUrl:'',
+    authority_mode:s.mode,
+    authority:{authority_epoch:s.epoch,authority_seq:s.fallbackSeq,mode:s.mode,scope:s.scope,service_generation:s.generation},
+    service_generation:s.generation,
     gas_fallback:true,
     legacy_bridge:true,
-    cutover_configured:mode==='SERVICE_PRIMARY'&&ppM2ValidServiceUrl_(url)&&!!ppM2BridgeSecret_(),
+    cutover_configured:s.mode==='SERVICE_PRIMARY'&&ppM2ValidServiceUrl_(s.serviceUrl)&&s.bridgeConfigured,
     business_date:ppBusinessIso_(),
     app_channel:String((body||{})._app_channel||''),
   };
