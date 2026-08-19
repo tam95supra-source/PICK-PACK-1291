@@ -14,11 +14,33 @@ if route not in s:
     api.write_text(s)
 
 s=m2.read_text()
-if 'function ppM2BridgeProbeInternal_' not in s:
+start=s.find('function ppM2BridgeProbeInternal_(body){')
+if start>=0:
+    end=s.find('\n}',start)
+    if end<0: raise SystemExit('bridge probe function end not found')
+    end+=2
+    replacement=r'''function ppM2BridgeProbeInternal_(body){
+  body=body||{};
+  if(String(body.confirmation||'')!=='OWNER_LOCKED_M2_BRIDGE_PROBE')return {ok:false,error:'BRIDGE_PROBE_CONFIRMATION_REQUIRED'};
+  if(!ppM2BridgeSecret_()||String(body.bridge_secret||'')!==ppM2BridgeSecret_())return {ok:false,error:'BRIDGE_PROBE_CALLER_SECRET_INVALID'};
+  const result=ppM2ServiceFetch_('/internal/gas-bridge-probe',{});
+  return {
+    ok:result.code===200&&!!(result.json&&result.json.ok),
+    service_http_code:result.code,
+    service_ok:!!(result.json&&result.json.ok),
+    service_authority_mode:String(result.json&&result.json.authority&&result.json.authority.mode||''),
+    service_authority_epoch:Number(result.json&&result.json.authority&&result.json.authority.authority_epoch||0),
+    service_generation:String(result.json&&result.json.service_generation||''),
+    service_error:String(result.json&&result.json.error||'').slice(0,120),
+    service_detail:String(result.json&&result.json.detail||'').slice(0,180)
+  };
+}'''
+    s=s[:start]+replacement+s[end:]
+else:
     s += r'''
 
 // S13 safe diagnostic: proves the bridge secret stored in GAS can authenticate to the live Worker.
-// It returns only status/authority metadata; no secret value is returned or logged.
+// It returns only status/authority metadata and sanitized transport diagnostics; no secret is returned.
 function ppM2BridgeProbeInternal_(body){
   body=body||{};
   if(String(body.confirmation||'')!=='OWNER_LOCKED_M2_BRIDGE_PROBE')return {ok:false,error:'BRIDGE_PROBE_CONFIRMATION_REQUIRED'};
@@ -30,9 +52,11 @@ function ppM2BridgeProbeInternal_(body){
     service_ok:!!(result.json&&result.json.ok),
     service_authority_mode:String(result.json&&result.json.authority&&result.json.authority.mode||''),
     service_authority_epoch:Number(result.json&&result.json.authority&&result.json.authority.authority_epoch||0),
-    service_generation:String(result.json&&result.json.service_generation||'')
+    service_generation:String(result.json&&result.json.service_generation||''),
+    service_error:String(result.json&&result.json.error||'').slice(0,120),
+    service_detail:String(result.json&&result.json.detail||'').slice(0,180)
   };
 }
 '''
     m2.write_text(s)
-print('Applied S13 safe GAS bridge probe.')
+print('Applied S13 safe GAS bridge probe with sanitized transport diagnostics.')
