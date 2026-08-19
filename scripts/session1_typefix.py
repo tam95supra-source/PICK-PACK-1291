@@ -18,4 +18,14 @@ replace('service/src/import_atomic.ts',
 replace('service/src/index.ts',
 '''try{const response=await route(request,env);response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){''',
 '''try{const response=await route(request,env);if(response.status!==101)response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){''')
+
+p=Path('service/public/app.js');s=p.read_text()
+if "\"':'&quot'," in s:
+    s=s.replace("\"':'&quot',", "\"':'&quot;',")
+if "m.type==='DELTA'" in s:
+    raise SystemExit('PWA still consumes legacy DELTA websocket payload')
+if "m.type==='DAY_CHANGED'" not in s or "INVALIDATION_V1" not in s:
+    raise SystemExit('PWA invalidation contract missing')
+p.write_text(s)
+print('SESSION1_PWA_INVALIDATION_GUARD=PASS')
 print('SESSION1_TYPEFIX_APPLIED')
