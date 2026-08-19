@@ -22,7 +22,7 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -121,20 +121,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --retry 5 --retry-delay 2 "$EXPECTED_SERVICE_URL/v1/authority" >/tmp/service-authority-before.json
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/v1/authority" >/tmp/service-authority-before.json
           node - <<'NODE'
           const j=require('/tmp/service-authority-before.json'),a=j.authority||j;
           if(!j.ok||a.mode!=='SERVICE_PRIMARY'||Number(a.authority_epoch)!==Number(process.env.EXPECTED_SERVICE_EPOCH)||a.scope!=='PRODUCTION'||a.service_generation!==process.env.SERVICE_GENERATION) throw new Error('SERVICE_TOPOLOGY_UNEXPECTED:'+JSON.stringify({mode:a.mode,epoch:a.authority_epoch,scope:a.scope,generation:a.service_generation}));
           console.log('SERVICE_BEFORE='+JSON.stringify({mode:a.mode,epoch:a.authority_epoch,seq:a.authority_seq,scope:a.scope,generation:a.service_generation}));
           NODE
-          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery-before.json
-          node - <<'NODE'
-          const j=require('/tmp/gas-discovery-before.json'),a=j.authority||{};
-          if(!j.ok||j.authority_mode!=='GOOGLE_FALLBACK'||Number(a.authority_epoch)!==Number(process.env.EXPECTED_FALLBACK_EPOCH)||j.service_generation!==process.env.SERVICE_GENERATION||j.service_url!==process.env.EXPECTED_SERVICE_URL) throw new Error('GAS_TOPOLOGY_UNEXPECTED:'+JSON.stringify({mode:j.authority_mode,epoch:a.authority_epoch,generation:j.service_generation,url:j.service_url}));
-          console.log('GAS_BEFORE='+JSON.stringify({mode:j.authority_mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:j.service_generation,url:j.service_url}));
-          NODE
+          GAS_OK=false
+          for i in $(seq 1 8); do
+            : >/tmp/gas-discovery-before.json
+            curl -sSL --max-time 25 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery-before.json || true
+            if node -e 'try{const j=require("/tmp/gas-discovery-before.json"),a=j.authority||{};if(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===Number(process.env.EXPECTED_FALLBACK_EPOCH)&&j.service_generation===process.env.SERVICE_GENERATION&&j.service_url===process.env.EXPECTED_SERVICE_URL){console.log("GAS_BEFORE="+JSON.stringify({mode:j.authority_mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:j.service_generation,url:j.service_url}));process.exit(0)}}catch{}process.exit(1)'; then GAS_OK=true; break; fi
+            sleep 2
+          done
+          [[ "$GAS_OK" == true ]] || { echo 'GAS_DISCOVERY_NOT_STABLE_EXPECTED_TOPOLOGY'; exit 1; }
           RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
-          curl -fsS -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/fallback-before.json
+          curl -fsS --max-time 25 -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/fallback-before.json
           node - <<'NODE'
           const j=require('/tmp/fallback-before.json'),rows=j.values||[],body=rows.slice(1),epoch=Number(process.env.EXPECTED_FALLBACK_EPOCH);
           const p=body.filter(r=>Number(r[1])===epoch&&String(r[12]||'')==='PENDING');
@@ -161,7 +163,7 @@ jobs:
           RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
           [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" ]] || { echo 'GAS_IDENTIFIERS_MISSING'; exit 1; }
-          curl -fsS -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" >/tmp/gas-live-before.json
+          curl -fsS --max-time 25 -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" >/tmp/gas-live-before.json
           python3 - <<'PY'
           import json,hashlib
           src=json.load(open('/tmp/gas-live-before.json'));files=src.get('files') or []
@@ -185,21 +187,22 @@ jobs:
           after=hashlib.sha256(s.encode()).hexdigest();print('GAS_M2_SOURCE='+json.dumps({'before_sha256':before,'after_sha256':after,'changed':changed}));open('/tmp/gas-changed','w').write('1' if changed else '0')
           PY
           if [[ "$(cat /tmp/gas-changed)" == 1 ]]; then
-            H=$(curl -sS -o /tmp/gas-put.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-live-patched.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+            H=$(curl -sS --max-time 25 -o /tmp/gas-put.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-live-patched.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
             [[ "$H" == 200 ]] || { echo "GAS_SOURCE_UPDATE_HTTP_$H"; exit 1; }
-            H=$(curl -sS -o /tmp/gas-version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Session1 security: redact fallback and bridge secrets"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+            H=$(curl -sS --max-time 25 -o /tmp/gas-version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Session1 security: redact fallback and bridge secrets"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
             [[ "$H" == 200 ]] || { echo "GAS_VERSION_HTTP_$H"; exit 1; }
             V=$(node -e 'const j=require("/tmp/gas-version.json");process.stdout.write(String(j.versionNumber||""))'); [[ -n "$V" ]] || exit 1
             node - "$SCRIPT_ID" "$V" <<'NODE'
             const fs=require('fs');fs.writeFileSync('/tmp/gas-deploy.json',JSON.stringify({deploymentConfig:{scriptId:process.argv[2],versionNumber:Number(process.argv[3]),manifestFileName:'appsscript',description:'Session1 security sanitizer'}}));
             NODE
-            H=$(curl -sS -o /tmp/gas-deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+            H=$(curl -sS --max-time 25 -o /tmp/gas-deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
             [[ "$H" == 200 ]] || { echo "GAS_DEPLOY_HTTP_$H"; exit 1; }
           fi
           OK=false
           for i in $(seq 1 12); do
-            curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery-after-sanitizer.json || true
-            if node -e 'const j=require("/tmp/gas-discovery-after-sanitizer.json");const a=j.authority||{};process.exit(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7&&j.service_generation===process.env.SERVICE_GENERATION&&j.service_url===process.env.EXPECTED_SERVICE_URL?0:1)'; then OK=true; break; fi
+            : >/tmp/gas-discovery-after-sanitizer.json
+            curl -sSL --max-time 25 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery-after-sanitizer.json || true
+            if node -e 'try{const j=require("/tmp/gas-discovery-after-sanitizer.json"),a=j.authority||{};process.exit(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7&&j.service_generation===process.env.SERVICE_GENERATION&&j.service_url===process.env.EXPECTED_SERVICE_URL?0:1)}catch{process.exit(1)}'; then OK=true; break; fi
             sleep 3
           done
           [[ "$OK" == true ]] || { echo 'GAS_SANITIZER_CHANGED_TOPOLOGY_STOP'; exit 1; }
@@ -237,10 +240,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --retry 8 --retry-delay 2 "$EXPECTED_SERVICE_URL/health" >/tmp/health-after.json
-          curl -fsS --retry 5 --retry-delay 2 "$EXPECTED_SERVICE_URL/v1/capabilities" >/tmp/cap-after.json
-          curl -fsS --retry 5 --retry-delay 2 "$EXPECTED_SERVICE_URL/v1/authority" >/tmp/authority-after.json
-          curl -fsS --retry 5 --retry-delay 2 "$EXPECTED_SERVICE_URL/" >/tmp/web-after.html
+          curl -fsS --retry 8 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/health" >/tmp/health-after.json
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/v1/capabilities" >/tmp/cap-after.json
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/v1/authority" >/tmp/authority-after.json
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/" >/tmp/web-after.html
           node - <<'NODE'
           const h=require('/tmp/health-after.json'),c=require('/tmp/cap-after.json'),j=require('/tmp/authority-after.json'),a=j.authority||j;
           if(!h.ok||h.environment!=='production'||h.generation!==process.env.SERVICE_GENERATION)throw new Error('POST_HEALTH_INVALID');
@@ -250,18 +253,22 @@ jobs:
           NODE
           grep -q 'PICK PACK 1291' /tmp/web-after.html
           echo 'HEALTH_BENCHMARK_SECONDS'
-          for i in $(seq 1 10); do curl -fsS -o /dev/null -w '%{time_total}\n' "$EXPECTED_SERVICE_URL/health"; done | tee /tmp/health-times.txt
+          for i in $(seq 1 10); do curl -fsS --max-time 10 -o /dev/null -w '%{time_total}\n' "$EXPECTED_SERVICE_URL/health"; done | tee /tmp/health-times.txt
           python3 - <<'PY'
           import statistics
           xs=[float(x) for x in open('/tmp/health-times.txt') if x.strip()]
           print('HEALTH_BENCH='+str({'samples':len(xs),'min_ms':round(min(xs)*1000,1),'median_ms':round(statistics.median(xs)*1000,1),'max_ms':round(max(xs)*1000,1),'mean_ms':round(statistics.mean(xs)*1000,1)}))
           PY
-          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery-post.json
-          node - <<'NODE'
-          const j=require('/tmp/gas-discovery-post.json'),a=j.authority||{};if(!j.ok||j.authority_mode!=='GOOGLE_FALLBACK'||Number(a.authority_epoch)!==7||j.service_url!==process.env.EXPECTED_SERVICE_URL)throw new Error('POST_GAS_TOPOLOGY_CHANGED');console.log('POST_GAS='+JSON.stringify({mode:j.authority_mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:j.service_generation,url:j.service_url}));
-          NODE
+          GAS_OK=false
+          for i in $(seq 1 8); do
+            : >/tmp/gas-discovery-post.json
+            curl -sSL --max-time 25 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/gas-discovery-post.json || true
+            if node -e 'try{const j=require("/tmp/gas-discovery-post.json"),a=j.authority||{};if(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7&&j.service_url===process.env.EXPECTED_SERVICE_URL){console.log("POST_GAS="+JSON.stringify({mode:j.authority_mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:j.service_generation,url:j.service_url}));process.exit(0)}}catch{}process.exit(1)'; then GAS_OK=true; break; fi
+            sleep 2
+          done
+          [[ "$GAS_OK" == true ]] || { echo 'POST_GAS_TOPOLOGY_NOT_STABLE'; exit 1; }
           RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
-          curl -fsS -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/fallback-post.json
+          curl -fsS --max-time 25 -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/fallback-post.json
           node - <<'NODE'
           const rows=(require('/tmp/fallback-post.json').values||[]).slice(1),p=rows.filter(r=>Number(r[1])===7&&String(r[12]||'')==='PENDING');if(p.length!==3)throw new Error('POST_FALLBACK_COUNT_CHANGED:'+p.length);console.log('POST_FALLBACK='+JSON.stringify({epoch:7,pending:p.length,seq:p.map(r=>Number(r[2]))}));
           NODE
