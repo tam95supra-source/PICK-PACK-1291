@@ -1,12 +1,7 @@
 name: S22 Beta22 OTA Verify
 
 on:
-  push:
-    branches: [agent/service-migration-m2]
-    paths:
-      - '.ops/s22-beta21-ota-verify.json'
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
