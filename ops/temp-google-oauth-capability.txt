@@ -1,3 +1,0 @@
-process_http=403
-error_class=PERMISSION_DENIED
-error_message=Request had insufficient authentication scopes.
