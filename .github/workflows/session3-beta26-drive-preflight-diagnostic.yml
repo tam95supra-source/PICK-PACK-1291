@@ -1,0 +1,60 @@
+name: Session3 Beta26 Drive Preflight Diagnostic
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-beta26-drive-preflight-diagnostic-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+      STABLE_FOLDER_ID: 1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4
+      APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.26.apk
+      CHECKSUM_NAME: SHA256SUMS-beta26.txt
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Read-only OAuth and Drive preflight
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/r
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do
+            if [[ -n "${!v:-}" ]]; then echo "${v}_present=YES" >> "$OUT"; else echo "${v}_present=NO" >> "$OUT"; fi
+          done
+          H=$(curl -sS --max-time 25 -o /tmp/token.json -w '%{http_code}' https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          echo "oauth_http=$H" >> "$OUT"
+          TOKEN=$(jq -r '.access_token//""' /tmp/token.json 2>/dev/null)
+          ERR=$(jq -r '.error//""' /tmp/token.json 2>/dev/null)
+          [[ -n "$TOKEN" ]] && echo oauth_token=YES >> "$OUT" || echo oauth_token=NO >> "$OUT"
+          [[ -n "$ERR" ]] && echo "oauth_error=$ERR" >> "$OUT"
+          if [[ -n "$TOKEN" ]]; then
+            for pair in "beta:$BETA_FOLDER_ID" "stable:$STABLE_FOLDER_ID"; do
+              n=${pair%%:*};f=${pair#*:};q=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote("\"%s\" in parents and trashed=false"%sys.argv[1]))' "$f")
+              C=$(curl -sS --max-time 25 -o "/tmp/$n.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size,modifiedTime)&pageSize=1000")
+              echo "${n}_http=$C" >> "$OUT"
+              echo "${n}_count=$(jq -r '.files|length//-1' /tmp/$n.json 2>/dev/null)" >> "$OUT"
+            done
+            echo "stable_empty=$(jq -r 'if (.files|length)==0 then "YES" else "NO" end' /tmp/stable.json 2>/dev/null)" >> "$OUT"
+            echo "beta26_exact_count=$(jq -r --arg n "$APK_NAME" --arg c "$CHECKSUM_NAME" '[.files[]|select(.name==$n or .name==$c)]|length' /tmp/beta.json 2>/dev/null)" >> "$OUT"
+          fi
+          echo verdict=READ_ONLY_COMPLETE >> "$OUT"
+      - name: Record sanitized result
+        shell: bash
+        run: |
+          cp /tmp/r ops/session3-beta26-drive-preflight-diagnostic-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-beta26-drive-preflight-diagnostic-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record Beta26 Drive preflight diagnostic'
+          git pull --rebase origin agent/service-migration-m2;git push origin HEAD:agent/service-migration-m2
