@@ -1,5 +1,10 @@
-checked_at=2026-08-19T22:26:18Z
-head_sha=04e0825b8bba24d780422651d7f47cc8277f0037
+checked_at=2026-08-19T22:28:14Z
+head_sha=2f6e4c3ed3dc63e5a44b8ea909ba374624712df8
 config=PASS
 failed_phase=BUILD
 failed_rc=1
+compiler_excerpt_begin
+> Task :app:generateS10Operations FAILED
+S31 API call signature anchor missing
+BUILD FAILED in 16s
+compiler_excerpt_end
