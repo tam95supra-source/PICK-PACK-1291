@@ -22,6 +22,9 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/SyncDirectionTracker.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/DeviceNetworkStatus.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2Firebase.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PdaImportActivity.kt"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch_in_place.py"))
     inputs.file(rootProject.file("tools/apply_s11_compact_report_patch.py"))
@@ -39,6 +42,8 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s21_labor_shift_fix.py"))
     inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability.py"))
     inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability_wrapper.py"))
+    inputs.file(rootProject.file("tools/apply_s23_pda_import_ui.py"))
+    inputs.file(rootProject.file("tools/apply_s24_fcm_logout_patch.py"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
@@ -107,4 +112,4 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// The M2 source transform composes after S10..S22 transforms in the ephemeral build workspace.
+// The M2 source transform composes S10..S24 in the ephemeral build workspace.
