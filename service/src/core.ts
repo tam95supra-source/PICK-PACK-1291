@@ -77,6 +77,7 @@ function normalizeMutation(req: CanonicalMutationRequest): CanonicalMutationRequ
   if (!deviceId || deviceId.length > 180) throw new CoreError("DEVICE_ID_REQUIRED", "VALIDATION", 400);
   if (!validIsoDate(String(req.business_date ?? ""))) throw new CoreError("BUSINESS_DATE_INVALID", "VALIDATION", 400);
   if (!Number.isInteger(req.base_version) || req.base_version < 0) throw new CoreError("BASE_VERSION_INVALID", "VALIDATION", 400);
+  if (!["ATTENDANCE_ENTER","ATTENDANCE_EXIT","RESOURCE_CHANGE","LABOR_START","LABOR_FINISH","M1_SHADOW_PROBE"].includes(String(req.event_type))) throw new CoreError("EVENT_TYPE_UNSUPPORTED","VALIDATION",400);
   if (req.schema_version !== 1) throw new CoreError("SCHEMA_VERSION_UNSUPPORTED", "SCHEMA", 409);
   return {
     ...req,
@@ -225,11 +226,11 @@ async function commitLaborFinish(db:D1Database, auth:AuthContext, req:CanonicalM
 async function commitProbe(db:D1Database,auth:AuthContext,req:CanonicalMutationRequest,a:AuthorityRow):Promise<EventRow>{const event=await buildEvent(req,auth,a,req.base_version+1);await db.batch(eventStatements(db,event,a.authority_seq));return event;}
 
 export async function commitMutation(db:D1Database,env:Env,auth:AuthContext,input:CanonicalMutationRequest):Promise<{event:EventRow;duplicate:boolean}>{
-  const req=normalizeMutation(input),preflightStatements:D1PreparedStatement[]=[
+  const req=normalizeMutation(input);if(req.event_type==="M1_SHADOW_PROBE"&&auth.role!=="SUPERADMIN")throw new CoreError("SHADOW_PROBE_SUPERADMIN_REQUIRED","PERMISSION",403);const preflightStatements:D1PreparedStatement[]=[
     db.prepare("SELECT * FROM events WHERE event_id=?1 OR idempotency_key=?2 ORDER BY committed_at LIMIT 1").bind(req.event_id,req.idempotency_key),
     db.prepare("SELECT authority_epoch,authority_seq,mode,scope,service_generation,updated_at FROM authority_state WHERE singleton_id=1"),
   ];
-  const writeWindow=auth.role==="SUPERADMIN"?(req.client_source==="WEB"?0:7):2;
+  const writeWindow=auth.role==="SUPERADMIN"?7:2;
   if(writeWindow)preflightStatements.push(db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT ?1").bind(writeWindow));
   const preflight=await db.batch(preflightStatements),prior=(preflight[0]?.results?.[0]??null) as EventRow|null;if(prior)return{event:prior,duplicate:true};
   const a=(preflight[1]?.results?.[0]??null) as AuthorityRow|null;if(!a)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);

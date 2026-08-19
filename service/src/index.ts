@@ -5,7 +5,8 @@ import { commitLegacyMutation, type LegacyMutationInput } from "./legacy";
 import { replicatePending } from "./replication";
 import { dayDeltaV2, masterDeltaV2, syncStatusV2 } from "./sync_contract";
 import { historicalCorrection } from "./correction";
-import { importChunk, importCommit, importHistory, importPreview, importRollback, importSchema, importStart } from "./import_engine";
+import { importChunk, importHistory, importPreview, importSchema, importStart } from "./import_engine";
+import { importCommitAtomic, importRollbackAtomic } from "./import_atomic";
 import { flushPushOutbox, registerPushDevice, revokePushDevice } from "./push";
 import { RealtimeHub } from "./realtime";
 import { apiError, constantTimeEqual, json, nowIso, readJsonBody, sha256Hex } from "./util";
@@ -36,7 +37,7 @@ async function gasBridgeAuthorized(request:Request,env:Env):Promise<boolean>{con
 function eventPublic(e:Record<string,unknown>):Record<string,unknown>{return e;}
 
 async function broadcastEvent(env:Env,e:{event_id:string;event_type:string;entity_type:string;entity_id:string;business_date:string;authority_epoch:number;authority_seq:number;service_generation:string;new_version:number}):Promise<number>{
-  const hub=env.REALTIME_HUB.getByName(`business:${e.business_date}`);try{return await hub.broadcast(e);}catch(err){console.log(JSON.stringify({level:"warn",kind:"realtime_broadcast_failed",event_id:e.event_id,error:String(err)}));return 0;}
+  const hub=env.REALTIME_HUB.getByName(`business:${e.business_date}`) as unknown as {broadcast(event:typeof e):Promise<number>};try{return await hub.broadcast(e);}catch(err){console.log(JSON.stringify({level:"warn",kind:"realtime_broadcast_failed",event_id:e.event_id,error:String(err)}));return 0;}
 }
 
 async function healthSnapshot(env:Env):Promise<Response>{
@@ -53,23 +54,24 @@ async function healthSnapshot(env:Env):Promise<Response>{
 }
 
 async function realtimeTicket(request:Request,env:Env):Promise<Response>{
-  const auth=await requireAuth(request,env),u=new URL(request.url),date=u.searchParams.get("business_date")||"";if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return apiError("BUSINESS_DATE_INVALID","VALIDATION",400);
+  const auth=await requireAuth(request,env),u=new URL(request.url),scope=u.searchParams.get("scope")==="master"?"master":"day",requested=u.searchParams.get("business_date")||"",date=scope==="master"?"__MASTER__":requested;if(scope==="day"&&!/^\d{4}-\d{2}-\d{2}$/.test(date))return apiError("BUSINESS_DATE_INVALID","VALIDATION",400);
   const ticket=crypto.randomUUID(),expires=Date.now()+120_000,createdAt=nowIso();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM realtime_tickets WHERE expires_at<?1").bind(Date.now()),
     env.DB.prepare("INSERT INTO realtime_tickets(ticket_id,login_id,device_id,business_date,expires_at,created_at) VALUES(?1,?2,?3,?4,?5,?6)").bind(ticket,auth.login_id,auth.device_id,date,expires,createdAt),
   ]);
-  return json({ok:true,ticket,expires_at:expires});
+  return json({ok:true,ticket,expires_at:expires,scope,business_date:scope==="day"?date:null});
 }
 async function realtimeConnect(request:Request,env:Env):Promise<Response>{
   if(request.headers.get("Upgrade")!=="websocket")return apiError("WEBSOCKET_REQUIRED","VALIDATION",426);
   const u=new URL(request.url),ticket=u.searchParams.get("ticket")||"";const row=await env.DB.prepare("SELECT ticket_id,login_id,device_id,business_date,expires_at FROM realtime_tickets WHERE ticket_id=?1").bind(ticket).first<{ticket_id:string;login_id:string;device_id:string;business_date:string;expires_at:number}>();
   if(!row||row.expires_at<Date.now())return apiError("REALTIME_TICKET_INVALID","AUTH",401);await env.DB.prepare("DELETE FROM realtime_tickets WHERE ticket_id=?1").bind(ticket).run();
-  const hub=env.REALTIME_HUB.getByName(`business:${row.business_date}`),target=new URL(request.url);target.searchParams.set("device_id",row.device_id);target.searchParams.set("login_id",row.login_id);return hub.fetch(new Request(target,request));
+  const hub=env.REALTIME_HUB.getByName(row.business_date==="__MASTER__"?"master:global":`business:${row.business_date}`),target=new URL(request.url);target.searchParams.set("device_id",row.device_id);target.searchParams.set("login_id",row.login_id);return hub.fetch(new Request(target,request));
 }
 
 async function bootstrapSnapshot(request:Request,env:Env):Promise<Response>{
-  await requireAuth(request,env);const u=new URL(request.url),date=u.searchParams.get("business_date")||"";
+  const auth=await requireAuth(request,env),u=new URL(request.url),date=u.searchParams.get("business_date")||"";
+  if(date&&!(auth.role==="SUPERADMIN"&&u.searchParams.get("client_source")==="WEB")){const allowed=await env.DB.prepare("SELECT 1 x FROM (SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 7) WHERE business_date=?1").bind(date).first();if(!allowed)return apiError("BUSINESS_DATE_OUTSIDE_VIEW_WINDOW","PERMISSION",403);}
   const results=await env.DB.batch([
     env.DB.prepare("SELECT mnv,full_name,phone,main_position,supplier,department,site,warehouse,start_date,note FROM employees ORDER BY mnv"),
     env.DB.prepare("SELECT resource_type,resource_id,status_label,available,metadata_json FROM resources ORDER BY resource_type,resource_id"),
@@ -172,7 +174,7 @@ async function route(request:Request,env:Env):Promise<Response>{
   if(p==="/v1/import/schema"&&method==="GET")return importSchema(request,env);
   if(p==="/v1/import/batches"&&method==="POST")return importStart(request,env);
   if(p==="/v1/import/history"&&method==="GET")return importHistory(request,env);
-  const im=p.match(/^\/v1\/import\/batches\/([^/]+)\/(chunks|preview|commit|rollback)$/);if(im){const id=decodeURIComponent(im[1]!),op=im[2];if(op==="chunks"&&(method==="POST"||method==="PUT"))return importChunk(request,env,id);if(op==="preview"&&method==="POST")return importPreview(request,env,id);if(op==="commit"&&method==="POST")return importCommit(request,env,id);if(op==="rollback"&&method==="POST")return importRollback(request,env,id);}
+  const im=p.match(/^\/v1\/import\/batches\/([^/]+)\/(chunks|preview|commit|rollback)$/);if(im){const id=decodeURIComponent(im[1]!),op=im[2];if(op==="chunks"&&(method==="POST"||method==="PUT"))return importChunk(request,env,id);if(op==="preview"&&method==="POST")return importPreview(request,env,id);if(op==="commit"&&method==="POST")return importCommitAtomic(request,env,id);if(op==="rollback"&&method==="POST")return importRollbackAtomic(request,env,id);}
 
   if(p==="/internal/legacy-bridge"&&method==="POST")return gasLegacyBridge(request,env);
   if(p==="/internal/fallback/ingest"&&method==="POST")return fallbackIngest(request,env);

@@ -1,5 +1,6 @@
 import { REPLICA_HEADERS, type EventRow } from "./domain";
 import { nowIso } from "./util";
+import { replicateMasterProjection } from "./master_replication";
 
 interface OutboxRow { outbox_id:number; event_id:string; attempt_count:number; }
 interface GoogleToken { access_token?:string; expires_in?:number; error?:string; }
@@ -125,14 +126,14 @@ async function replicateLaborFinishOperational(db:D1Database,sheetId:string,toke
 }
 
 async function replicateOperational(db:D1Database,env:Env,token:string,events:EventRow[]):Promise<number>{
-  const a=await db.prepare("SELECT scope FROM authority_state WHERE singleton_id=1").first<{scope:string}>();if(a?.scope!=="PRODUCTION")return 0;const index=await loadOperationalIndex(env,token);let n=0;
+  const a=await db.prepare("SELECT scope FROM authority_state WHERE singleton_id=1").first<{scope:string}>();if(a?.scope!=="PRODUCTION")return 0;const master=await replicateMasterProjection(db,env,token,events),index=await loadOperationalIndex(env,token);let n=0;
   for(const e of events){
     if(["ATTENDANCE_ENTER","RESOURCE_CHANGE","ATTENDANCE_EXIT"].includes(e.event_type))await replicateAttendanceOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
     else if(e.event_type==="LABOR_START")await replicateLaborStartOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
     else if(e.event_type==="LABOR_FINISH")await replicateLaborFinishOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
     else continue;n++;
   }
-  return n;
+  return n+master;
 }
 
 function retryDelaySeconds(attempt:number):number{return Math.min(900,Math.max(5,Math.pow(2,Math.min(8,attempt))*5));}
