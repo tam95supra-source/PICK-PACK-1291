@@ -1,0 +1,11 @@
+{
+  "status": "FAIL",
+  "canonical_restore": "PASS",
+  "last_stage": "EXERCISE",
+  "probe_gas_version": 79,
+  "final_gas_version": 80,
+  "employee_code": "909090",
+  "marker_bridge": "UNKNOWN",
+  "restore_bridge": "UNKNOWN",
+  "verified_at": "2026-08-19T23:54:23.271613+00:00"
+}
