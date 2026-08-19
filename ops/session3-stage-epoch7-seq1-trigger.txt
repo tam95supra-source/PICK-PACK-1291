@@ -1,0 +1,6 @@
+confirmation=OWNER_SERVICE_RETURN_DIAGNOSTIC
+epoch=7
+seq=1
+requested_at=2026-08-19T21:59:00+07:00
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
