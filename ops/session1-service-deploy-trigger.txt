@@ -1,0 +1,7 @@
+confirmation=OWNER_SESSION1_SERVICE_DEPLOY
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
+authority_change=FORBIDDEN_IN_THIS_RUN
+expected_service_epoch=6
+expected_fallback_epoch=7
+expected_fallback_pending=3
