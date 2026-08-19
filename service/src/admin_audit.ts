@@ -24,7 +24,7 @@ export async function commitAdminAudit(db:D1Database,auth:AuthContext,input:Admi
   const action=text(input.action,80);if(!ALLOWED.has(action))throw new CoreError("ADMIN_AUDIT_ACTION_INVALID","VALIDATION",400);
   const eventId=text(input.event_id,180)||crypto.randomUUID();
   const existing=await db.prepare("SELECT * FROM events WHERE event_id=?1").bind(eventId).first<EventRow>();if(existing)return{ok:true,duplicate:true,event:existing};
-  const a=await currentAuthority(db);if(a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION")throw new CoreError("ADMIN_AUDIT_REQUIRES_SERVICE_PRIMARY","AUTHORITY",409,true);
+  const a=await currentAuthority(db);if(a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION")throw new CoreError("ADMIN_AUDIT_REQUIRES_SERVICE_PRIMARY","CONFLICT",409,true);
   const seq=a.authority_seq+1,at=nowIso(),targetId=text(input.target_id,180)||auth.login_id,targetType=text(input.target_type,80)||"ADMIN_ACTION";
   const payload=sanitizeSensitive({action,target_type:targetType,target_id:targetId,target_label:text(input.target_label,240),result:text(input.result,80)||"OK",detail:text(input.detail,500)}) as Record<string,unknown>;
   const base={event_id:eventId,event_type:TYPE[action]||"ADMIN_AUDIT",entity_type:targetType,entity_id:targetId,business_date:"MASTER",authority_epoch:a.authority_epoch,authority_seq:seq,service_generation:a.service_generation,base_version:0,new_version:0,actor_id:auth.login_id,actor_role:auth.role,device_id:text(input.device_id,180)||auth.device_id,occurred_at:text(input.occurred_at,80)||at,committed_at:at,payload_json:JSON.stringify(payload),idempotency_key:`admin-audit:${eventId}`,origin:"ADMIN_AUDIT",schema_version:1};
