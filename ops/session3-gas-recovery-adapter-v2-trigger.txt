@@ -1,0 +1,5 @@
+scope=RECOVERY_ADAPTER_ONLY
+expected_authority=GOOGLE_FALLBACK|7|7
+authority_change=FORBIDDEN
+stable=FORBIDDEN
+requested_at=2026-08-19T21:35:00+07:00
