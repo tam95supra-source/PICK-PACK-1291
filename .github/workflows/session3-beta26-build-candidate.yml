@@ -107,6 +107,11 @@ jobs:
         run: |
           test -f /tmp/session4-beta27-build-candidate-result.txt || echo result_missing=true >/tmp/session4-beta27-build-candidate-result.txt
           cp /tmp/session4-beta27-build-candidate-result.txt /tmp/result.copy
+          if grep -q '^failed_phase=BUILD$' /tmp/result.copy && [[ -f /tmp/gradle.log ]]; then
+            echo compiler_excerpt_begin >> /tmp/result.copy
+            grep -E '(^e:| error: |FAILED|Exception|S31|S31B|anchor missing|Traceback|Unresolved reference|Compilation error)' /tmp/gradle.log | tail -120 >> /tmp/result.copy || true
+            echo compiler_excerpt_end >> /tmp/result.copy
+          fi
           git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true
           cp /tmp/result.copy ops/session4-beta27-build-candidate-result.txt
           git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
