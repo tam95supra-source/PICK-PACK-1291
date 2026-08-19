@@ -1,0 +1,67 @@
+name: Service M2 Beta20 OTA Publish
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/m2-beta20-ota-publish-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: service-m2-beta20-ota-publish
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_GENERATION: m2-prod-20260819-001
+  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+  BETA_VERSION: 0.4.2-beta.20
+  BETA_VERSION_CODE: '26'
+  BETA_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  PREVIOUS_BETA_VERSION: 0.4.2-beta.19
+  STABLE_VERSION: 0.4.2-stable.0
+  EXPECTED_BETA_SHA256: ed5b98afeaf962b1081faaab4c710afa00f2fc80981b76666a86d8bee856502e
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+  CANDIDATE_ARTIFACT_ID: '9349144530'
+  CANDIDATE_RUN_ID: '32205829548'
+  CANDIDATE_ARTIFACT_NAME: pick-pack-1291-0.4.2-beta.20-signed-validation
+
+jobs:
+  publish-beta20:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+      - name: Verify immutable Beta20 release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 26' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.20"' app/build.gradle.kts
+          grep -q 'S21_LABOR_SHIFT_APPLIED' tools/apply_s21_labor_shift_fix.py
+          grep -q 'S20_PACK_IDENTITY_APPLIED' tools/apply_s20_pack_identity_fix.py
+      - name: Publish and verify Beta20 OTA
+        run: python3 tools/m2_beta20_ota_publish_v1.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m2-beta20-ota-publish-evidence-${{ github.run_id }}
+          path: m2-beta20-ota-publish-evidence/
+          if-no-files-found: warn
+          retention-days: 30
