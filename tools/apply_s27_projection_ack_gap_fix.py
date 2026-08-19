@@ -17,9 +17,9 @@ if MARK not in s:
     if end<0: raise SystemExit('S27 markMutationSynced anchor missing')
     insert='''    /**
      * S27_PROJECTION_ACK_GAP: visible local projection includes ordinary pending writes plus
-     * CONFIRMED writes that were queued after the currently stored day snapshot. This closes the
+     * CONFIRMED writes whose ACK is newer than the currently stored day snapshot. This closes the
      * ACK-to-next-snapshot gap without ever making a confirmed write eligible for network resend.
-     * Once reconcile saves a newer snapshot, the confirmed overlay automatically disappears.
+     * Once reconcile saves a snapshot after the ACK, the confirmed overlay disappears.
      */
     fun projectionMutations(limit: Int = 500): List<PendingMutation> = withDbLock {
         val out = ArrayList<PendingMutation>()
@@ -37,11 +37,11 @@ if MARK not in s:
                     val payload = body.optJSONObject("payload") ?: body
                     val date = payload.optString("business_date").ifBlank { body.optString("business_date") }
                     if (date.isBlank()) continue
-                    val queuedAt = c.getLong(5)
+                    val ackAt = c.getLong(6)
                     val snapshotSavedAt = readableDb().query(
                         "day_snapshot", arrayOf("saved_at"), "business_date=?", arrayOf(date), null, null, null, "1"
                     ).use { sc -> if (sc.moveToFirst()) sc.getLong(0) else 0L }
-                    if (snapshotSavedAt >= queuedAt) continue
+                    if (snapshotSavedAt >= ackAt) continue
                 }
                 out += PendingMutation(c.getString(0), body, c.getInt(2) == 1, status, c.getInt(4), c.getLong(5))
             }
