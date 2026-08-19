@@ -2,7 +2,7 @@ import base, { RealtimeHub } from "./index";
 import { authenticate, internalAuthorized } from "./auth";
 import { bootstrapGoogleStart, bootstrapGoogleStatus, bootstrapGoogleStep } from "./bootstrap_resumable";
 import { bootstrapResourceProjectionStep } from "./bootstrap_resources";
-import { compatBootstrap, compatDay, compatSyncStatus } from "./compat";
+import { compatBootstrap, compatDay } from "./compat";
 import { currentAuthority } from "./core";
 import { rebuildGoogleStagingFromD1 } from "./dr";
 import { failbackFromFallbackInbox, reconciliationLocked } from "./recovery";
@@ -10,12 +10,41 @@ import { apiError, constantTimeEqual, json, nowIso, readJsonBody, sha256Hex } fr
 
 export { RealtimeHub };
 
+interface ClientSyncRow{
+  business_date:string;sequence_no:number;max_seq:number|null;
+  authority_epoch:number;authority_seq:number;mode:string;scope:string;service_generation:string;updated_at:string;
+  server_retention_floor:string|null;projection_pending:number|null;master_revision:number|null;
+}
+
 async function m2ClientSyncStatus(db:D1Database):Promise<Record<string,unknown>>{
-  const status=await compatSyncStatus(db) as Record<string,unknown>;
-  const dates=(await db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 2").all<{business_date:string}>()).results??[];
-  const all=(status.day_revisions&&typeof status.day_revisions==="object"?status.day_revisions:{}) as Record<string,unknown>;
-  const recent:Record<string,unknown>={};for(const d of dates)recent[d.business_date]=all[d.business_date]??1;
-  return{...status,sync_engine:"M2_SERVICE_RECENT_N_N_MINUS_1",retention_floor:dates[dates.length-1]?.business_date??"",day_revisions:recent,server_retention_floor:status.server_retention_floor};
+  const q=`WITH recent AS (
+      SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 2
+    ), rev AS (
+      SELECT recent.business_date,recent.sequence_no,MAX(COALESCE(events.authority_seq,0)) AS max_seq
+      FROM recent LEFT JOIN events ON events.business_date=recent.business_date
+      GROUP BY recent.business_date,recent.sequence_no
+    ), meta AS (
+      SELECT
+        (SELECT business_date FROM business_dates ORDER BY sequence_no ASC LIMIT 1) AS server_retention_floor,
+        COALESCE((SELECT pending_count FROM replication_status WHERE singleton_id=1),0) AS projection_pending,
+        COALESCE((SELECT MAX(source_row) FROM employees),0) AS master_revision
+    )
+    SELECT rev.business_date,rev.sequence_no,rev.max_seq,
+      a.authority_epoch,a.authority_seq,a.mode,a.scope,a.service_generation,a.updated_at,
+      meta.server_retention_floor,meta.projection_pending,meta.master_revision
+    FROM rev CROSS JOIN authority_state a CROSS JOIN meta
+    WHERE a.singleton_id=1 ORDER BY rev.sequence_no DESC`;
+  const result=await db.prepare(q).all<ClientSyncRow>(),rows=result.results??[],first=rows[0];
+  if(!first)throw new Error("SYNC_STATUS_EMPTY");
+  const dayRevisions:Record<string,number>={};for(const r of rows)dayRevisions[r.business_date]=Math.max(1,Number(r.max_seq??0));
+  const authority={authority_epoch:first.authority_epoch,authority_seq:first.authority_seq,mode:first.mode,scope:first.scope,service_generation:first.service_generation,updated_at:first.updated_at};
+  return{
+    ok:true,business_date:first.business_date,server_seq:first.authority_seq,master_revision:Number(first.master_revision??0),last_event_at:first.updated_at,
+    projection_pending:Number(first.projection_pending??0),mode:"APP_SERVICE_D1",sync_engine:"M2_SERVICE_RECENT_N_N_MINUS_1",
+    retention_floor:rows[rows.length-1]?.business_date??first.business_date,server_retention_floor:first.server_retention_floor??rows[rows.length-1]?.business_date??first.business_date,
+    retention_epoch:first.authority_epoch,day_revisions:dayRevisions,authority,service_generation:first.service_generation,
+    service_telemetry:{db_duration_ms:result.meta.duration,db_rows_read:result.meta.rows_read,served_by_region:result.meta.served_by_region??"",served_by_primary:result.meta.served_by_primary??false}
+  };
 }
 
 async function legacySync(request:Request,env:Env):Promise<Response>{
