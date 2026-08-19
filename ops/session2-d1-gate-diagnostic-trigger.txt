@@ -5,4 +5,5 @@ pinpoint_at=2026-08-19T18:31:00+07:00
 isolate_query_at=2026-08-19T18:35:00+07:00
 refresh_beta25_at=2026-08-19T20:42:00+07:00
 owner_service_return_checkpoint_at=2026-08-19T21:22:00+07:00
+pre_failback_epoch7_at=2026-08-19T21:39:00+07:00
 mode=read-only
