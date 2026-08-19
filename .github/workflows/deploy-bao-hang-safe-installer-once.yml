@@ -1,0 +1,107 @@
+name: Deploy Bao Hang safe installer once
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/deploy-bao-hang-safe-installer-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      PP_SCRIPT_ID_RAW: ${{ secrets.GAS_SCRIPT_ID }}
+      PP_DEPLOYMENT_ID_RAW: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: OAuth
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Patch only safe installer into live PICK PACK source
+        id: prep
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$PP_SCRIPT_ID_RAW" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$PP_DEPLOYMENT_ID_RAW" | tr -d '\r\n\t ')
+          DEPLOY_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOY_ID="${BASH_REMATCH[1]}"; fi
+          test -n "$SCRIPT_ID"; test -n "$DEPLOY_ID"
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOY_ID"
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" > /tmp/live.json
+          python3 - <<'PY'
+          import json,pathlib
+          live=json.load(open('/tmp/live.json')); safe=pathlib.Path('google-apps-script/BAO_HANG_STAFF_SETUP_SAFE.gs').read_text()
+          files=live.get('files',[]); out=[]; replaced=False
+          for f in files:
+            if f.get('type')=='SERVER_JS' and ('function setupBaoHangStaffBridgeSafe()' in f.get('source','') or f.get('name')=='BAO_HANG_STAFF_SETUP_SAFE'):
+              if not replaced:
+                g=dict(f); g['name']='BAO_HANG_STAFF_SETUP_SAFE'; g['source']=safe; out.append(g); replaced=True
+              continue
+            out.append(f)
+          if not replaced: out.append({'name':'BAO_HANG_STAFF_SETUP_SAFE','type':'SERVER_JS','source':safe})
+          src='\n'.join(f.get('source','') for f in out if f.get('type')=='SERVER_JS')
+          if 'function setupBaoHangStaffBridge()' not in src or "SOURCE_ID: '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'" not in src: raise SystemExit('PICK_PACK_BRIDGE_SCOPE_MISMATCH')
+          pathlib.Path('/tmp/content.json').write_text(json.dumps({'files':out},ensure_ascii=False))
+          pathlib.Path('/tmp/safe.js').write_text(safe)
+          PY
+          node --check /tmp/safe.js >/dev/null
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"; echo "deployment_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy existing PICK PACK web app
+        id: deploy
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.prep.outputs.script_id }}
+          DEPLOY_ID: ${{ steps.prep.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          H=$(curl -sS -o /tmp/u.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content"); [[ "$H" == 200 ]] || { cat /tmp/u.out; exit 31; }
+          H=$(curl -sS -o /tmp/v.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack safe Bao Hang staff installer"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions"); [[ "$H" == 200 ]] || exit 32
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/v.json"))["versionNumber"])')
+          python3 - "$V" "$SCRIPT_ID" <<'PY'
+          import json,sys
+          open('/tmp/d.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[2],'versionNumber':int(sys.argv[1]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API'}}))
+          PY
+          H=$(curl -sS -o /tmp/d.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/d.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOY_ID"); [[ "$H" == 200 ]] || { cat /tmp/d.out; exit 33; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Verify live source contains SAFE installer and record proof
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.prep.outputs.script_id }}
+          GAS_VERSION: ${{ steps.deploy.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" > /tmp/after.json
+          python3 - <<'PY'
+          import datetime,json,os
+          live=json.load(open('/tmp/after.json')); src='\n'.join(f.get('source','') for f in live.get('files',[]) if f.get('type')=='SERVER_JS')
+          if 'function setupBaoHangStaffBridgeSafe()' not in src or "installer: 'SAFE_NO_RECONCILE'" not in src: raise SystemExit('SAFE_INSTALLER_NOT_LIVE')
+          p={'status':'PASS','installer':'SAFE_NO_RECONCILE','backend_mutations_on_setup':0,'gas_version':int(os.environ['GAS_VERSION']),'verified_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          open('ops/bao-hang-safe-installer-proof.json','w').write(json.dumps(p,indent=2)+'\n')
+          PY
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/bao-hang-safe-installer-proof.json
+          git commit -m 'chore(gas): record safe staff installer proof'
+          git pull --rebase origin main; git push origin HEAD:main
