@@ -1,0 +1,4 @@
+Session2 Beta23 signed release-candidate build
+requested_at=2026-08-19T19:45:00+07:00
+publish=false
+stable=false
