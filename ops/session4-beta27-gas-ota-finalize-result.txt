@@ -1,0 +1,7 @@
+checked_at=2026-08-19T22:44:33Z
+head_sha=5a616f7b33f2dd9203939c345c1b384eb383d737
+failed_phase=AUTHORITY
+failed_rc=1
+stable=UNTOUCHED_BY_WORKFLOW
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
