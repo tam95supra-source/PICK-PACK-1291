@@ -5,6 +5,9 @@
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "placement": {
+    "mode": "smart"
+  },
   "vars": {
     "SERVICE_GENERATION": "m2-precutover-20260819-001",
     "GOOGLE_SOURCE_SHEET_ID": "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78"
