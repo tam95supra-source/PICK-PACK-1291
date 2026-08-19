@@ -59,10 +59,12 @@ if MARK not in s:
     anchor='    private val executor = Executors.newSingleThreadExecutor()\n'
     if anchor not in s: raise SystemExit('S30 API transport anchor missing')
     s=s.replace(anchor,anchor+'    private val adminAuditTransport by lazy { M2ServiceTransport(appContext) } // '+MARK+'\n',1)
-    old='''      if (result.ok) {\n          val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }\n          if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())\n      }\n'''
-    new='''      if (result.ok) {\n          val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }\n          if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())\n          if(action in M2ServiceTransport.ADMIN_AUDIT_ACTIONS) adminAuditTransport.audit(action,payload)\n      }\n'''
-    if old not in s: raise SystemExit('S30 API success anchor missing')
-    s=s.replace(old,new,1)
+    # Earlier runtime patches reshape the result-success block. Anchor immediately before the
+    # stable 401/session handling line instead of depending on the exact preceding block.
+    audit_anchor='      if (result.code == 401) clearSession()\n'
+    if s.count(audit_anchor)!=1: raise SystemExit(f'S30 API post-result anchor mismatch: {s.count(audit_anchor)}')
+    audit_line='      if (result.ok && action in M2ServiceTransport.ADMIN_AUDIT_ACTIONS) adminAuditTransport.audit(action,payload)\n'
+    s=s.replace(audit_anchor,audit_line+audit_anchor,1)
     API.write_text(s,encoding='utf-8')
 
 print('Applied S30 canonical admin audit across Service replication and Android durable outbox')
