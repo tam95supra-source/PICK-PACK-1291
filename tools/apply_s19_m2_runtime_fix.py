@@ -181,24 +181,14 @@ if 'S19_RUNTIME_UI_APPLIED' not in s:
     s=s[:start]+sync+s[end:]
     p.write_text(s)
 
-# --- WebSocket-first foreground: polling is only a watchdog, not the primary realtime engine. ---
+# --- Event-driven foreground contract guard. Never reintroduce a normal polling loop. ---
 p=ROOT/'app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt'
 s=p.read_text()
-old='''        return when {
-            idlePolls <= 3 -> 1_500L
-            idlePolls <= 12 -> 2_500L
-            else -> 4_000L
-        }
-'''
-if old in s:
-    s=s.replace(old,'''        return when {
-            idlePolls <= 2 -> 15_000L
-            idlePolls <= 8 -> 30_000L
-            else -> 60_000L
-        }
-''',1)
-elif 'idlePolls <= 2 -> 15_000L' not in s:
-    raise SystemExit('S19 foreground polling anchor mismatch')
-p.write_text(s)
+legacy_markers=('main.postDelayed(tick, nextDelay(result.ok))','idlePolls <= 3 -> 1_500L','idlePolls <= 2 -> 15_000L')
+found=[m for m in legacy_markers if m in s]
+if found:
+    raise SystemExit('S19 legacy continuous polling reintroduced: '+', '.join(found))
+if 'Event-driven foreground Service/D1 revision synchronizer' not in s:
+    raise SystemExit('S19 event-driven foreground contract marker missing')
 
-print('Applied S19 M2 production runtime fix.')
+print('Applied S19 M2 production runtime fix; event-driven foreground contract preserved.')
