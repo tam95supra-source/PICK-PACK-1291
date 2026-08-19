@@ -1,12 +1,20 @@
 name: Session1 Live Postcheck
+
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
+    paths:
+      - 'ops/session1-service-deploy-trigger.txt'
+      - 'ops/gas-deploy-trigger.txt'
+      - '.github/workflows/session1-live-postcheck.yml'
+
 permissions:
   contents: read
+
 jobs:
   verify:
-    if: github.head_ref == 'agent/service-migration-m2'
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
