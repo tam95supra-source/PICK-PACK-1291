@@ -3,5 +3,5 @@ expected=RECONCILING|7|0
 target_epoch=8
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
-requested_at=2026-08-19T23:12:00+07:00
-retry=4
+requested_at=2026-08-19T23:19:00+07:00
+retry=5
