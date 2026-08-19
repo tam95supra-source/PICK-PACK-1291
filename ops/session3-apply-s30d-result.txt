@@ -1,0 +1,6 @@
+service_batch=PASS
+android_s30_chain=CANONICAL_ONLY
+typecheck=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS
