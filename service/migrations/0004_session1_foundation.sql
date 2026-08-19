@@ -15,6 +15,9 @@ INSERT OR IGNORE INTO revision_state(namespace,revision,updated_at) VALUES
 ('pack_table',0,strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 ('user_pack',0,strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 
+ALTER TABLE fallback_event_inbox ADD COLUMN source_checksum_verified INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE fallback_event_inbox ADD COLUMN sanitized_checksum TEXT;
+
 CREATE TABLE IF NOT EXISTS import_batches (
   import_batch_id TEXT PRIMARY KEY,
   dataset TEXT NOT NULL,
