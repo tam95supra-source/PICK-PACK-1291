@@ -19,6 +19,29 @@ replace('service/src/index.ts',
 '''try{const response=await route(request,env);response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){''',
 '''try{const response=await route(request,env);if(response.status!==101)response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){''')
 
+replace('service/src/recovery_resume_compat.ts',
+'''interface InboxRow { event_id:string;authority_epoch:number;authority_seq:number;service_generation:string;event_json:string;checksum:string;ingest_status:string; }''',
+'''interface InboxRow { event_id:string;authority_epoch:number;authority_seq:number;service_generation:string;event_json:string;checksum:string;ingest_status:string;source_checksum_verified?:number;sanitized_checksum?:string|null; }''')
+replace('service/src/recovery_resume_compat.ts',
+'''async function verifyRow(row:InboxRow,e:FallbackEnvelope):Promise<void>{
+  const raw=[row.event_id,row.authority_epoch,row.authority_seq,row.service_generation,e.action,e.business_date,e.actor,e.role,e.device_id||"",e.occurred_at||"",e.payload_json].join("|");
+  const digest=await sha256Hex(raw);
+  if(digest!==row.checksum)throw new Error(`FALLBACK_CHECKSUM_MISMATCH:${row.event_id}`);
+}''',
+'''async function verifyRow(row:InboxRow,e:FallbackEnvelope):Promise<void>{
+  if(row.source_checksum_verified===1){
+    const digest=await sha256Hex(row.event_json);
+    if(!row.sanitized_checksum||digest!==row.sanitized_checksum)throw new Error(`FALLBACK_SANITIZED_CHECKSUM_MISMATCH:${row.event_id}`);
+    return;
+  }
+  const raw=[row.event_id,row.authority_epoch,row.authority_seq,row.service_generation,e.action,e.business_date,e.actor,e.role,e.device_id||"",e.occurred_at||"",e.payload_json].join("|");
+  const digest=await sha256Hex(raw);
+  if(digest!==row.checksum)throw new Error(`FALLBACK_CHECKSUM_MISMATCH:${row.event_id}`);
+}''')
+replace('service/src/recovery_resume_compat.ts',
+'''  const rows=(await db.prepare("SELECT event_id,authority_epoch,authority_seq,service_generation,event_json,checksum,ingest_status FROM fallback_event_inbox WHERE authority_epoch=?1 ORDER BY authority_seq").bind(epoch).all<InboxRow>()).results??[];''',
+'''  const rows=(await db.prepare("SELECT event_id,authority_epoch,authority_seq,service_generation,event_json,checksum,ingest_status,source_checksum_verified,sanitized_checksum FROM fallback_event_inbox WHERE authority_epoch=?1 ORDER BY authority_seq").bind(epoch).all<InboxRow>()).results??[];''')
+
 p=Path('service/public/app.js');s=p.read_text()
 if "\"':'&quot'," in s:
     s=s.replace("\"':'&quot',", "\"':'&quot;',")
