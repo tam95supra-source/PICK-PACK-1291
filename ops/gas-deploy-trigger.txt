@@ -1,3 +1,7 @@
-deploy=2026-08-19-M2-discovery-single-snapshot
-reason=service-discovery-latency
-scope=source-only-no-authority-transition
+deploy=2026-08-20-Beta27-restore-pick-pack-gas
+reason=live-service-discovery-auth-regression
+scope=source-and-existing-deployment-no-authority-transition
+expected_service_authority=SERVICE_PRIMARY|8
+expected_replication=HEALTHY|0
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
