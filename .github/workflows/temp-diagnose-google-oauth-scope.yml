@@ -1,0 +1,64 @@
+name: Temp diagnose Google OAuth capability
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/temp-diagnose-google-oauth-scope.yml']
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Diagnose scope and Drive error without exposing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops "$RUNNER_TEMP/g"
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          test -n "$TOKEN"; echo "::add-mask::$TOKEN"
+          curl -fsS "https://oauth2.googleapis.com/tokeninfo?access_token=$TOKEN" > "$RUNNER_TEMP/g/tokeninfo.json"
+          code=$(curl -sS -o "$RUNNER_TEMP/g/drive.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)" || true)
+          python3 - "$code" <<'PY' > ops/temp-google-oauth-capability.txt
+          import json,sys,re
+          t=json.load(open(__import__('os').environ['RUNNER_TEMP']+'/g/tokeninfo.json'))
+          scopes=set(str(t.get('scope','')).split())
+          names=[]
+          for s in sorted(scopes):
+            if 'drive' in s: names.append('DRIVE')
+            elif 'script.projects' in s: names.append('SCRIPT_PROJECTS')
+            elif 'script.processes' in s: names.append('SCRIPT_PROCESSES')
+            elif 'script.deployments' in s: names.append('SCRIPT_DEPLOYMENTS')
+          d={}
+          try:d=json.load(open(__import__('os').environ['RUNNER_TEMP']+'/g/drive.json'))
+          except:pass
+          err=d.get('error',{}) if isinstance(d,dict) else {}
+          reason=''
+          if isinstance(err,dict):
+            reason=str(err.get('status') or '')
+            details=err.get('details') or []
+            msg=str(err.get('message') or '')
+            if 'insufficient' in msg.lower() or 'scope' in msg.lower(): reason='INSUFFICIENT_SCOPE'
+            elif 'disabled' in msg.lower() or 'has not been used' in msg.lower(): reason='API_DISABLED'
+            elif not reason: reason='OTHER'
+          print('oauth_caps=' + ('+'.join(sorted(set(names))) if names else 'NONE_RELEVANT'))
+          print('drive_http='+sys.argv[1])
+          print('drive_reason='+reason)
+          PY
+          cat ops/temp-google-oauth-capability.txt
+      - name: Commit sanitized result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/temp-google-oauth-capability.txt
+          git diff --cached --quiet || git commit -m 'chore(temp): record Google OAuth capability'
+          git pull --rebase origin main
+          git push origin HEAD:main
