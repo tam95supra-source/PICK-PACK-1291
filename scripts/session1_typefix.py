@@ -15,4 +15,7 @@ replace('service/src/correction.ts',
 replace('service/src/import_atomic.ts',
 '''try{await env.REALTIME_HUB.getByName("master:global").invalidate({type:"MASTER_CHANGED",namespace:dataset,revision,authority_epoch:a.authority_epoch,authority_seq:a.authority_seq,service_generation:a.service_generation});}catch(e){''',
 '''try{const hub=env.REALTIME_HUB.getByName("master:global") as unknown as {invalidate(message:Record<string,unknown>):Promise<number>};await hub.invalidate({type:"MASTER_CHANGED",namespace:dataset,revision,authority_epoch:a.authority_epoch,authority_seq:a.authority_seq,service_generation:a.service_generation});}catch(e){''')
+replace('service/src/index.ts',
+'''try{const response=await route(request,env);response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){''',
+'''try{const response=await route(request,env);if(response.status!==101)response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){''')
 print('SESSION1_TYPEFIX_APPLIED')
