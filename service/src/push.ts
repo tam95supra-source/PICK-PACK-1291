@@ -2,19 +2,27 @@ import { authenticate } from "./auth";
 import { currentAuthority } from "./core";
 import { apiError, json, nowIso, readJsonBody } from "./util";
 
-type PushEnv=Env&{FCM_PROJECT_ID?:string;FCM_CLIENT_EMAIL?:string;FCM_PRIVATE_KEY?:string};
-interface TokenCache{token:string;expires:number}
+type PushEnv=Env&{FCM_SERVICE_ACCOUNT_JSON?:string;FCM_PROJECT_ID?:string;FCM_CLIENT_EMAIL?:string;FCM_PRIVATE_KEY?:string};
+interface FcmCreds{projectId:string;clientEmail:string;privateKey:string}
+interface TokenCache{token:string;expires:number;projectId:string}
 let tokenCache:TokenCache|null=null;
 
 function b64u(input:string|ArrayBuffer):string{const bytes=typeof input==="string"?new TextEncoder().encode(input):new Uint8Array(input);let s="";for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");}
 function pemBytes(pem:string):ArrayBuffer{const raw=pem.replace(/\\n/g,"\n").replace(/-----[^-]+-----/g,"").replace(/\s/g,"");const bin=atob(raw),out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out.buffer;}
-async function fcmAccessToken(env:PushEnv):Promise<string|null>{
-  if(!env.FCM_PROJECT_ID||!env.FCM_CLIENT_EMAIL||!env.FCM_PRIVATE_KEY)return null;
-  if(tokenCache&&tokenCache.expires>Date.now()+60_000)return tokenCache.token;
-  const now=Math.floor(Date.now()/1000),header=b64u(JSON.stringify({alg:"RS256",typ:"JWT"})),claims=b64u(JSON.stringify({iss:env.FCM_CLIENT_EMAIL,scope:"https://www.googleapis.com/auth/firebase.messaging",aud:"https://oauth2.googleapis.com/token",iat:now,exp:now+3600})),unsigned=`${header}.${claims}`;
-  const key=await crypto.subtle.importKey("pkcs8",pemBytes(env.FCM_PRIVATE_KEY),{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["sign"]),sig=await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,new TextEncoder().encode(unsigned)),assertion=`${unsigned}.${b64u(sig)}`;
+function fcmCredentials(env:PushEnv):FcmCreds|null{
+  if(env.FCM_SERVICE_ACCOUNT_JSON){
+    try{const j=JSON.parse(env.FCM_SERVICE_ACCOUNT_JSON) as Record<string,unknown>,projectId=String(j.project_id||"").trim(),clientEmail=String(j.client_email||"").trim(),privateKey=String(j.private_key||"");if(projectId&&clientEmail&&privateKey.includes("PRIVATE KEY"))return{projectId,clientEmail,privateKey};}catch{}
+  }
+  if(env.FCM_PROJECT_ID&&env.FCM_CLIENT_EMAIL&&env.FCM_PRIVATE_KEY)return{projectId:env.FCM_PROJECT_ID,clientEmail:env.FCM_CLIENT_EMAIL,privateKey:env.FCM_PRIVATE_KEY};
+  return null;
+}
+async function fcmAccessToken(env:PushEnv):Promise<{token:string;projectId:string}|null>{
+  const creds=fcmCredentials(env);if(!creds)return null;
+  if(tokenCache&&tokenCache.projectId===creds.projectId&&tokenCache.expires>Date.now()+60_000)return{token:tokenCache.token,projectId:tokenCache.projectId};
+  const now=Math.floor(Date.now()/1000),header=b64u(JSON.stringify({alg:"RS256",typ:"JWT"})),claims=b64u(JSON.stringify({iss:creds.clientEmail,scope:"https://www.googleapis.com/auth/firebase.messaging",aud:"https://oauth2.googleapis.com/token",iat:now,exp:now+3600})),unsigned=`${header}.${claims}`;
+  const key=await crypto.subtle.importKey("pkcs8",pemBytes(creds.privateKey),{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["sign"]),sig=await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,new TextEncoder().encode(unsigned)),assertion=`${unsigned}.${b64u(sig)}`;
   const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:grant-type:jwt-bearer",assertion})});
-  if(!r.ok)throw new Error(`FCM_OAUTH_${r.status}`);const j=await r.json<{access_token?:string;expires_in?:number}>();if(!j.access_token)throw new Error("FCM_OAUTH_TOKEN_MISSING");tokenCache={token:j.access_token,expires:Date.now()+Math.max(300,Number(j.expires_in||3600))*1000};return j.access_token;
+  if(!r.ok)throw new Error(`FCM_OAUTH_${r.status}`);const j=await r.json<{access_token?:string;expires_in?:number}>();if(!j.access_token)throw new Error("FCM_OAUTH_TOKEN_MISSING");tokenCache={token:j.access_token,expires:Date.now()+Math.max(300,Number(j.expires_in||3600))*1000,projectId:creds.projectId};return{token:j.access_token,projectId:creds.projectId};
 }
 
 export async function registerPushDevice(request:Request,env:Env):Promise<Response>{
@@ -48,7 +56,7 @@ export async function flushPushOutbox(db:D1Database,rawEnv:Env,limit=50):Promise
   await stageRecentDayInvalidations(db);
   const env=rawEnv as PushEnv,access=await fcmAccessToken(env);if(!access)return{configured:false,sent:0,invalid:0,retry:0,pending:(await db.prepare("SELECT COUNT(*) n FROM push_outbox WHERE status IN ('PENDING','RETRY')").first<{n:number}>())?.n??0};
   const pushes=(await db.prepare("SELECT push_id,payload_json,attempt_count FROM push_outbox WHERE status IN ('PENDING','RETRY') AND next_attempt_at<=?1 ORDER BY created_at LIMIT ?2").bind(nowIso(),Math.max(1,Math.min(100,limit))).all<{push_id:string;payload_json:string;attempt_count:number}>()).results??[],devices=(await db.prepare("SELECT device_id,login_id,fcm_token FROM push_devices WHERE status='ACTIVE'").all<{device_id:string;login_id:string;fcm_token:string}>()).results??[];let sent=0,invalid=0,retry=0;
-  for(const p of pushes){let transient=false;for(const d of devices){const data=JSON.parse(p.payload_json) as Record<string,unknown>,stringData=Object.fromEntries(Object.entries(data).map(([k,v])=>[k,v==null?"":String(v)]));const r=await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(env.FCM_PROJECT_ID!)}/messages:send`,{method:"POST",headers:{authorization:`Bearer ${access}`,"content-type":"application/json"},body:JSON.stringify({message:{token:d.fcm_token,data:stringData,android:{priority:"high"}}})});if(r.ok){sent++;await db.prepare("UPDATE push_devices SET last_success_at=?1,last_error_class=NULL WHERE fcm_token=?2").bind(nowIso(),d.fcm_token).run();continue;}const text=(await r.text()).slice(0,800);if(r.status===404||/UNREGISTERED|registration-token-not-registered/i.test(text)){invalid++;await db.prepare("UPDATE push_devices SET status='INVALID',last_error_class='UNREGISTERED',updated_at=?1 WHERE fcm_token=?2").bind(nowIso(),d.fcm_token).run();}else if(r.status===429||r.status>=500){transient=true;retry++;}else await db.prepare("UPDATE push_devices SET last_error_class=?1,updated_at=?2 WHERE fcm_token=?3").bind(`FCM_HTTP_${r.status}`,nowIso(),d.fcm_token).run();}
+  for(const p of pushes){let transient=false;for(const d of devices){const data=JSON.parse(p.payload_json) as Record<string,unknown>,stringData=Object.fromEntries(Object.entries(data).map(([k,v])=>[k,v==null?"":String(v)]));const r=await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(access.projectId)}/messages:send`,{method:"POST",headers:{authorization:`Bearer ${access.token}`,"content-type":"application/json"},body:JSON.stringify({message:{token:d.fcm_token,data:stringData,android:{priority:"high"}}})});if(r.ok){sent++;await db.prepare("UPDATE push_devices SET last_success_at=?1,last_error_class=NULL WHERE fcm_token=?2").bind(nowIso(),d.fcm_token).run();continue;}const text=(await r.text()).slice(0,800);if(r.status===404||/UNREGISTERED|registration-token-not-registered/i.test(text)){invalid++;await db.prepare("UPDATE push_devices SET status='INVALID',last_error_class='UNREGISTERED',updated_at=?1 WHERE fcm_token=?2").bind(nowIso(),d.fcm_token).run();}else if(r.status===429||r.status>=500){transient=true;retry++;}else await db.prepare("UPDATE push_devices SET last_error_class=?1,updated_at=?2 WHERE fcm_token=?3").bind(`FCM_HTTP_${r.status}`,nowIso(),d.fcm_token).run();}
     const attempts=p.attempt_count+1,next=new Date(Date.now()+Math.min(3600_000,Math.pow(2,Math.min(attempts,8))*5000)).toISOString();await db.prepare("UPDATE push_outbox SET status=?1,attempt_count=?2,next_attempt_at=?3,last_error_class=?4 WHERE push_id=?5").bind(transient&&attempts<8?"RETRY":transient?"FAILED":"SENT",attempts,next,transient?"FCM_TRANSIENT":null,p.push_id).run();
   }
   const pending=(await db.prepare("SELECT COUNT(*) n FROM push_outbox WHERE status IN ('PENDING','RETRY')").first<{n:number}>())?.n??0;return{configured:true,sent,invalid,retry,pending};
