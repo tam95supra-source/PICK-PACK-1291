@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Base64
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -50,35 +51,39 @@ class M2ServiceTransport(context: Context) {
         }.onFailure { recordFailure() }
     }
 
+    /**
+     * Ordinary PDA mutations commit to durable SQLite first, including while online. In normal
+     * SERVICE_PRIMARY mode the UI receives 202 immediately and WorkManager reconciles the batch.
+     * If Google is the fenced authority, the already-enqueued event is allowed to continue through
+     * the legacy GAS authority path; acknowledgeFallback() resolves the local row after that commit.
+     */
     fun operational(action: String, payload: JSONObject): TransportResult {
         if (action !in OPERATIONAL) return TransportResult(false, false, 0, null, null)
-        if (!hasNetwork()) return queueOffline(action, payload)
-        if (circuitOpen()) return TransportResult(false, false, 0, null, "CIRCUIT_OPEN")
-        val discovery = discover() ?: return TransportResult(false, false, 0, null, "DISCOVERY_UNAVAILABLE")
-        if (discovery.optString("authority_mode") != "SERVICE_PRIMARY") return TransportResult(false, false, 0, null, null)
-        val base = discovery.optString("service_url").trimEnd('/')
-        val token = prefs.getString(KEY_SERVICE_TOKEN, null)
-        if (!validServiceUrl(base) || token.isNullOrBlank()) return TransportResult(false, false, 0, null, "SERVICE_SESSION_UNAVAILABLE")
         val eventId = payload.optString("event_id").ifBlank { java.util.UUID.randomUUID().toString() }
+        payload.put("event_id", eventId)
         val request = JSONObject()
             .put("action", action)
             .put("event_id", eventId)
             .put("device_id", M2DeviceIdentity.id(app))
             .put("payload", JSONObject(payload.toString()).put("event_id", eventId))
-        return try {
-            val r = httpJson("$base/v1/legacy-mutations", request, token)
-            if (r.code >= 500 || r.code == -1) {
-                recordFailure()
-                TransportResult(false, false, r.code, r.json, r.error)
-            } else {
-                if (r.code == 401) prefs.edit().remove(KEY_SERVICE_TOKEN).apply()
-                if (r.ok) closeCircuit()
-                TransportResult(true, r.ok, r.code, r.json, r.error)
-            }
-        } catch (t: Throwable) {
-            recordFailure()
-            TransportResult(false, false, -1, null, t.message ?: "SERVICE_NETWORK_ERROR")
+        val exclusive = action == "enter" || action == "resource_change"
+        store.enqueueMutation(request, exclusive)
+
+        if (!hasNetwork()) return queuedResult(eventId, exclusive, "OFFLINE_LOCAL")
+        val discovery = discover()
+        // Preserve the one-authority fence. During GOOGLE_FALLBACK, BetaApiClient performs the
+        // existing GAS commit using this same event_id, then acknowledges this local row.
+        if (discovery?.optString("authority_mode") != "SERVICE_PRIMARY") {
+            return TransportResult(false, false, 0, null, "FENCED_FALLBACK_AUTHORITY")
         }
+        M2WorkScheduler.schedule(app)
+        return queuedResult(eventId, exclusive, "SERVICE_D1_PENDING")
+    }
+
+    fun acknowledgeFallback(eventId: String, ok: Boolean, error: String?) {
+        if (eventId.isBlank()) return
+        if (ok) store.markMutationSynced(eventId)
+        else if (!error.isNullOrBlank()) store.markMutationRetry(eventId, error, 5_000L)
     }
 
     fun sync(action: String, payload: JSONObject): TransportResult {
@@ -106,43 +111,75 @@ class M2ServiceTransport(context: Context) {
         }
     }
 
+    /** Submit up to 100 durable local events and reconcile each result independently. */
     fun flushOutbox(): Boolean {
         if (!hasNetwork() || circuitOpen()) return false
         val discovery = discover(force = true) ?: return false
-        if (discovery.optString("authority_mode") != "SERVICE_PRIMARY") return false
+        if (discovery.optString("authority_mode") != "SERVICE_PRIMARY") return true
         val base = discovery.optString("service_url").trimEnd('/')
         val token = prefs.getString(KEY_SERVICE_TOKEN, null)
         if (!validServiceUrl(base) || token.isNullOrBlank()) return false
-        var retryNeeded = false
-        for (item in store.pendingMutations(100)) {
-            try {
-                val r = httpJson("$base/v1/legacy-mutations", item.body, token)
-                when {
-                    r.ok -> store.markMutationSynced(item.eventId)
-                    r.code == 409 || r.code == 403 || r.code == 400 -> store.markMutationConflict(item.eventId, r.json?.toString() ?: r.error.orEmpty())
-                    r.code == 401 -> { prefs.edit().remove(KEY_SERVICE_TOKEN).apply(); retryNeeded = true; break }
-                    else -> { store.markMutationRetry(item.eventId, r.error ?: "HTTP_${r.code}", retryDelay(item.attemptCount)); retryNeeded = true; recordFailure(); break }
-                }
-            } catch (t: Throwable) {
-                store.markMutationRetry(item.eventId, t.message ?: "NETWORK", retryDelay(item.attemptCount)); retryNeeded = true; recordFailure(); break
+        val items = store.pendingMutations(100)
+        if (items.isEmpty()) return true
+        return try {
+            val body = JSONObject().put("events", JSONArray().apply { items.forEach { put(it.body) } })
+            val r = httpJson("$base/v1/legacy-mutations/batch", body, token)
+            if (r.code == 401) {
+                prefs.edit().remove(KEY_SERVICE_TOKEN).apply()
+                return false
             }
+            if (!r.ok || r.json == null) {
+                items.forEach { store.markMutationRetry(it.eventId, r.error ?: "HTTP_${r.code}", retryDelay(it.attemptCount)) }
+                if (r.code >= 500 || r.code == -1) recordFailure()
+                return false
+            }
+            val results = r.json.optJSONArray("results") ?: JSONArray()
+            val byId = items.associateBy { it.eventId }
+            var retryNeeded = false
+            for (i in 0 until results.length()) {
+                val result = results.optJSONObject(i) ?: continue
+                val eventId = result.optString("local_event_id")
+                val item = byId[eventId] ?: continue
+                val error = result.optString("error_code").ifBlank { result.optJSONObject("conflict")?.toString().orEmpty() }
+                when (result.optString("status")) {
+                    "CONFIRMED", "DUPLICATE" -> store.markMutationSynced(eventId)
+                    "REVIEW_REQUIRED" -> store.markMutationReviewRequired(eventId, error)
+                    "REJECTED" -> {
+                        if (result.optBoolean("retryable", false)) {
+                            store.markMutationRetry(eventId, error.ifBlank { "RETRYABLE_REJECT" }, retryDelay(item.attemptCount))
+                            retryNeeded = true
+                        } else store.markMutationRejected(eventId, error)
+                    }
+                    else -> {
+                        store.markMutationRetry(eventId, "BATCH_RESULT_INVALID", retryDelay(item.attemptCount))
+                        retryNeeded = true
+                    }
+                }
+            }
+            val returned = HashSet<String>().apply { for (i in 0 until results.length()) add(results.optJSONObject(i)?.optString("local_event_id").orEmpty()) }
+            items.filter { it.eventId !in returned }.forEach {
+                store.markMutationRetry(it.eventId, "BATCH_RESULT_MISSING", retryDelay(it.attemptCount)); retryNeeded = true
+            }
+            if (!retryNeeded) closeCircuit()
+            !retryNeeded
+        } catch (t: Throwable) {
+            items.forEach { store.markMutationRetry(it.eventId, t.message ?: "NETWORK", retryDelay(it.attemptCount)) }
+            recordFailure()
+            false
         }
-        return !retryNeeded
     }
 
     fun discoverySnapshot(): JSONObject? = discover()
 
-    private fun queueOffline(action: String, payload: JSONObject): TransportResult {
-        val eventId = payload.optString("event_id").ifBlank { java.util.UUID.randomUUID().toString() }
-        val request = JSONObject()
-            .put("action", action)
-            .put("event_id", eventId)
-            .put("device_id", M2DeviceIdentity.id(app))
-            .put("payload", JSONObject(payload.toString()).put("event_id", eventId))
-        val exclusive = action == "enter" || action == "resource_change"
-        store.enqueueMutation(request, exclusive)
+    private fun queuedResult(eventId: String, exclusive: Boolean, projection: String): TransportResult {
         M2WorkScheduler.schedule(app)
-        val json = JSONObject().put("ok", true).put("queued", true).put("offline_provisional", exclusive).put("projection", "OFFLINE_LOCAL").put("result", JSONObject().put("event_id", eventId))
+        val json = JSONObject()
+            .put("ok", true)
+            .put("queued", true)
+            .put("reconciliation_state", "LOCAL_PENDING")
+            .put("provisional", exclusive)
+            .put("projection", projection)
+            .put("result", JSONObject().put("event_id", eventId))
         return TransportResult(true, true, 202, json, null)
     }
 
