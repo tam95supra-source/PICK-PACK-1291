@@ -25,6 +25,7 @@ export interface AuthContext {
   device_id: string;
   session_id: string;
   verifier_hash: string;
+  session_kind: "PDA" | "WEB";
 }
 
 export interface EventRow {
