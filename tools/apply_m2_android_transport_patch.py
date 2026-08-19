@@ -9,7 +9,7 @@ path = ROOT / "app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt"
 s = path.read_text()
 marker = "M2_SERVICE_TRANSPORT_APPLIED"
 if marker in s:
-    print("M2 Android transport already applied; composing S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31 runtime fixes.")
+    print("M2 Android transport already applied; composing S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31/S31B runtime fixes.")
     runpy.run_path(str(ROOT / "tools/apply_s19_m2_runtime_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s20_pack_identity_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s21_labor_shift_fix.py"), run_name="__main__")
@@ -21,6 +21,7 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s29_owner_localfirst_history.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s30_canonical_admin_audit.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s31_service_first_hotpath.py"), run_name="__main__")
+    runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
     raise SystemExit(0)
 
 anchor = "    private val executor = Executors.newSingleThreadExecutor()\n"
@@ -81,4 +82,5 @@ runpy.run_path(str(ROOT / "tools/apply_s27_projection_ack_gap_fix.py"), run_name
 runpy.run_path(str(ROOT / "tools/apply_s29_owner_localfirst_history.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s30_canonical_admin_audit.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s31_service_first_hotpath.py"), run_name="__main__")
-print(f"Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31 runtime patches: {path}")
+runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
+print(f"Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31/S31B runtime patches: {path}")
