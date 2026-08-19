@@ -1,0 +1,69 @@
+name: Session2 Beta23 OTA Live Verify
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta23-ota-live-verify-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      EXPECTED_VERSION: 0.4.2-beta.23
+      EXPECTED_SIZE: '12810579'
+      EXPECTED_SHA256: ea561b034a78147cc3df35f6bc2ddef3f8850b812c3c872b58bf65153b4ca5c4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Beta OTA discovery and public download
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-beta23-ota-live-verify-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          echo "head_sha=$GITHUB_SHA" >> "$OUT"
+
+          curl -fsSL --retry 5 --retry-delay 2 \
+            -H 'content-type: application/json' \
+            "$GAS_URL" \
+            -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.22"}' \
+            > /tmp/beta-update.json
+
+          jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SIZE" --arg sha "$EXPECTED_SHA256" '
+            .ok==true and .source=="GOOGLE_DRIVE" and .channel=="BETA" and .available==true and
+            .version_name==$v and (.size|tostring)==$s and .sha256==$sha and (.apk_url|type)=="string" and (.apk_url|length)>30
+          ' /tmp/beta-update.json >/dev/null
+          echo beta_discovery=PASS >> "$OUT"
+
+          APK_URL=$(jq -r '.apk_url' /tmp/beta-update.json)
+          HTTP=$(curl -sS -L --retry 3 --retry-delay 2 --range 0-1023 -o /tmp/apk-prefix.bin -w '%{http_code}' "$APK_URL")
+          echo "beta_download_http=$HTTP" >> "$OUT"
+          [[ "$HTTP" == 200 || "$HTTP" == 206 ]]
+          [[ -s /tmp/apk-prefix.bin ]]
+          echo beta_download=PASS >> "$OUT"
+
+          curl -fsSL --retry 5 --retry-delay 2 \
+            -H 'content-type: application/json' \
+            "$GAS_URL" \
+            -d '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' \
+            > /tmp/stable-update.json
+          jq -e '.ok==true and .source=="GOOGLE_DRIVE" and .channel=="STABLE" and .available==false and .reason=="NO_APK"' /tmp/stable-update.json >/dev/null
+          echo stable_discovery=EMPTY >> "$OUT"
+          echo verdict=PASS >> "$OUT"
+
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-beta23-ota-live-verify-result.txt || echo result_missing=true >/tmp/session2-beta23-ota-live-verify-result.txt
+          cp /tmp/session2-beta23-ota-live-verify-result.txt ops/session2-beta23-ota-live-verify-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-beta23-ota-live-verify-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record Beta23 live OTA verification'
+          git push
