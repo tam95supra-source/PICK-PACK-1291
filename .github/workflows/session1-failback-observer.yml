@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 35
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_SHA: 1acc3ae3877ab9005feb739648c13181a94da29e
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Observe exact controlled failback run
         shell: bash
@@ -20,7 +20,7 @@ jobs:
           set -euo pipefail
           FOUND=''
           for i in $(seq 1 100); do
-            JSON=$(gh api -X GET "repos/${{ github.repository }}/actions/workflows/session1-controlled-failback.yml/runs?branch=agent%2Fservice-migration-m2&event=push&per_page=10")
+            JSON=$(gh api -X GET "repos/${{ github.repository }}/actions/workflows/session1-controlled-failback.yml/runs?branch=agent%2Fservice-migration-m2&event=push&per_page=20")
             FOUND=$(node -e 'const j=JSON.parse(process.argv[1]),x=(j.workflow_runs||[]).find(r=>r.head_sha===process.env.EXPECTED_SHA);if(x)process.stdout.write(JSON.stringify({id:x.id,status:x.status,conclusion:x.conclusion,head_sha:x.head_sha,created_at:x.created_at,updated_at:x.updated_at}))' "$JSON")
             if [[ -n "$FOUND" ]]; then echo "FAILBACK_RUN=$FOUND"; STATUS=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).status)' "$FOUND"); [[ "$STATUS" == completed ]] && break; fi
             sleep 10
