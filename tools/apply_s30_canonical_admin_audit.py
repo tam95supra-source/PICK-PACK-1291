@@ -9,7 +9,9 @@ API=ROOT/'app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt'
 MARK='S30_CANONICAL_ADMIN_AUDIT'
 
 s=IDX.read_text(encoding='utf-8')
-if MARK not in s:
+# S30D already owns the Service batch/direct routes. During Android Gradle transforms,
+# do not try to re-apply the older Service anchors; only compose the Android portion below.
+if MARK not in s and 'S30D_CANONICAL_AUDIT_BATCH' not in s:
     a='import { commitLegacyMutation, type LegacyMutationInput } from "./legacy";'
     if a not in s: raise SystemExit('S30 index import anchor missing')
     s=s.replace(a,a+'\nimport { commitAdminAudit, type AdminAuditInput } from "./admin_audit"; // '+MARK,1)
@@ -32,7 +34,6 @@ if MARK not in s:
     anchor='async function replicateOperational(db:D1Database,env:Env,token:string,events:EventRow[]):Promise<number>{'
     pos=s.find(anchor)
     if pos<0: raise SystemExit('S30 replication function anchor missing')
-    # Add a helper immediately before replicateOperational.
     helper='''function adminHistoryLabel(type:string):string{const m:Record<string,string>={MASTER_STAFF_UPSERT:"Cập nhật nhân sự",MASTER_STAFF_DELETE:"Xóa nhân sự",MASTER_STAFF_IMPORT:"Import nhân sự",ACCOUNT_UPSERT:"Tạo / sửa tài khoản",ACCOUNT_STATUS:"Đổi trạng thái tài khoản",ACCOUNT_EMAIL:"Đổi email tài khoản",ACCOUNT_PASSWORD:"Đổi mật khẩu",ACCOUNT_LOGIN:"Đăng nhập",ACCOUNT_LOGOUT:"Đăng xuất",SETTINGS_CHANGE:"Thay đổi cài đặt",FALLBACK_RECONCILED_DUPLICATE:"Đối soát dữ liệu dự phòng"};return m[type]??type;}\nasync function replicateAdminHistory(env:Env,token:string,index:OperationalIndex,e:EventRow):Promise<void>{\n  const p=payload(e),target=ptext(p,"target_id")||e.entity_id,label=adminHistoryLabel(e.event_type),targetLabel=ptext(p,"target_label"),result=ptext(p,"result"),detail=[targetLabel,ptext(p,"detail"),result&&`Kết quả: ${result}`].filter(Boolean).join(" • ");\n  await appendHistory(env.GOOGLE_SOURCE_SHEET_ID,token,index,e,`ADMIN:${target}`,target,targetLabel,"",label,detail);\n}\n// S30_CANONICAL_ADMIN_AUDIT\n'''
     s=s[:pos]+helper+s[pos:]
     old='''    else if(e.event_type==="LABOR_FINISH")await replicateLaborFinishOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);\n    else continue;n++;\n'''
@@ -46,7 +47,7 @@ if MARK not in s:
     anchor='    fun acknowledgeFallback(eventId: String, ok: Boolean, error: String?) {'
     pos=s.find(anchor)
     if pos<0: raise SystemExit('S30 M2 audit insert anchor missing')
-    fn='''    // S30_CANONICAL_ADMIN_AUDIT: durable sanitized audit through the same SQLite outbox.\n    fun audit(action:String,payload:JSONObject){\n        if(action !in ADMIN_AUDIT_ACTIONS)return\n        val eventId=java.util.UUID.randomUUID().toString()\n        val targetId=when(action){"staff_upsert","staff_delete"->payload.optString("mnv");"account_upsert","account_status","change_email","change_password"->payload.optString("login_id").ifBlank{payload.optString("target_login_id")};else->""}\n        val targetLabel=payload.optString("full_name").ifBlank{payload.optString("display_name")}.take(180)\n        val detail=when(action){"staff_upsert"->"Thêm / cập nhật hồ sơ nhân sự";"staff_delete"->"Xóa hồ sơ nhân sự";"account_upsert"->"Tạo / cập nhật tài khoản";"account_status"->"Thay đổi trạng thái tài khoản";"change_email"->"Thay đổi email tài khoản";"change_password"->"Thay đổi mật khẩu";else->"Thao tác quản trị"}\n        val body=JSONObject().put("action","admin_audit").put("event_id",eventId).put("target_type",if(action.startsWith("staff_"))"EMPLOYEE" else "ACCOUNT").put("target_id",targetId.take(180)).put("target_label",targetLabel).put("result","OK").put("detail",detail).put("device_id",M2DeviceIdentity.id(app)).put("occurred_at",java.time.Instant.now().toString())\n        store.enqueueMutation(body,false);M2WorkScheduler.schedule(app)\n    }\n\n'''
+    fn='''    // S30_CANONICAL_ADMIN_AUDIT: durable sanitized audit through the same SQLite outbox.\n    fun audit(action:String,payload:JSONObject){\n        if(action !in ADMIN_AUDIT_ACTIONS)return\n        val eventId=java.util.UUID.randomUUID().toString()\n        val targetId=when(action){"staff_upsert","staff_delete"->payload.optString("mnv");"account_upsert","account_status","change_email","change_password"->payload.optString("login_id").ifBlank{payload.optString("target_login_id")};else->""}\n        val targetLabel=payload.optString("full_name").ifBlank{payload.optString("display_name")}.take(180)\n        val detail=when(action){"staff_upsert"->"Thêm / cập nhật hồ sơ nhân sự";"staff_delete"->"Xóa hồ sơ nhân sự";"account_upsert"->"Tạo / cập nhật tài khoản";"account_status"->"Thay đổi trạng thái tài khoản";"change_email"->"Thay đổi email tài khoản";"change_password"->"Thay đổi mật khẩu";else->"Thao tác quản trị"}\n        val body=JSONObject().put("action","admin_audit").put("event_id",eventId).put("target_type",if(action.startsWith("staff_"))"STAFF" else "ACCOUNT").put("target_id",targetId.take(180)).put("target_label",targetLabel).put("result","OK").put("detail",detail).put("device_id",M2DeviceIdentity.id(app)).put("occurred_at",java.time.Instant.now().toString())\n        store.enqueueMutation(body,false);M2WorkScheduler.schedule(app)\n    }\n\n'''
     s=s[:pos]+fn+s[pos:]
     anchor2='        val SYNC_ACTIONS = setOf("sync_status", "sync_day", "sync_bootstrap")'
     if anchor2 not in s: raise SystemExit('S30 M2 companion anchor missing')
