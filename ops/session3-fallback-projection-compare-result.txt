@@ -1,0 +1,11 @@
+checked_at=2026-08-19T15:09:37.839Z
+seq1=enter|10079|session:ACTIVE|v1|labor:NONE
+seq2=enter|10001|session:NONE|v0|labor:NONE
+seq3=enter|10095|session:NONE|v0|labor:NONE
+seq4=labor_start|10095|session:NONE|v0|labor:NONE
+seq5=enter|10086|session:NONE|v0|labor:NONE
+seq6=enter|10076|session:NONE|v0|labor:NONE
+seq7=enter|10100|session:NONE|v0|labor:NONE
+rows=7
+payload_logged=NO
+verdict=DIAGNOSTIC_COMPLETE
