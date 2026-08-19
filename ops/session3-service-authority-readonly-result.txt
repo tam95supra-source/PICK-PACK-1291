@@ -1,0 +1,8 @@
+checked_at=2026-08-19T16:18:31.516Z
+health_ok=true
+health_authority=RECONCILING|7|0|PRODUCTION|m2-prod-20260819-001
+authority_ok=true
+authority=RECONCILING|7|0|PRODUCTION|m2-prod-20260819-001
+verdict=READ_ONLY_COMPLETE
+health_http=200
+authority_http=200
