@@ -16,31 +16,38 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply deterministic source patch
+      - name: Apply deterministic source patches
         run: |
           set -euo pipefail
           python3 scripts/session1_apply.py
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('service/src/replication.ts')
-          s=p.read_text()
+          p=Path('service/src/replication.ts');s=p.read_text()
           old='const [header,ids]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);'
           new='const [header=[],ids=[]]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);'
           if old in s:s=s.replace(old,new)
           elif new not in s:raise SystemExit('replication strictness anchor missing')
           p.write_text(s)
           PY
+          python3 scripts/session1_followup.py
+          python3 scripts/session1_policy_followup.py
       - name: Verify source contract guards
         run: |
           set -euo pipefail
           grep -F 'e.committed_at,e.idempotency_key,e.origin,e.schema_version,e.checksum,e.payload_json' service/src/replication.ts
           ! grep -F 'e.committed_at,e.payload_json,e.idempotency_key' service/src/replication.ts
           grep -F 'const [header=[],ids=[]]' service/src/replication.ts
+          grep -F 'replicateMasterProjection' service/src/replication.ts
           grep -F 'LIMIT 7' service/src/entry.ts
           ! grep -F 'ORDER BY sequence_no DESC LIMIT 45' service/src/index.ts
+          grep -F 'const writeWindow=auth.role==="SUPERADMIN"?7:2' service/src/core.ts
+          grep -F 'BUSINESS_DATE_OUTSIDE_VIEW_WINDOW' service/src/index.ts
           grep -F 'client_source?: "PDA" | "WEB" | "FILE_IMPORT"' service/src/domain.ts
           grep -F 'source_checksum_verified' service/src/recovery.ts
           grep -F 'ppM2SanitizePayload_' google-apps-script/SERVICE_MIGRATION_M2.gs
+          grep -F 'importCommitAtomic' service/src/index.ts
+          grep -F 'scope==="master"' service/src/index.ts
+          ! grep -F 'for(let i=0;i<stmts.length;i+=100)await env.DB.batch' service/src/import_engine.ts
       - name: Typecheck Service
         working-directory: service
         run: |
@@ -53,23 +60,27 @@ jobs:
           rm -f /tmp/pp1291-session1.db
           for f in service/migrations/*.sql; do echo "APPLY $f"; sqlite3 /tmp/pp1291-session1.db < "$f"; done
           sqlite3 /tmp/pp1291-session1.db "PRAGMA integrity_check; SELECT COUNT(*) FROM pragma_table_info('import_batches'); SELECT COUNT(*) FROM pragma_table_info('push_devices'); SELECT COUNT(*) FROM pragma_table_info('fallback_event_inbox') WHERE name IN ('source_checksum_verified','sanitized_checksum');"
-      - name: Static architecture and secret guards
+      - name: Architecture, permission and secret guards
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          core=Path('service/src/core.ts').read_text()
-          entry=Path('service/src/entry.ts').read_text()
-          gas=Path('google-apps-script/SERVICE_MIGRATION_M2.gs').read_text()
-          imp=Path('service/src/import_engine.ts').read_text()
+          core=Path('service/src/core.ts').read_text();entry=Path('service/src/entry.ts').read_text();gas=Path('google-apps-script/SERVICE_MIGRATION_M2.gs').read_text();idx=Path('service/src/index.ts').read_text();imp=Path('service/src/import_engine.ts').read_text();atomic=Path('service/src/import_atomic.ts').read_text();master=Path('service/src/master_replication.ts').read_text()
           assert 'BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW' in core
           assert 'LABOR_ADMIN_REQUIRED' in core
-          assert 'MUTATION_BATCH_INVALID' in Path('service/src/index.ts').read_text()
-          assert 'IMPORT_ROLLBACK_INSERT_REQUIRES_EXPLICIT_CORRECTION' in imp
+          assert 'SHADOW_PROBE_SUPERADMIN_REQUIRED' in core
+          assert 'MUTATION_BATCH_INVALID' in idx
+          assert 'HISTORICAL_CORRECTION' in Path('service/src/correction.ts').read_text()
+          assert 'IMPORT_ROLLBACK_INSERT_REQUIRES_EXPLICIT_CORRECTION' in atomic
+          assert 'await env.DB.batch(stmts)' in atomic
+          assert 'MAX_CHANGED_ROWS=4000' in atomic
+          assert 'select_values' in imp and 'importRuleError' in imp
+          assert 'GOOGLE_MASTER_BATCH_WRITE' in master
           assert 'FCM_WAKE_ONLY' in Path('service/src/push.ts').read_text()
           assert 'Firebase' not in Path('service/wrangler.jsonc').read_text()
           assert 'ppM2SanitizePayload_' in gas
           assert 'source_checksum_verified' in entry
+          assert '_token' not in master
           print('SESSION1_ARCHITECTURE_GUARDS=PASS')
           PY
       - name: Commit tested source changes
@@ -79,5 +90,5 @@ jobs:
           git config user.name 'pp1291-session1-bot'
           git config user.email 'pp1291-session1-bot@users.noreply.github.com'
           git add service/src service/public/app.js google-apps-script/SERVICE_MIGRATION_M2.gs
-          git commit -m 'feat: finalize session1 service protocol and security'
+          git commit -m 'feat: finalize session1 service import realtime contracts'
           git push origin HEAD:agent/service-migration-m2
