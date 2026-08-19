@@ -1,4 +1,4 @@
-name: Temp deploy Bao Hang GAS
+name: Temp classify Bao Hang Google OAuth
 
 on:
   push:
@@ -9,9 +9,9 @@ permissions:
   contents: write
 
 jobs:
-  deploy:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -20,103 +20,35 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Discover exact Bao Hang Apps Script and deploy canonical source
+      - name: Inspect OAuth capability without exposing credentials
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/bhgas"
           STATUS="$RUNNER_TEMP/bhgas/status.txt"
-          if [ -z "${GOOGLE_OAUTH_CLIENT_ID:-}" ] || [ -z "${GOOGLE_OAUTH_CLIENT_SECRET:-}" ] || [ -z "${GOOGLE_OAUTH_REFRESH_TOKEN:-}" ]; then
-            echo 'oauth=FAIL missing_google_oauth' > "$STATUS"
-            exit 0
-          fi
-          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 \
-            https://raw.githubusercontent.com/tam95supra-source/bao-hang-1291/main/google-apps-script/DEPLOY_NEON.gs \
-            -o "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs"
-          grep -F "const BH_PROJECT = 'bao-hang-1291';" "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs" >/dev/null
-          grep -F "const BH_STAFF_SHEET_ID = '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78';" "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs" >/dev/null
-          cp "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs" "$RUNNER_TEMP/bhgas/DEPLOY_NEON.js"
-          node --check "$RUNNER_TEMP/bhgas/DEPLOY_NEON.js"
-
           node <<'NODE'
-          const fs = require('fs');
-          const dir = process.env.RUNNER_TEMP + '/bhgas';
-          const statusPath = dir + '/status.txt';
-          const lines=[];
-          const status=(k,v)=>lines.push(`${k}=${v}`);
-          const finish=()=>fs.writeFileSync(statusPath, lines.join('\n')+'\n');
-          async function req(url, options={}) {
-            const r=await fetch(url,options); const text=await r.text(); let j={};
-            try{j=text?JSON.parse(text):{}}catch{j={raw:text}}
-            if(!r.ok){const e=new Error(`HTTP_${r.status}:${String(j?.error?.message||j?.error||j?.raw||'').slice(0,180)}`);e.status=r.status;throw e}
-            return j;
-          }
+          const fs=require('fs');
+          const out=[]; const add=(k,v)=>out.push(`${k}=${String(v).replace(/[\r\n]+/g,' ').slice(0,300)}`);
+          const done=()=>fs.writeFileSync(process.env.RUNNER_TEMP+'/bhgas/status.txt',out.join('\n')+'\n');
+          async function json(url,opt={}){const r=await fetch(url,opt);const t=await r.text();let j={};try{j=JSON.parse(t)}catch{j={raw:t}};return {r,j,t}}
           (async()=>{
-            const tok=await req('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:process.env.GOOGLE_OAUTH_CLIENT_ID,client_secret:process.env.GOOGLE_OAUTH_CLIENT_SECRET,refresh_token:process.env.GOOGLE_OAUTH_REFRESH_TOKEN,grant_type:'refresh_token'})});
-            const access=tok.access_token; if(!access) throw new Error('NO_ACCESS_TOKEN');
-            status('oauth','PASS');
-            const auth={Authorization:`Bearer ${access}`};
-            let drive;
-            try{
-              drive=await req("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent("mimeType='application/vnd.google-apps.script' and trashed=false")+"&pageSize=100&fields=files(id,name)",{headers:auth});
-            }catch(e){status('drive_discovery',`FAIL_${e.status||'ERR'}`);finish();return;}
-            const files=Array.isArray(drive.files)?drive.files:[];
-            status('drive_candidates',String(files.length));
-            let target=null,current=null;
-            for(const f of files){
-              try{
-                const c=await req(`https://script.googleapis.com/v1/projects/${encodeURIComponent(f.id)}/content`,{headers:auth});
-                const src=(c.files||[]).map(x=>String(x.source||'')).join('\n');
-                if(src.includes("const BH_PROJECT = 'bao-hang-1291'") && src.includes("const BH_NEON_PROJECT = 'tiny-boat-19315489'")){target=f;current=c;break;}
-              }catch{}
-            }
-            if(!target){status('script_discovery','FAIL_NOT_FOUND');finish();return;}
-            status('script_discovery','PASS');
-            const deployments=await req(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/deployments`,{headers:auth});
-            let live=null;
-            for(const d of deployments.deployments||[]){
-              const eps=d.entryPoints||[];
-              for(const ep of eps){
-                const url=ep?.webApp?.url; if(!url) continue;
-                try{
-                  const ping=await req(url,{method:'POST',headers:{'content-type':'text/plain;charset=UTF-8'},body:JSON.stringify({action:'ping'})});
-                  if(ping.ok===true && ping.project==='bao-hang-1291' && ping.provider==='NEON_FIREBASE_GOOGLE'){live={deployment:d,url};break;}
-                }catch{}
-              }
-              if(live)break;
-            }
-            if(!live){status('deployment_discovery','FAIL_NOT_FOUND');finish();return;}
-            status('deployment_discovery','PASS');
-            const canonical=fs.readFileSync(dir+'/DEPLOY_NEON.gs','utf8');
-            const projectFiles=Array.isArray(current.files)?current.files:[];
-            let code=projectFiles.find(x=>x.type==='SERVER_JS' && String(x.source||'').includes("const BH_PROJECT = 'bao-hang-1291'"));
-            if(!code) code=projectFiles.find(x=>x.type==='SERVER_JS' && String(x.source||'').includes('function doPost'));
-            if(!code){status('source_replace','FAIL_SERVER_JS_NOT_FOUND');finish();return;}
-            code.source=canonical;
-            await req(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/content`,{method:'PUT',headers:{...auth,'content-type':'application/json'},body:JSON.stringify({files:projectFiles})});
-            status('source_update','PASS');
-            const ver=await req(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/versions`,{method:'POST',headers:{...auth,'content-type':'application/json'},body:JSON.stringify({description:'Bao Hang 1291 - new staff source and web worker compatibility'})});
-            const deploymentId=live.deployment.deploymentId;
-            await req(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/deployments/${encodeURIComponent(deploymentId)}`,{method:'PUT',headers:{...auth,'content-type':'application/json'},body:JSON.stringify({deploymentConfig:{scriptId:target.id,versionNumber:Number(ver.versionNumber),manifestFileName:'appsscript',description:'Bao Hang 1291 production'}})});
-            status('deployment_update','PASS');
-            let verified=false,last='';
-            for(let i=0;i<15;i++){
-              try{
-                const ping=await req(live.url,{method:'POST',headers:{'content-type':'text/plain;charset=UTF-8'},body:JSON.stringify({action:'ping'})});
-                last=JSON.stringify(ping);
-                if(ping.ok===true && ping.project==='bao-hang-1291' && ping.staff_sheet_id==='1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78' && ping.staff_sheet_name==='DANH SÁCH NHÂN SỰ'){verified=true;break;}
-              }catch(e){last=e.message}
-              await new Promise(r=>setTimeout(r,4000));
-            }
-            status('live_staff_source',verified?'PASS':'FAIL');
-            if(!verified) status('live_detail',String(last).replace(/[\r\n]+/g,' ').slice(0,160));
-            status('version',String(ver.versionNumber||''));
-            finish();
-          })().catch(e=>{status('fatal',String(e.message).replace(/[\r\n]+/g,' ').slice(0,220));finish();});
+            const x=await json('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:process.env.GOOGLE_OAUTH_CLIENT_ID||'',client_secret:process.env.GOOGLE_OAUTH_CLIENT_SECRET||'',refresh_token:process.env.GOOGLE_OAUTH_REFRESH_TOKEN||'',grant_type:'refresh_token'})});
+            if(!x.r.ok||!x.j.access_token){add('oauth','FAIL_'+x.r.status);done();return}
+            const token=x.j.access_token; add('oauth','PASS');
+            const ti=await json('https://oauth2.googleapis.com/tokeninfo?access_token='+encodeURIComponent(token));
+            const scopes=String(ti.j.scope||'').split(/\s+/).filter(Boolean).sort();
+            add('has_script_projects',scopes.some(s=>s.includes('/auth/script.projects'))?'YES':'NO');
+            add('has_script_deployments',scopes.some(s=>s.includes('/auth/script.deployments'))?'YES':'NO');
+            add('has_drive',scopes.some(s=>s==="https://www.googleapis.com/auth/drive"||s.startsWith('https://www.googleapis.com/auth/drive.'))?'YES':'NO');
+            add('scope_count',scopes.length);
+            const d=await json("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent("mimeType='application/vnd.google-apps.script' and trashed=false")+"&pageSize=10&fields=files(id,name)",{headers:{Authorization:'Bearer '+token}});
+            add('drive_http',d.r.status);
+            add('drive_reason',d.j?.error?.errors?.[0]?.reason||d.j?.error?.status||'');
+            add('drive_message_class',String(d.j?.error?.message||'').replace(/[^A-Za-z0-9 _.-]/g,'').slice(0,120));
+            done();
+          })().catch(e=>{add('fatal',e.message);done()});
           NODE
-
-      - name: Record sanitized result on temporary branch
+      - name: Record sanitized capability result
         shell: bash
         run: |
           set -euo pipefail
@@ -126,5 +58,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ops/temp-baohang-gas-deploy-status.txt
-          git diff --cached --quiet || git commit -m 'chore(temp): record Bao Hang GAS deployment result'
+          git diff --cached --quiet || git commit -m 'chore(temp): record Bao Hang Google OAuth capability'
           git push origin HEAD:temp/bh-gas-deploy-20260819
