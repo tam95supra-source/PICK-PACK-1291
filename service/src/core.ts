@@ -54,30 +54,9 @@ async function authority(db: D1Database): Promise<AuthorityRow> {
   return row;
 }
 
-async function allowedBusinessDates(db: D1Database): Promise<Set<string>> {
-  const rows = await db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 2").all<{business_date:string}>();
-  return new Set((rows.results ?? []).map((r) => r.business_date));
-}
-
-async function enforceDateWindow(db: D1Database, auth: AuthContext, date: string): Promise<void> {
-  if (auth.role === "SUPERADMIN") return;
-  const allowed = await allowedBusinessDates(db);
-  if (!allowed.has(date)) throw new CoreError("BUSINESS_DATE_NOT_N_N_MINUS_1", "PERMISSION", 403, false, { allowed: [...allowed] });
-}
-
 async function existingByIdentity(db: D1Database, request: CanonicalMutationRequest): Promise<EventRow | null> {
   return db.prepare("SELECT * FROM events WHERE event_id=?1 OR idempotency_key=?2 ORDER BY committed_at LIMIT 1")
     .bind(request.event_id, request.idempotency_key).first<EventRow>();
-}
-
-async function employeeExists(db: D1Database, mnv: string): Promise<boolean> {
-  return Boolean(await db.prepare("SELECT 1 AS x FROM employees WHERE mnv=?1").bind(mnv).first<{x:number}>());
-}
-
-async function resourceAvailable(db: D1Database, type: string, id: string): Promise<boolean> {
-  if (!id) return true;
-  const row = await db.prepare("SELECT available FROM resources WHERE resource_type=?1 AND resource_id=?2").bind(type, id).first<{available:number}>();
-  return Boolean(row?.available);
 }
 
 function normalizeMutation(req: CanonicalMutationRequest): CanonicalMutationRequest {
@@ -140,20 +119,27 @@ function leaseStatements(db: D1Database, sessionId: string, mnv: string, date: s
   return out;
 }
 
-async function commitAttendanceEnter(db: D1Database, env: Env, auth: AuthContext, req: CanonicalMutationRequest, a: AuthorityRow): Promise<EventRow> {
+async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: CanonicalMutationRequest, a: AuthorityRow): Promise<EventRow> {
   const p=req.payload, mnv=text(p,"mnv",80), shift=text(p,"shift",80), choice=workChoice(p.work_choice);
   if(!mnv||!shift) throw new CoreError("ATTENDANCE_FIELDS_REQUIRED","VALIDATION",400);
-  if(!await employeeExists(db,mnv)) throw new CoreError("EMPLOYEE_NOT_FOUND","VALIDATION",404);
-  const current=await db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date).first<AttendanceRow>();
-  const currentVersion=current?.version??0;
+  const pda=text(p,"pda_serial"), pick=text(p,"user_pick"), table=text(p,"pack_table"), pack=text(p,"user_pack");
+  const checks=await db.batch([
+    db.prepare("SELECT 1 AS x FROM employees WHERE mnv=?1").bind(mnv),
+    db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
+    db.prepare("SELECT available FROM resources WHERE resource_type='PDA' AND resource_id=?1").bind(pda),
+    db.prepare("SELECT available FROM resources WHERE resource_type='USER_PICK' AND resource_id=?1").bind(pick),
+    db.prepare("SELECT available FROM resources WHERE resource_type='PACK_TABLE' AND resource_id=?1").bind(table),
+    db.prepare("SELECT available FROM resources WHERE resource_type='USER_PACK' AND resource_id=?1").bind(pack),
+  ]);
+  if(!(checks[0]?.results?.length)) throw new CoreError("EMPLOYEE_NOT_FOUND","VALIDATION",404);
+  const current=(checks[1]?.results?.[0]??null) as AttendanceRow|null,currentVersion=current?.version??0;
   if(currentVersion!==req.base_version) throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:currentVersion});
   if(current?.state==="ACTIVE") throw new CoreError("ATTENDANCE_ALREADY_ACTIVE","CONFLICT",409,false,{session_id:current.session_id});
   if(current?.state==="ENDED") throw new CoreError("ATTENDANCE_ALREADY_ENDED","CONFLICT",409,false,{session_id:current.session_id});
-  const pda=text(p,"pda_serial"), pick=text(p,"user_pick"), table=text(p,"pack_table"), pack=text(p,"user_pack");
-  if(pda&&!await resourceAvailable(db,"PDA",pda)) throw new CoreError("PDA_UNAVAILABLE","RESOURCE",409);
-  if(pick&&!await resourceAvailable(db,"USER_PICK",pick)) throw new CoreError("USER_PICK_UNAVAILABLE","RESOURCE",409);
-  if(table&&!await resourceAvailable(db,"PACK_TABLE",table)) throw new CoreError("PACK_TABLE_UNAVAILABLE","RESOURCE",409);
-  if(pack&&!await resourceAvailable(db,"USER_PACK",pack)) throw new CoreError("USER_PACK_UNAVAILABLE","RESOURCE",409);
+  if(pda&&!Boolean((checks[2]?.results?.[0] as {available?:number}|undefined)?.available)) throw new CoreError("PDA_UNAVAILABLE","RESOURCE",409);
+  if(pick&&!Boolean((checks[3]?.results?.[0] as {available?:number}|undefined)?.available)) throw new CoreError("USER_PICK_UNAVAILABLE","RESOURCE",409);
+  if(table&&!Boolean((checks[4]?.results?.[0] as {available?:number}|undefined)?.available)) throw new CoreError("PACK_TABLE_UNAVAILABLE","RESOURCE",409);
+  if(pack&&!Boolean((checks[5]?.results?.[0] as {available?:number}|undefined)?.available)) throw new CoreError("USER_PACK_UNAVAILABLE","RESOURCE",409);
   if(choice==="PICK"&&!pda) throw new CoreError("PDA_REQUIRED_FOR_PICK","VALIDATION",400);
   if(choice==="PACK"&&(!table||!pack)) throw new CoreError("PACK_RESOURCES_REQUIRED","VALIDATION",400);
   const event=await buildEvent(req,auth,a,currentVersion+1);
@@ -174,11 +160,14 @@ async function commitAttendanceEnter(db: D1Database, env: Env, auth: AuthContext
 
 async function commitAttendanceExit(db:D1Database, auth:AuthContext, req:CanonicalMutationRequest, a:AuthorityRow):Promise<EventRow>{
   const p=req.payload,mnv=text(p,"mnv",80);
-  const current=await db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date).first<AttendanceRow>();
+  const checks=await db.batch([
+    db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
+    db.prepare("SELECT COUNT(*) AS n FROM labor_sessions WHERE mnv=?1 AND business_date=?2 AND state='OPEN'").bind(mnv,req.business_date),
+  ]);
+  const current=(checks[0]?.results?.[0]??null) as AttendanceRow|null;
   if(!current||current.state!=="ACTIVE") throw new CoreError("ATTENDANCE_NOT_ACTIVE","CONFLICT",409);
   if(current.version!==req.base_version) throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:current.version});
-  const open=await db.prepare("SELECT COUNT(*) AS n FROM labor_sessions WHERE mnv=?1 AND business_date=?2 AND state='OPEN'").bind(mnv,req.business_date).first<{n:number}>();
-  if((open?.n??0)>0) throw new CoreError("OPEN_LABOR_BLOCKS_EXIT","CONFLICT",409);
+  const open=(checks[1]?.results?.[0]??null) as {n?:number}|null;if((open?.n??0)>0) throw new CoreError("OPEN_LABOR_BLOCKS_EXIT","CONFLICT",409);
   const event=await buildEvent(req,auth,a,current.version+1),stmts=eventStatements(db,event,a.authority_seq);
   stmts.push(db.prepare("UPDATE attendance_sessions SET state='ENDED',exit_at=?1,exited_by=?2,version=?3,updated_at=?1 WHERE session_id=?4 AND version=?5 AND state='ACTIVE'").bind(event.committed_at,auth.login_id,event.new_version,current.session_id,current.version));
   stmts.push(db.prepare("DELETE FROM resource_leases WHERE session_id=?1").bind(current.session_id));
@@ -202,9 +191,13 @@ async function commitLaborStart(db:D1Database, auth:AuthContext, req:CanonicalMu
   if(auth.role==="USER") throw new CoreError("LABOR_ADMIN_REQUIRED","PERMISSION",403);
   const p=req.payload,mnv=text(p,"mnv",80),shift=text(p,"shift",80),laborType=text(p,"labor_type",180),marker=text(p,"time_marker",120);
   if(!mnv||!shift||!laborType||!marker) throw new CoreError("LABOR_FIELDS_REQUIRED","VALIDATION",400);
-  const current=await db.prepare("SELECT labor_id,mnv,business_date,state,version FROM labor_sessions WHERE labor_id=?1").bind(req.entity_id).first<LaborRow>();
-  const v=current?.version??0;if(v!==req.base_version)throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:v});if(current?.state==="OPEN")throw new CoreError("LABOR_ALREADY_OPEN","CONFLICT",409);
-  const attendance=await db.prepare("SELECT state FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date).first<{state:string}>();if(attendance?.state!=="ACTIVE")throw new CoreError("ATTENDANCE_NOT_ACTIVE","CONFLICT",409);
+  const checks=await db.batch([
+    db.prepare("SELECT labor_id,mnv,business_date,state,version FROM labor_sessions WHERE labor_id=?1").bind(req.entity_id),
+    db.prepare("SELECT state FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
+  ]);
+  const current=(checks[0]?.results?.[0]??null) as LaborRow|null,v=current?.version??0;
+  if(v!==req.base_version)throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:v});if(current?.state==="OPEN")throw new CoreError("LABOR_ALREADY_OPEN","CONFLICT",409);
+  const attendance=(checks[1]?.results?.[0]??null) as {state?:string}|null;if(attendance?.state!=="ACTIVE")throw new CoreError("ATTENDANCE_NOT_ACTIVE","CONFLICT",409);
   const event=await buildEvent(req,auth,a,v+1),stmts=eventStatements(db,event,a.authority_seq);
   stmts.push(db.prepare(`INSERT INTO labor_sessions(labor_id,mnv,business_date,shift,labor_type,time_marker,state,start_at,note,deduct_staff,start_event_id,version,updated_at)
     VALUES(?1,?2,?3,?4,?5,?6,'OPEN',?7,?8,?9,?10,?11,?12)`)
@@ -224,14 +217,21 @@ async function commitLaborFinish(db:D1Database, auth:AuthContext, req:CanonicalM
 async function commitProbe(db:D1Database,auth:AuthContext,req:CanonicalMutationRequest,a:AuthorityRow):Promise<EventRow>{const event=await buildEvent(req,auth,a,req.base_version+1);await db.batch(eventStatements(db,event,a.authority_seq));return event;}
 
 export async function commitMutation(db:D1Database,env:Env,auth:AuthContext,input:CanonicalMutationRequest):Promise<{event:EventRow;duplicate:boolean}>{
-  const req=normalizeMutation(input), prior=await existingByIdentity(db,req);if(prior)return{event:prior,duplicate:true};
-  const a=await authority(db);
+  const req=normalizeMutation(input),preflightStatements:D1PreparedStatement[]=[
+    db.prepare("SELECT * FROM events WHERE event_id=?1 OR idempotency_key=?2 ORDER BY committed_at LIMIT 1").bind(req.event_id,req.idempotency_key),
+    db.prepare("SELECT authority_epoch,authority_seq,mode,scope,service_generation,updated_at FROM authority_state WHERE singleton_id=1"),
+  ];
+  if(auth.role!=="SUPERADMIN")preflightStatements.push(db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 2"));
+  const preflight=await db.batch(preflightStatements),prior=(preflight[0]?.results?.[0]??null) as EventRow|null;if(prior)return{event:prior,duplicate:true};
+  const a=(preflight[1]?.results?.[0]??null) as AuthorityRow|null;if(!a)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);
   if(a.mode!=="SERVICE_PRIMARY")throw new CoreError("SERVICE_NOT_WRITE_AUTHORITY","CONFLICT",409,true,{mode:a.mode,authority_epoch:a.authority_epoch});
   if(req.authority_epoch!==undefined&&req.authority_epoch!==a.authority_epoch)throw new CoreError("AUTHORITY_EPOCH_STALE","CONFLICT",409,false,{current_epoch:a.authority_epoch});
   if(req.service_generation&&req.service_generation!==a.service_generation)throw new CoreError("SERVICE_GENERATION_STALE","CONFLICT",409,true,{service_generation:a.service_generation});
-  await enforceDateWindow(db,auth,req.business_date);
+  if(auth.role!=="SUPERADMIN"){
+    const allowed=new Set((preflight[2]?.results??[]).map(r=>String((r as {business_date?:string}).business_date??"")));if(!allowed.has(req.business_date))throw new CoreError("BUSINESS_DATE_NOT_N_N_MINUS_1","PERMISSION",403,false,{allowed:[...allowed]});
+  }
   try{
-    const event= req.event_type==="ATTENDANCE_ENTER"?await commitAttendanceEnter(db,env,auth,req,a):req.event_type==="ATTENDANCE_EXIT"?await commitAttendanceExit(db,auth,req,a):req.event_type==="RESOURCE_CHANGE"?await commitResourceChange(db,auth,req,a):req.event_type==="LABOR_START"?await commitLaborStart(db,auth,req,a):req.event_type==="LABOR_FINISH"?await commitLaborFinish(db,auth,req,a):await commitProbe(db,auth,req,a);
+    const event= req.event_type==="ATTENDANCE_ENTER"?await commitAttendanceEnter(db,auth,req,a):req.event_type==="ATTENDANCE_EXIT"?await commitAttendanceExit(db,auth,req,a):req.event_type==="RESOURCE_CHANGE"?await commitResourceChange(db,auth,req,a):req.event_type==="LABOR_START"?await commitLaborStart(db,auth,req,a):req.event_type==="LABOR_FINISH"?await commitLaborFinish(db,auth,req,a):await commitProbe(db,auth,req,a);
     return{event,duplicate:false};
   }catch(e){
     if(e instanceof CoreError)throw e;
@@ -242,9 +242,12 @@ export async function commitMutation(db:D1Database,env:Env,auth:AuthContext,inpu
 }
 
 export async function delta(db:D1Database,epoch:number,afterSeq:number,limit=500):Promise<{authority:AuthorityRow;events:EventRow[];has_more:boolean}>{
-  const a=await authority(db);if(epoch!==a.authority_epoch)return{authority:a,events:[],has_more:false};
-  const cap=Math.max(1,Math.min(500,limit));const rows=await db.prepare("SELECT * FROM events WHERE authority_epoch=?1 AND authority_seq>?2 ORDER BY authority_seq LIMIT ?3").bind(epoch,afterSeq,cap+1).all<EventRow>();
-  const all=rows.results??[];return{authority:a,events:all.slice(0,cap),has_more:all.length>cap};
+  const cap=Math.max(1,Math.min(500,limit)),results=await db.batch([
+    db.prepare("SELECT authority_epoch,authority_seq,mode,scope,service_generation,updated_at FROM authority_state WHERE singleton_id=1"),
+    db.prepare("SELECT * FROM events WHERE authority_epoch=?1 AND authority_seq>?2 ORDER BY authority_seq LIMIT ?3").bind(epoch,afterSeq,cap+1),
+  ]),a=(results[0]?.results?.[0]??null) as AuthorityRow|null;
+  if(!a)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);if(epoch!==a.authority_epoch)return{authority:a,events:[],has_more:false};
+  const all=(results[1]?.results??[]) as EventRow[];return{authority:a,events:all.slice(0,cap),has_more:all.length>cap};
 }
 
 export async function currentAuthority(db:D1Database):Promise<AuthorityRow>{return authority(db);}
