@@ -63,10 +63,10 @@ object TopNotice {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun statusBarInset(activity:Activity):Int{
         val insets=activity.window.decorView.rootWindowInsets ?: return 0
-        return if(Build.VERSION.SDK_INT>=30) insets.getInsets(WindowInsets.Type.statusBars()).top
-        else @Suppress("DEPRECATION") insets.systemWindowInsetTop
+        return if(Build.VERSION.SDK_INT>=30) insets.getInsets(WindowInsets.Type.statusBars()).top else insets.systemWindowInsetTop
     }
     private fun dp(a:Activity,v:Int)=(v*a.resources.displayMetrics.density).toInt()
 }
