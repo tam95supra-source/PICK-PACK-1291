@@ -190,7 +190,7 @@ jobs:
             H=$(curl -sS -o /tmp/gas-version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Session1 security: redact fallback and bridge secrets"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
             [[ "$H" == 200 ]] || { echo "GAS_VERSION_HTTP_$H"; exit 1; }
             V=$(node -e 'const j=require("/tmp/gas-version.json");process.stdout.write(String(j.versionNumber||""))'); [[ -n "$V" ]] || exit 1
-            node - <<'NODE' "$SCRIPT_ID" "$V"
+            node - "$SCRIPT_ID" "$V" <<'NODE'
             const fs=require('fs');fs.writeFileSync('/tmp/gas-deploy.json',JSON.stringify({deploymentConfig:{scriptId:process.argv[2],versionNumber:Number(process.argv[3]),manifestFileName:'appsscript',description:'Session1 security sanitizer'}}));
             NODE
             H=$(curl -sS -o /tmp/gas-deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
