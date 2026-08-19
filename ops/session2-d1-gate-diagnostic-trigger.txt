@@ -1,10 +1,6 @@
-Session2 D1 gate diagnostic trigger
-requested_at=2026-08-19T18:21:00+07:00
-retriggered_at=2026-08-19T18:27:00+07:00
-pinpoint_at=2026-08-19T18:31:00+07:00
-isolate_query_at=2026-08-19T18:35:00+07:00
-refresh_beta25_at=2026-08-19T20:42:00+07:00
-owner_service_return_checkpoint_at=2026-08-19T21:22:00+07:00
-pre_failback_epoch7_at=2026-08-19T21:39:00+07:00
-pre_failback_v2_at=2026-08-19T21:50:00+07:00
+Session2 proven D1 diagnostic trigger
+requested_at=2026-08-20T05:53:00+07:00
+reason=BETA27_REPLICATION_PENDING_8
 mode=read-only
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
