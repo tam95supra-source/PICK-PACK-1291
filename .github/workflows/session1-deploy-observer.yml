@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 35
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_DEPLOY_SHA: 54003b1c3f7acff903fb6365b1240372ff42b1bd
+      EXPECTED_DEPLOY_SHA: 6a34ffa6e1c485b9682aaad0fb721b147746046a
     steps:
       - name: Observe exact bounded deploy run
         shell: bash
