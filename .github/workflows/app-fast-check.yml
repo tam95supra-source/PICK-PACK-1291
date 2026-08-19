@@ -50,7 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # PR scope calculation diffs against the base SHA, which can be older than two commits.
+          fetch-depth: 0
       - id: scope
         shell: bash
         run: |
@@ -92,6 +93,7 @@ jobs:
           test -f ARCHITECTURE_GUARDRAILS.md
           test -f app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           test -f google-apps-script/PICK_PACK_API.gs
+          test -f google-apps-script/SERVICE_MIGRATION_M2.gs
           echo "$EXPECTED_OWNER_ICON_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
           grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           grep -q 'private fun businessHome()' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
@@ -124,7 +126,9 @@ jobs:
           rm -rf app/build/generated/s10
           if [[ "${{ needs.changes.outputs.gas }}" == "true" ]]; then
             cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+            cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
             node --check /tmp/PICK_PACK_API.js
+            node --check /tmp/SERVICE_MIGRATION_M2.js
           fi
           echo 'PASS - static guards and S10 generated UI checks.'
 
