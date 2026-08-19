@@ -102,8 +102,27 @@ jobs:
           npx wrangler d1 execute "$D1_NAME" --remote --config wrangler.recovery.jsonc --command "SELECT COUNT(*) n FROM fallback_event_inbox WHERE authority_epoch=7; SELECT ingest_status,COUNT(*) n FROM fallback_event_inbox WHERE authority_epoch=7 GROUP BY ingest_status;" --json >/tmp/inbox.json
           node -e 'const x=require("/tmp/inbox.json"),r=x.flatMap(g=>g.results||[]),n=r.find(v=>Object.hasOwn(v,"n")&&!v.ingest_status),p=r.find(v=>v.ingest_status==="PENDING");if(Number(n?.n)!==3||Number(p?.n)!==3)throw new Error("SERVICE_INBOX_NOT_EXACT_3_PENDING");console.log("SERVICE_INBOX_PRE_REPLAY="+JSON.stringify({total:n.n,pending:p.n}))'
           cd ..
-          HTTP=$(curl -sS --max-time 90 -o /tmp/failback.json -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback" -d '{"fallback_epoch":7,"expected_service_epoch":6}' || true)
-          if [[ "$HTTP" =~ ^2 ]]; then node -e 'const j=require("/tmp/failback.json");if(!j.ok)throw new Error("FAILBACK_BODY_NOT_OK");console.log("SERVICE_FAILBACK="+JSON.stringify(j))'; else echo "FAILBACK_HTTP=$HTTP attempting bounded resume"; curl -fsS --max-time 90 -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/resume" -d '{"fallback_epoch":7}' >/tmp/resume.json; node -e 'const j=require("/tmp/resume.json");if(!j.ok)throw new Error("FAILBACK_RESUME_FAILED");console.log("SERVICE_FAILBACK_RESUME="+JSON.stringify(j))'; fi
+          HTTP=$(curl -sS --max-time 90 -o /tmp/failback.json -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback" -d '{"fallback_epoch":7,"expected_service_epoch":6,"confirmation":"OWNER_LOCKED_M2_FAILBACK","initiated_by":"SESSION1_CONTROLLED_FAILBACK"}' || true)
+          if [[ "$HTTP" =~ ^2 ]]; then
+            node -e 'const j=require("/tmp/failback.json");if(!j.ok)throw new Error("FAILBACK_BODY_NOT_OK");console.log("SERVICE_FAILBACK="+JSON.stringify(j))'
+          else
+            echo "FAILBACK_HTTP=$HTTP inspecting bounded resume state"
+            curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/after-fail.json
+            STATE=$(node -e 'const j=require("/tmp/after-fail.json"),a=j.authority||j;if(a.mode==="RECONCILING"&&Number(a.authority_epoch)===7)process.stdout.write("RESUME");else if(a.mode==="SERVICE_PRIMARY"&&Number(a.authority_epoch)===6)process.stdout.write("REVERT");else process.stdout.write("STOP")')
+            if [[ "$STATE" == RESUME ]]; then
+              curl -fsS --max-time 90 -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback-resume" -d '{"fallback_epoch":7,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"SESSION1_CONTROLLED_FAILBACK_RESUME"}' >/tmp/resume.json
+              node -e 'const j=require("/tmp/resume.json");if(!j.ok)throw new Error("FAILBACK_RESUME_FAILED");console.log("SERVICE_FAILBACK_RESUME="+JSON.stringify(j))'
+            elif [[ "$STATE" == REVERT ]]; then
+              curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"m2_internal_reconcile_revert\",\"_bridge_secret\":\"$BRIDGE\",\"confirmation\":\"OWNER_LOCKED_M2_FAILBACK\"}" >/tmp/revert.json || true
+              echo SERVICE_FAILBACK_FAILED_BEFORE_D1_TRANSITION_REVERTED_GAS
+              cat /tmp/failback.json
+              exit 1
+            else
+              echo SERVICE_FAILBACK_UNEXPECTED_STATE
+              cat /tmp/after-fail.json
+              exit 1
+            fi
+          fi
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/sa.json
           node -e 'const j=require("/tmp/sa.json"),a=j.authority||j;if(!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||a.service_generation!==process.env.GENERATION)throw new Error("SERVICE_NOT_PRIMARY_EPOCH8");console.log("SERVICE_AFTER_REPLAY="+JSON.stringify({mode:a.mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:a.service_generation}))'
       - name: Complete GAS failback to Service Primary epoch 8
