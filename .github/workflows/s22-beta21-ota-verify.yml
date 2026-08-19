@@ -1,4 +1,4 @@
-name: S22 Beta21 OTA Verify
+name: S22 Beta22 OTA Verify
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
       - '.ops/s22-beta21-ota-verify.json'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
@@ -17,9 +17,9 @@ jobs:
       GAS_WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
       SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
       BETA_FROM: 0.4.2-beta.20
-      BETA_TO: 0.4.2-beta.21
-      EXPECTED_SHA256: d0eda83e421cd8f1d4bf07beb99285d7c04d512fdaef1e2a858b8e929f393d0a
-      EXPECTED_SIZE: '9786276'
+      BETA_TO: 0.4.2-beta.22
+      EXPECTED_SHA256: da2c1c837102e9e557013971ece9dac961caa6312b579db9c63184acc8daed3b
+      EXPECTED_SIZE: '9790372'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,7 +47,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          body='{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.21"}'
+          body='{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.22"}'
           ok=0
           for i in $(seq 1 10); do
             code=$(curl -sSL --connect-timeout 5 --max-time 20 -o /tmp/discovery.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_WEB_URL" -d "$body" || true)
@@ -59,7 +59,7 @@ jobs:
           done
           [[ "$ok" == 1 ]]
 
-      - name: Verify Beta21 OTA metadata and roundtrip APK SHA
+      - name: Verify Beta22 OTA metadata and roundtrip APK SHA
         shell: bash
         run: |
           set -euo pipefail
@@ -81,15 +81,15 @@ jobs:
           url=$(jq -r '.apk_url' /tmp/beta-from.json)
           reported_size=$(jq -r '.size|tostring' /tmp/beta-from.json)
           [[ "$reported_size" == "$EXPECTED_SIZE" ]]
-          curl -fL --retry 4 --retry-delay 2 --connect-timeout 10 --max-time 180 "$url" -o /tmp/beta21.apk
-          actual_size=$(stat -c '%s' /tmp/beta21.apk)
-          actual_sha=$(sha256sum /tmp/beta21.apk | awk '{print $1}')
+          curl -fL --retry 4 --retry-delay 2 --connect-timeout 10 --max-time 180 "$url" -o /tmp/beta22.apk
+          actual_size=$(stat -c '%s' /tmp/beta22.apk)
+          actual_sha=$(sha256sum /tmp/beta22.apk | awk '{print $1}')
           echo "OTA_APK size=$actual_size sha256=$actual_sha"
           [[ "$actual_size" == "$EXPECTED_SIZE" ]]
           [[ "$actual_sha" == "$EXPECTED_SHA256" ]]
           post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$BETA_TO\"}" /tmp/beta-to.json
           jq -e --arg v "$BETA_TO" '.source == "GOOGLE_DRIVE" and .channel == "BETA" and .available == false and .version_name == $v' /tmp/beta-to.json >/dev/null
-          echo 'BETA21_OTA_ROUNDTRIP=PASS'
+          echo 'BETA22_OTA_ROUNDTRIP=PASS'
 
       - name: Verify Stable channel remains unpublished
         shell: bash
@@ -102,27 +102,3 @@ jobs:
           [[ "$code" == 200 ]]
           jq -e '.ok == true and .source == "GOOGLE_DRIVE" and .channel == "STABLE" and .available == false' /tmp/stable.json >/dev/null
           echo 'STABLE_UNPUBLISHED=PASS'
-
-      - name: Persist success evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p .ops
-          cat > .ops/s22-beta21-ota-result.json <<EOF
-          {
-            "status": "PASS",
-            "version": "$BETA_TO",
-            "sha256": "$EXPECTED_SHA256",
-            "size": $EXPECTED_SIZE,
-            "authority_mode": "SERVICE_PRIMARY",
-            "authority_epoch_min": 6,
-            "stable_publish": false,
-            "verified_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "run_id": "$GITHUB_RUN_ID"
-          }
-          EOF
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .ops/s22-beta21-ota-result.json
-          git commit -m 'ops(beta21): record OTA verification pass'
-          git push origin HEAD:agent/service-migration-m2
