@@ -1,0 +1,2 @@
+oauth=PASS
+drive_discovery=FAIL_403
