@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "version": "0.4.2-beta.21",
+  "sha256": "d0eda83e421cd8f1d4bf07beb99285d7c04d512fdaef1e2a858b8e929f393d0a",
+  "size": 9786276,
+  "authority_mode": "SERVICE_PRIMARY",
+  "authority_epoch_min": 6,
+  "stable_publish": false,
+  "verified_at": "2026-08-19T03:30:43Z",
+  "run_id": "32212380623"
+}
