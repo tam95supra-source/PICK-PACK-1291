@@ -41,9 +41,10 @@ function ppM2ServiceFetch_(path,payload){
 }
 
 function ppM2BridgeActor_(auth,body){return {login_id:String(auth.login_id||auth.login||''),role:String(auth.role||'USER'),display_name:String(auth.display_name||auth.login_id||''),device_id:String((body||{})._device_id||'gas-legacy')};}
+function ppM2SanitizePayload_(value){if(Array.isArray(value))return value.map(ppM2SanitizePayload_);if(value&&typeof value==='object'){const out={};Object.keys(value).forEach(function(k){if(/(^|_)(token|password|verifier|secret|authorization|cookie|oauth)(_|$)/i.test(k))return;out[k]=ppM2SanitizePayload_(value[k]);});return out;}return value;}
 function ppM2BridgeMutation_(auth,body,action){
   const eventId=String(body.event_id||Utilities.getUuid());
-  const req={actor:ppM2BridgeActor_(auth,body),mutation:{action:action,event_id:eventId,business_date:String(body.business_date||ppBusinessIso_()),device_id:String(body._device_id||'gas-legacy'),payload:body}};
+  const req={actor:ppM2BridgeActor_(auth,body),mutation:{action:action,event_id:eventId,business_date:String(body.business_date||ppBusinessIso_()),device_id:String(body._device_id||'gas-legacy'),payload:ppM2SanitizePayload_(body)}};
   const r=ppM2ServiceFetch_('/internal/legacy-bridge',req);
   if(r.code>=200&&r.code<300&&r.json&&r.json.ok){ppM2ClearServiceFailure_();return r.json;}
   const err=(r.json&&r.json.error&&(r.json.error.code||r.json.error))||('HTTP_'+r.code);throw new Error('SERVICE_BRIDGE:'+err);
@@ -78,7 +79,7 @@ function ppM2RecordFallback_(auth,body,action,result){
   const lock=LockService.getScriptLock();if(!lock.tryLock(10000))throw new Error('FALLBACK_LEDGER_BUSY');
   try{
     const p=ppM2Props_(),seq=Number(p.getProperty('PP_M2_FALLBACK_SEQ')||'0')+1;p.setProperty('PP_M2_FALLBACK_SEQ',String(seq));
-    const eventId=String(body.event_id||(result&&result.result&&result.result.event_id)||Utilities.getUuid()),date=String(body.business_date||ppBusinessIso_()),at=new Date().toISOString(),payload=JSON.stringify(body||{}),raw=[eventId,ppM2Epoch_(),seq,ppM2Generation_(),action,date,String(auth.login_id||''),String(auth.role||'USER'),String(body._device_id||''),at,payload].join('|');
+    const eventId=String(body.event_id||(result&&result.result&&result.result.event_id)||Utilities.getUuid()),date=String(body.business_date||ppBusinessIso_()),at=new Date().toISOString(),payload=JSON.stringify(ppM2SanitizePayload_(body||{})),raw=[eventId,ppM2Epoch_(),seq,ppM2Generation_(),action,date,String(auth.login_id||''),String(auth.role||'USER'),String(body._device_id||''),at,payload].join('|');
     const checksum=ppM2Hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,raw,Utilities.Charset.UTF_8));
     ppM2FallbackSheet_().appendRow([eventId,ppM2Epoch_(),seq,ppM2Generation_(),action,date,String(auth.login_id||''),String(auth.role||'USER'),String(body._device_id||''),at,payload,checksum,'PENDING']);
     return {event_id:eventId,authority_epoch:ppM2Epoch_(),authority_seq:seq,checksum:checksum};

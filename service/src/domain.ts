@@ -15,6 +15,7 @@ export interface CanonicalMutationRequest {
   idempotency_key: string;
   device_id: string;
   schema_version: 1;
+  client_source?: "PDA" | "WEB" | "FILE_IMPORT";
 }
 
 export interface AuthContext {

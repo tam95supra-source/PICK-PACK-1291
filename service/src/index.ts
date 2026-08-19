@@ -3,6 +3,10 @@ import { bootstrapFromGoogle } from "./bootstrap";
 import { commitMutation, CoreError, currentAuthority, delta, transitionAuthority } from "./core";
 import { commitLegacyMutation, type LegacyMutationInput } from "./legacy";
 import { replicatePending } from "./replication";
+import { dayDeltaV2, masterDeltaV2, syncStatusV2 } from "./sync_contract";
+import { historicalCorrection } from "./correction";
+import { importChunk, importCommit, importHistory, importPreview, importRollback, importSchema, importStart } from "./import_engine";
+import { flushPushOutbox, registerPushDevice, revokePushDevice } from "./push";
 import { RealtimeHub } from "./realtime";
 import { apiError, constantTimeEqual, json, nowIso, readJsonBody, sha256Hex } from "./util";
 import type { AuthContext, CanonicalMutationRequest } from "./domain";
@@ -79,7 +83,7 @@ async function bootstrapSnapshot(request:Request,env:Env):Promise<Response>{
 }
 async function syncStatus(request:Request,env:Env):Promise<Response>{
   const auth=await requireAuth(request,env),now=nowIso(),cutoff=new Date(Date.now()-60_000).toISOString();
-  const q=`WITH recent AS (SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 45)
+  const q=`WITH recent AS (SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 7)
     SELECT recent.business_date,recent.sequence_no,
       a.authority_epoch,a.authority_seq,a.mode AS authority_mode,a.scope AS authority_scope,a.service_generation AS authority_generation,a.updated_at AS authority_updated_at,
       r.target_kind,r.target_identity,r.schema_version AS replication_schema_version,r.state AS replication_state,r.checkpoint,r.pending_count AS replication_pending_count,r.retry_count,r.last_attempt_at,r.last_success_at,r.last_error_class,r.last_error,r.updated_at AS replication_updated_at,
@@ -98,6 +102,11 @@ async function mutate(request:Request,env:Env):Promise<Response>{
   const auth=await requireAuth(request,env),body=await readJsonBody<CanonicalMutationRequest>(request),result=await commitMutation(env.DB,env,auth,body),e=result.event;
   const delivered=await broadcastEvent(env,{event_id:e.event_id,event_type:e.event_type,entity_type:e.entity_type,entity_id:e.entity_id,business_date:e.business_date,authority_epoch:e.authority_epoch,authority_seq:e.authority_seq,service_generation:e.service_generation,new_version:e.new_version});
   return json({ok:true,duplicate:result.duplicate,event:eventPublic(e as unknown as Record<string,unknown>),realtime_delivered:delivered},result.duplicate?200:201);
+}
+async function mutateBatch(request:Request,env:Env):Promise<Response>{
+  const auth=await requireAuth(request,env),body=await readJsonBody<{events:CanonicalMutationRequest[]}>(request),events=Array.isArray(body.events)?body.events:[];if(!events.length||events.length>100)return apiError("MUTATION_BATCH_INVALID","VALIDATION",400);const results:Record<string,unknown>[]=[];
+  for(const input of events){const localEventId=String(input?.event_id||"");try{const result=await commitMutation(env.DB,env,auth,input),e=result.event,delivered=await broadcastEvent(env,e);results.push({local_event_id:localEventId,status:result.duplicate?"DUPLICATE":"CONFIRMED",canonical_event_id:e.event_id,authority_epoch:e.authority_epoch,authority_seq:e.authority_seq,new_version:e.new_version,error_code:null,conflict:null,realtime_delivered:delivered});}catch(err){if(err instanceof CoreError){const review=err.errorClass==="CONFLICT"||err.errorClass==="RESOURCE";results.push({local_event_id:localEventId,status:review?"REVIEW_REQUIRED":"REJECTED",canonical_event_id:null,authority_epoch:null,authority_seq:null,new_version:null,error_code:err.code,conflict:err.conflict??null,retryable:err.retryable});continue;}throw err;}}
+  return json({ok:true,results});
 }
 async function legacyMutation(request:Request,env:Env):Promise<Response>{
   const auth=await requireAuth(request,env),input=await readJsonBody<LegacyMutationInput>(request),result=await commitLegacyMutation(env.DB,env,auth,input),e=result.event as {event_id:string;event_type:string;entity_type:string;entity_id:string;business_date:string;authority_epoch:number;authority_seq:number;service_generation:string;new_version:number};
@@ -142,22 +151,34 @@ async function internalTestAccount(request:Request,env:Env):Promise<Response>{
 async function route(request:Request,env:Env):Promise<Response>{
   const u=new URL(request.url),p=u.pathname,method=request.method.toUpperCase();
   if(p==="/health"&&method==="GET")return healthSnapshot(env);
-  if(p==="/v1/capabilities"&&method==="GET")return json({ok:true,api_version:"v1",canonical_event_schema:1,auth:"PBKDF2_HMAC_SHA256_CHALLENGE",session_model:"SINGLE_ACTIVE_DEVICE_V1",realtime:"DURABLE_OBJECT_WEBSOCKET_HIBERNATION",delta:true,offline_outbox:true,legacy_adapter:true,authority_modes:["SERVICE_PRIMARY","GOOGLE_FALLBACK","OFFLINE_LOCAL","RECONCILING"],production_cutover:(await currentAuthority(env.DB)).scope==="PRODUCTION"});
+  if(p==="/v1/capabilities"&&method==="GET")return json({ok:true,api_version:"v1",canonical_event_schema:1,auth:"PBKDF2_HMAC_SHA256_CHALLENGE",session_model:"SINGLE_ACTIVE_DEVICE_V1",realtime:"DURABLE_OBJECT_WEBSOCKET_HIBERNATION",realtime_protocol:"INVALIDATION_V1",delta:true,revision_namespaces:true,business_window:7,mutation_batch:true,offline_outbox:true,fcm_wake:true,import_engine:true,historical_corrections:true,legacy_adapter:true,authority_modes:["SERVICE_PRIMARY","GOOGLE_FALLBACK","OFFLINE_LOCAL","RECONCILING"],production_cutover:(await currentAuthority(env.DB)).scope==="PRODUCTION"});
   if(p==="/v1/authority"&&method==="GET")return json({ok:true,authority:await currentAuthority(env.DB)});
   if(p==="/v1/auth/challenge"&&method==="POST"){const b=await readJsonBody<{login_id:string}>(request);return json(await createChallenge(env.DB,String(b.login_id||"").trim()));}
   if(p==="/v1/auth/login"&&method==="POST"){const b=await readJsonBody<{login_id:string;challenge_id:string;proof:string;device_id:string;device_label?:string}>(request),out=await createSession(env.DB,env,b);return json(out,((out as {ok?:boolean}).ok===false)?401:200);}
   if(p==="/v1/auth/logout"&&method==="POST"){const a=await requireAuth(request,env);await logout(env.DB,a);return json({ok:true});}
   if(p==="/v1/mutations"&&method==="POST")return mutate(request,env);
+  if(p==="/v1/mutations/batch"&&method==="POST")return mutateBatch(request,env);
+  if(p==="/v1/corrections"&&method==="POST")return historicalCorrection(request,env);
   if(p==="/v1/legacy-mutations"&&method==="POST")return legacyMutation(request,env);
   if(p==="/v1/delta"&&method==="GET"){await requireAuth(request,env);const epoch=Number(u.searchParams.get("authority_epoch")||"0"),after=Number(u.searchParams.get("after_seq")||"0"),limit=Number(u.searchParams.get("limit")||"500");return json({ok:true,...await delta(env.DB,epoch,after,limit)});}
-  if(p==="/v1/sync/status"&&method==="GET")return syncStatus(request,env);
+  if(p==="/v1/sync/status"&&method==="GET")return syncStatusV2(request,env);
+  if(p==="/v1/delta/day"&&method==="GET")return dayDeltaV2(request,env);
+  if(p==="/v1/delta/master"&&method==="GET")return masterDeltaV2(request,env);
   if(p==="/v1/bootstrap"&&method==="GET")return bootstrapSnapshot(request,env);
   if(p==="/v1/realtime/ticket"&&method==="POST")return realtimeTicket(request,env);
   if(p==="/v1/realtime"&&method==="GET")return realtimeConnect(request,env);
+  if(p==="/v1/push/register"&&method==="POST")return registerPushDevice(request,env);
+  if(p==="/v1/push/revoke"&&method==="POST")return revokePushDevice(request,env);
+  if(p==="/v1/import/schema"&&method==="GET")return importSchema(request,env);
+  if(p==="/v1/import/batches"&&method==="POST")return importStart(request,env);
+  if(p==="/v1/import/history"&&method==="GET")return importHistory(request,env);
+  const im=p.match(/^\/v1\/import\/batches\/([^/]+)\/(chunks|preview|commit|rollback)$/);if(im){const id=decodeURIComponent(im[1]!),op=im[2];if(op==="chunks"&&(method==="POST"||method==="PUT"))return importChunk(request,env,id);if(op==="preview"&&method==="POST")return importPreview(request,env,id);if(op==="commit"&&method==="POST")return importCommit(request,env,id);if(op==="rollback"&&method==="POST")return importRollback(request,env,id);}
+
   if(p==="/internal/legacy-bridge"&&method==="POST")return gasLegacyBridge(request,env);
   if(p==="/internal/fallback/ingest"&&method==="POST")return fallbackIngest(request,env);
   if(p==="/internal/bootstrap-google"&&method==="POST"){if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);await ensureConfiguredGeneration(env);return json(await bootstrapFromGoogle(env.DB,env));}
   if(p==="/internal/replicate"&&method==="POST"){if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);return json(await replicatePending(env.DB,env));}
+  if(p==="/internal/push/flush"&&method==="POST"){if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);return json({ok:true,...await flushPushOutbox(env.DB,env)});}
   if(p==="/internal/test-account"&&method==="POST")return internalTestAccount(request,env);
   if(p==="/internal/dr/manifest"&&method==="POST"){if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);return json(await drManifest(env));}
   if(p==="/internal/authority/transition"&&method==="POST"){if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);const b=await readJsonBody<{expected_epoch:number;mode:"SERVICE_PRIMARY"|"GOOGLE_FALLBACK"|"OFFLINE_LOCAL"|"RECONCILING";scope?:"STAGING_SHADOW"|"PRODUCTION";service_generation?:string;increment_epoch?:boolean;reason?:string;initiated_by?:string;confirmation?:string}>(request);return json(await transitionWithAudit(env,b));}
@@ -165,6 +186,6 @@ async function route(request:Request,env:Env):Promise<Response>{
 }
 
 export default {
-  async fetch(request:Request,env:Env):Promise<Response>{try{return await route(request,env);}catch(e){if(e instanceof CoreError)return apiError(e.code,e.errorClass,e.status,e.retryable,undefined,e.conflict);console.log(JSON.stringify({level:"error",kind:"request_failed",path:new URL(request.url).pathname,error:String(e)}));return apiError("INTERNAL_ERROR","INTERNAL",500,true);}},
-  async scheduled(_controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{ctx.waitUntil(replicatePending(env.DB,env).then(()=>undefined).catch(e=>console.log(JSON.stringify({level:"error",kind:"scheduled_replication_failed",error:String(e)}))));},
+  async fetch(request:Request,env:Env):Promise<Response>{const started=Date.now(),requestId=request.headers.get("x-request-id")?.slice(0,100)||crypto.randomUUID(),path=new URL(request.url).pathname;try{const response=await route(request,env);response.headers.set("x-request-id",requestId);console.log(JSON.stringify({level:"info",kind:"request_complete",request_id:requestId,route:path,method:request.method,status:response.status,wall_ms:Date.now()-started}));return response;}catch(e){if(e instanceof CoreError)return apiError(e.code,e.errorClass,e.status,e.retryable,undefined,e.conflict);console.log(JSON.stringify({level:"error",kind:"request_failed",request_id:requestId,route:path,method:request.method,wall_ms:Date.now()-started,error_class:"INTERNAL",error:String(e).slice(0,240)}));return apiError("INTERNAL_ERROR","INTERNAL",500,true);}},
+  async scheduled(_controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{ctx.waitUntil(Promise.all([replicatePending(env.DB,env),flushPushOutbox(env.DB,env)]).then(()=>undefined).catch(e=>console.log(JSON.stringify({level:"error",kind:"scheduled_background_failed",error:String(e).slice(0,240)}))));},
 } satisfies ExportedHandler<Env>;

@@ -65,12 +65,12 @@ async function ensureReplicaSheet(env:Env,token:string):Promise<Set<string>>{
     const hide=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(id)}:batchUpdate`,{method:"POST",headers:authHeaders(token,{"content-type":"application/json"}),body:JSON.stringify({requests:[{updateSheetProperties:{properties:{sheetId:p.sheetId,hidden:true},fields:"hidden"}}]})});
     if(!hide.ok)throw new Error(`GOOGLE_HIDE_REPLICA:${hide.status}`);
   }
-  const [header,ids]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);
+  const [header=[],ids=[]]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);
   if(JSON.stringify((header[0]??[]).map(String))!==JSON.stringify([...REPLICA_HEADERS]))await putValues(id,token,"__M1_SERVICE_REPLICA","A1:T1",[[...REPLICA_HEADERS]]);
   return new Set(ids.map(r=>String(r[0]??"")).filter(Boolean));
 }
 
-function eventValues(e:EventRow):unknown[]{return[e.event_id,e.event_type,e.entity_type,e.entity_id,e.business_date,e.authority_epoch,e.authority_seq,e.service_generation,e.base_version,e.new_version,e.actor_id,e.actor_role,e.device_id,e.occurred_at,e.committed_at,e.payload_json,e.idempotency_key,e.origin,e.schema_version,e.checksum];}
+function eventValues(e:EventRow):unknown[]{return[e.event_id,e.event_type,e.entity_type,e.entity_id,e.business_date,e.authority_epoch,e.authority_seq,e.service_generation,e.base_version,e.new_version,e.actor_id,e.actor_role,e.device_id,e.occurred_at,e.committed_at,e.idempotency_key,e.origin,e.schema_version,e.checksum,e.payload_json];}
 async function appendTechnicalRows(env:Env,token:string,events:EventRow[]):Promise<string>{return appendValues(env.GOOGLE_STAGING_SHEET_ID,token,"__M1_SERVICE_REPLICA","A:T",events.map(eventValues));}
 
 async function loadOperationalIndex(env:Env,token:string):Promise<OperationalIndex>{

@@ -48,6 +48,13 @@ function text(payload: Record<string, unknown>, key: string, max = 240): string 
   return String(payload[key] ?? "").trim().slice(0, max);
 }
 
+const SENSITIVE_KEY=/(^|_)(token|password|verifier|secret|authorization|cookie|oauth)(_|$)/i;
+export function sanitizeSensitive(value: unknown): unknown {
+  if(Array.isArray(value))return value.map(sanitizeSensitive);
+  if(value&&typeof value==="object"){const out:Record<string,unknown>={};for(const [k,v] of Object.entries(value as Record<string,unknown>)){if(SENSITIVE_KEY.test(k))continue;out[k]=sanitizeSensitive(v);}return out;}
+  return value;
+}
+
 async function authority(db: D1Database): Promise<AuthorityRow> {
   const row = await db.prepare("SELECT authority_epoch,authority_seq,mode,scope,service_generation,updated_at FROM authority_state WHERE singleton_id=1").first<AuthorityRow>();
   if (!row) throw new CoreError("AUTHORITY_STATE_MISSING", "INTEGRITY", 503, false);
@@ -79,7 +86,8 @@ function normalizeMutation(req: CanonicalMutationRequest): CanonicalMutationRequ
     device_id: deviceId,
     business_date: String(req.business_date),
     timestamp: String(req.timestamp || nowIso()),
-    payload: req.payload && typeof req.payload === "object" ? req.payload : {},
+    payload: sanitizeSensitive(req.payload && typeof req.payload === "object" ? req.payload : {}) as Record<string,unknown>,
+    client_source: req.client_source === "WEB" || req.client_source === "FILE_IMPORT" ? req.client_source : "PDA",
   };
 }
 
@@ -221,14 +229,15 @@ export async function commitMutation(db:D1Database,env:Env,auth:AuthContext,inpu
     db.prepare("SELECT * FROM events WHERE event_id=?1 OR idempotency_key=?2 ORDER BY committed_at LIMIT 1").bind(req.event_id,req.idempotency_key),
     db.prepare("SELECT authority_epoch,authority_seq,mode,scope,service_generation,updated_at FROM authority_state WHERE singleton_id=1"),
   ];
-  if(auth.role!=="SUPERADMIN")preflightStatements.push(db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 2"));
+  const writeWindow=auth.role==="SUPERADMIN"?(req.client_source==="WEB"?0:7):2;
+  if(writeWindow)preflightStatements.push(db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT ?1").bind(writeWindow));
   const preflight=await db.batch(preflightStatements),prior=(preflight[0]?.results?.[0]??null) as EventRow|null;if(prior)return{event:prior,duplicate:true};
   const a=(preflight[1]?.results?.[0]??null) as AuthorityRow|null;if(!a)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);
   if(a.mode!=="SERVICE_PRIMARY")throw new CoreError("SERVICE_NOT_WRITE_AUTHORITY","CONFLICT",409,true,{mode:a.mode,authority_epoch:a.authority_epoch});
   if(req.authority_epoch!==undefined&&req.authority_epoch!==a.authority_epoch)throw new CoreError("AUTHORITY_EPOCH_STALE","CONFLICT",409,false,{current_epoch:a.authority_epoch});
   if(req.service_generation&&req.service_generation!==a.service_generation)throw new CoreError("SERVICE_GENERATION_STALE","CONFLICT",409,true,{service_generation:a.service_generation});
-  if(auth.role!=="SUPERADMIN"){
-    const allowed=new Set((preflight[2]?.results??[]).map(r=>String((r as {business_date?:string}).business_date??"")));if(!allowed.has(req.business_date))throw new CoreError("BUSINESS_DATE_NOT_N_N_MINUS_1","PERMISSION",403,false,{allowed:[...allowed]});
+  if(writeWindow){
+    const allowed=new Set((preflight[2]?.results??[]).map(r=>String((r as {business_date?:string}).business_date??"")));if(!allowed.has(req.business_date))throw new CoreError(auth.role==="SUPERADMIN"?"BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW":"BUSINESS_DATE_NOT_N_N_MINUS_1","PERMISSION",403,false,{allowed:[...allowed]});
   }
   try{
     const event= req.event_type==="ATTENDANCE_ENTER"?await commitAttendanceEnter(db,auth,req,a):req.event_type==="ATTENDANCE_EXIT"?await commitAttendanceExit(db,auth,req,a):req.event_type==="RESOURCE_CHANGE"?await commitResourceChange(db,auth,req,a):req.event_type==="LABOR_START"?await commitLaborStart(db,auth,req,a):req.event_type==="LABOR_FINISH"?await commitLaborFinish(db,auth,req,a):await commitProbe(db,auth,req,a);
