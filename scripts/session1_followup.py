@@ -42,4 +42,12 @@ replace('service/src/import_engine.ts',
 '''try{for(let i=0;i<stmts.length;i+=100)await env.DB.batch(stmts.slice(i,i+100));}catch(e){return apiError("IMPORT_ROLLBACK_CONFLICT","TRANSIENT",409,true,String(e).slice(0,180));}''',
 '''try{await env.DB.batch(stmts);}catch(e){return apiError("IMPORT_ROLLBACK_CONFLICT","TRANSIENT",409,true,String(e).slice(0,180));}''')
 
+# Projection checksum is transport metadata; immutable audit before/after remains the user-visible canonical row.
+replace('service/src/import_atomic.ts',
+'''const after=JSON.parse(x.after_json) as Record<string,unknown>,before=x.before_json?JSON.parse(x.before_json) as Record<string,unknown>:null;after._checksum=await sha256Hex(JSON.stringify(after));const e=await buildEvent(a,auth,m.dataset,x.business_key,id,x.row_no,before,after,revision,++seq,"MASTER_IMPORT_UPSERT");events.push(e);rows.push(after);links.push({row_no:x.row_no,event_id:e.event_id});''',
+'''const after=JSON.parse(x.after_json) as Record<string,unknown>,before=x.before_json?JSON.parse(x.before_json) as Record<string,unknown>:null,projection={...after,_checksum:await sha256Hex(JSON.stringify(after))};const e=await buildEvent(a,auth,m.dataset,x.business_key,id,x.row_no,before,after,revision,++seq,"MASTER_IMPORT_UPSERT");events.push(e);rows.push(projection);links.push({row_no:x.row_no,event_id:e.event_id});''')
+replace('service/src/import_atomic.ts',
+'''const before=JSON.parse(x.before_json!) as Record<string,unknown>,after=JSON.parse(x.after_json) as Record<string,unknown>;before._checksum=await sha256Hex(JSON.stringify(before));events.push(await buildEvent(a,auth,m.dataset,x.business_key,id,x.row_no,after,before,revision,++seq,"MASTER_IMPORT_ROLLBACK"));rows.push(before);''',
+'''const before=JSON.parse(x.before_json!) as Record<string,unknown>,after=JSON.parse(x.after_json) as Record<string,unknown>,projection={...before,_checksum:await sha256Hex(JSON.stringify(before))};events.push(await buildEvent(a,auth,m.dataset,x.business_key,id,x.row_no,after,before,revision,++seq,"MASTER_IMPORT_ROLLBACK"));rows.push(projection);''')
+
 print('SESSION1_FOLLOWUP_APPLIED')
