@@ -1,1 +1,1 @@
-Run sanitized read-only release diagnostic for the current Session2 Web/Beta23 state.
+Run expanded sanitized read-only release diagnostic for current Web/Beta23 bindings and Drive state.
