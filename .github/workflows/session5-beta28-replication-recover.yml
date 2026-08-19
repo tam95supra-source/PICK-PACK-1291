@@ -1,0 +1,86 @@
+name: Session5 Beta28 Replication Recovery
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session5-beta28-replication-recover-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session5-beta28-replication-recover
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Recover only stale claims and run canonical replication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=GATE
+          trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
+          node - <<'NODE'
+          const h=require('/tmp/h0.json'),a=h.authority||{};
+          if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||Number(a.authority_epoch)<8)throw Error('SERVICE_AUTHORITY_GATE');
+          NODE
+          echo service_gate=PASS >> "$OUT"
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}')
+          echo "::add-mask::$ADMIN"
+
+          PHASE=D1_RESOLVE
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode 'name=pick-pack-1291-service-prod' --data-urlencode 'per_page=20'); [[ "$HTTP" == 200 ]]
+          D1_ID=$(jq -r '.result[]|select(.name=="pick-pack-1291-service-prod")|(.uuid//.id)' /tmp/list.json|head -1); [[ -n "$D1_ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s5recover.jsonc',JSON.stringify(c,null,2))" "$D1_ID"; cd ..
+          d1(){ (cd service && npx wrangler d1 execute pick-pack-1291-service-prod --remote --config .wrangler-s5recover.jsonc --command "$1" --json); }
+
+          PHASE=RECOVER
+          for round in 1 2 3 4 5 6; do
+            curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+            P=$(jq -r '.replication.pending_count//999' /tmp/h.json); [[ "$P" == 0 ]] && break
+            d1 "SELECT outbox_id,status,attempt_count,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/pending.json
+            node - <<'NODE'
+            const fs=require('fs'),x=require('/tmp/pending.json').flatMap(v=>v.results||[]),o='/tmp/r';
+            fs.appendFileSync(o,`round_rows=${x.length}\n`);
+            if(!x.length)throw Error('HEALTH_OUTBOX_MISMATCH');
+            NODE
+            IDS=$(node -e 'const x=require("/tmp/pending.json").flatMap(v=>v.results||[]),now=Date.now();process.stdout.write(x.filter(r=>r.status==="INFLIGHT"&&r.claimed_at&&now-Date.parse(r.claimed_at)>=120000).slice(0,20).map(r=>r.outbox_id).join(","))')
+            DUE=$(node -e 'const x=require("/tmp/pending.json").flatMap(v=>v.results||[]),now=Date.now();process.stdout.write(String(x.filter(r=>(r.status==="PENDING"||r.status==="RETRY")&&(!r.next_attempt_at||Date.parse(r.next_attempt_at)<=now)).length))')
+            if [[ -n "$IDS" ]]; then
+              d1 "UPDATE sheet_replication_outbox SET status='RETRY',claim_token=NULL,claimed_at=NULL,next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error_class='RECOVERY',last_error='STALE_INFLIGHT_RECOVERY_BETA28' WHERE outbox_id IN ($IDS) AND status='INFLIGHT' AND julianday(claimed_at)<=julianday('now','-2 minutes')" >/tmp/reset.json
+              echo "recovered_stale_ids=$IDS" >> "$OUT"
+            elif [[ "$DUE" == 0 ]]; then
+              echo no_eligible_rows=true >> "$OUT"; exit 21
+            fi
+            RH=$(curl -sS --max-time 180 -o /tmp/rep.json -w '%{http_code}' -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" || true)
+            ROK=$(jq -r '.ok//false' /tmp/rep.json 2>/dev/null || echo false)
+            echo "replicate_round_$round=${RH}|${ROK}" >> "$OUT"
+            [[ "$RH" == 2* && "$ROK" == true ]] || exit 22
+          done
+          PHASE=FINAL
+          curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json
+          node - <<'NODE'
+          const fs=require('fs'),h=require('/tmp/hf.json'),a=h.authority||{},o='/tmp/r';
+          if(a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0)throw Error('FINAL_GATE');
+          fs.appendFileSync(o,`final_authority=SERVICE_PRIMARY_${a.authority_epoch}\nfinal_seq=${a.authority_seq}\nreplication=HEALTHY_0\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n`);
+          NODE
+      - name: Record sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          if ! grep -q '^verdict=' /tmp/r; then echo stable=UNTOUCHED >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; fi
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2||true; cp /tmp/c ops/session5-beta28-replication-recover-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session5-beta28-replication-recover-result.txt; git diff --cached --quiet||git commit -m 'ops: record Beta28 replication recovery'; git push origin HEAD:agent/service-migration-m2
