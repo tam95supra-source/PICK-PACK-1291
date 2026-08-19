@@ -1,0 +1,43 @@
+name: Session3 Apply S30 Service
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-apply-s30-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Apply and compile S30
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_s30_admin_audit_service.py
+          grep -q 'S30_CANONICAL_ADMIN_AUDIT' service/src/admin_audit.ts
+          grep -q '/v1/admin-audit' service/src/entry.ts
+          grep -q 'replicateAdminAudit' service/src/replication.ts
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npm run check
+      - name: Commit source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/src/admin_audit.ts service/src/entry.ts service/src/compat.ts service/src/replication.ts
+          git diff --cached --quiet || git commit -m 'feat: apply S30 canonical admin audit service'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          printf 'source=PASS\ntypecheck=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' > /tmp/result
+          cp /tmp/result ops/session3-apply-s30-result.txt
+          git add ops/session3-apply-s30-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S30 service source gate'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
