@@ -1,15 +1,13 @@
-checked_at=2026-08-19T22:32:54Z
-head_sha=cacb45d8367a452f6326a7bbd432c401d8729ecb
+checked_at=2026-08-19T22:37:13Z
+head_sha=a7d0e7d562b54ea20b27973693e34d881b340cf6
 config=PASS
-failed_phase=BUILD
-failed_rc=1
-compiler_excerpt_begin
-Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor
-Applied S31 strict Service-first non-blocking PDA hot path + background-only authority fallback + RTT split
-Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
-Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
-e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt:13:1042 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
-> Task :app:compileBetaReleaseKotlin FAILED
-   > Compilation error. See log for more details
-BUILD FAILED in 1m 20s
-compiler_excerpt_end
+build=PASS
+s31_contract=PASS
+admin_audit_preserved=PASS
+sign=PASS
+apk_size=12810579
+apk_sha256=08552cea22cc1f3ab0a0f7fdb8ca5d327d2bfcc3e43c4250b4a583edcf20b3a3
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9386006831
+artifact_name=beta27-release-candidate
+verdict=PASS
