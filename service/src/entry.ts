@@ -1,5 +1,6 @@
 import base, { RealtimeHub } from "./index";
 import { authenticate, internalAuthorized } from "./auth";
+import { commitAdminAudit, type AdminAuditInput } from "./admin_audit"; // S30_CANONICAL_ADMIN_AUDIT
 import { bootstrapGoogleStart, bootstrapGoogleStatus, bootstrapGoogleStep } from "./bootstrap_resumable";
 import { bootstrapResourceProjectionStep } from "./bootstrap_resources";
 import { compatBootstrap, compatDay } from "./compat";
@@ -68,6 +69,13 @@ async function recoveryResume(request:Request,env:Env):Promise<Response>{
   const input=await readJsonBody<{fallback_epoch:number;confirmation:string;initiated_by?:string}>(request);
   try{return json(await resumeFailbackWithLegacyCompat(env.DB,env,input));}catch(e){console.log(JSON.stringify({level:"error",kind:"failback_resume_failed",error:String(e)}));return apiError("FAILBACK_RESUME_FAILED","INTEGRITY",409,false,String(e).slice(0,500));}
 }
+async function adminAudit(request:Request,env:Env):Promise<Response>{
+  const auth=await authenticate(env.DB,env,request);if(!auth)return apiError("UNAUTHORIZED","AUTH",401);
+  const input=await readJsonBody<AdminAuditInput>(request);
+  try{const result=await commitAdminAudit(env.DB,auth,input);return json({ok:true,duplicate:result.duplicate,event:result.event},result.duplicate?200:201);}
+  catch(e){if(e instanceof Error)console.log(JSON.stringify({level:"warn",kind:"admin_audit_failed",error:String(e).slice(0,240)}));throw e;}
+}
+
 async function drRebuildGoogle(request:Request,env:Env):Promise<Response>{
   if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);
   try{return json(await rebuildGoogleStagingFromD1(env.DB,env));}catch(e){console.log(JSON.stringify({level:"error",kind:"dr_google_rebuild_failed",error:String(e)}));return apiError("DR_GOOGLE_REBUILD_FAILED","INTEGRITY",409,false,String(e).slice(0,500));}
@@ -128,8 +136,9 @@ export default {
       try{return await legacySync(request,env);}catch(e){console.log(JSON.stringify({level:"error",kind:"legacy_sync_failed",error:String(e)}));return apiError("LEGACY_SYNC_FAILED","INTERNAL",500,true);}
     }
     if(await reconciliationLocked(env.DB)){
-      if(path==="/v1/mutations"||path==="/v1/mutations/batch"||path==="/v1/legacy-mutations"||path==="/v1/legacy-mutations/batch"||path==="/internal/legacy-bridge")return apiError("RECONCILING_RETRY","CONFLICT",409,true);
+      if(path==="/v1/mutations"||path==="/v1/mutations/batch"||path==="/v1/legacy-mutations"||path==="/v1/legacy-mutations/batch"||path==="/v1/admin-audit"||path==="/internal/legacy-bridge")return apiError("RECONCILING_RETRY","CONFLICT",409,true);
     }
+    if(path==="/v1/admin-audit"&&request.method==="POST")return adminAudit(request,env);
     return base.fetch(request,env);
   },
   async scheduled(controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{return base.scheduled(controller,env,ctx);},

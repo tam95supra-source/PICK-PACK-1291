@@ -125,12 +125,21 @@ async function replicateLaborFinishOperational(db:D1Database,sheetId:string,toke
   await appendHistory(sheetId,token,index,e,l.attendance_session_id||`${visibleDate(e.business_date)}|${l.mnv}`,l.mnv,l.full_name,l.shift,"Hoàn thành công nhật",`${l.labor_type} • Mốc ${l.time_marker} • Khấu trừ ${l.deduct_staff?"Có":"Không"}`);
 }
 
+// S30_CANONICAL_ADMIN_AUDIT
+function adminAuditLabel(type:string):string{const m:Record<string,string>={MASTER_STAFF_UPSERT:"Cập nhật nhân sự",MASTER_STAFF_DELETE:"Xóa nhân sự",ACCOUNT_UPSERT:"Tạo / sửa tài khoản",ACCOUNT_STATUS:"Đổi trạng thái tài khoản",ACCOUNT_EMAIL:"Đổi email tài khoản",ACCOUNT_PASSWORD:"Đổi mật khẩu",MASTER_STAFF_IMPORT:"Import nhân sự",ACCOUNT_LOGIN:"Đăng nhập",ACCOUNT_LOGOUT:"Đăng xuất",SETTINGS_CHANGE:"Đổi cài đặt"};return m[type]||type;}
+async function replicateAdminAudit(sheetId:string,token:string,index:OperationalIndex,e:EventRow):Promise<void>{
+  const p=payload(e),targetType=ptext(p,"target_type")||e.entity_type,targetId=ptext(p,"target_id")||e.entity_id,targetLabel=ptext(p,"target_label"),detail=ptext(p,"detail");
+  const mnv=targetType==="STAFF"?targetId:"";
+  await appendHistory(sheetId,token,index,e,`ADMIN|${targetType}|${targetId}`,mnv,targetLabel,"",adminAuditLabel(e.event_type),detail);
+}
+
 async function replicateOperational(db:D1Database,env:Env,token:string,events:EventRow[]):Promise<number>{
   const a=await db.prepare("SELECT scope FROM authority_state WHERE singleton_id=1").first<{scope:string}>();if(a?.scope!=="PRODUCTION")return 0;const master=await replicateMasterProjection(db,env,token,events),index=await loadOperationalIndex(env,token);let n=0;
   for(const e of events){
     if(["ATTENDANCE_ENTER","RESOURCE_CHANGE","ATTENDANCE_EXIT"].includes(e.event_type))await replicateAttendanceOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
     else if(e.event_type==="LABOR_START")await replicateLaborStartOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
     else if(e.event_type==="LABOR_FINISH")await replicateLaborFinishOperational(db,env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
+    else if(e.origin==="ADMIN_AUDIT")await replicateAdminAudit(env.GOOGLE_SOURCE_SHEET_ID,token,index,e);
     else continue;n++;
   }
   return n+master;
