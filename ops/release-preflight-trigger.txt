@@ -1,3 +1,3 @@
-release-preflight=2026-08-19T03:55:00+07:00
-target=0.4.2-beta.19
-purpose=M2 precutover signer verification
+release-preflight=2026-08-19T08:34:00+07:00
+target=0.4.2-beta.20
+purpose=S13 final service-first hotfix signer verification before Beta OTA
