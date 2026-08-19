@@ -36,6 +36,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s20_pack_identity_fix.py"))
     inputs.file(rootProject.file("tools/apply_s21_labor_shift_fix.py"))
     inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability.py"))
+    inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability_wrapper.py"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
@@ -58,8 +59,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 27
-            versionName = "0.4.2-beta.21"
+            versionCode = 28
+            versionName = "0.4.2-beta.22"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
