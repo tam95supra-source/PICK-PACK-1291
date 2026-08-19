@@ -1,18 +1,22 @@
 name: Session1 Failback Observer
+
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session1-failback-trigger.txt]
+  workflow_dispatch:
+
 permissions:
   contents: read
   actions: read
+
 jobs:
   observe:
-    if: github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       GH_TOKEN: ${{ github.token }}
-      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+      EXPECTED_SHA: ${{ github.sha }}
     steps:
       - name: Observe exact controlled failback run
         shell: bash
