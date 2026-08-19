@@ -45,7 +45,7 @@ jobs:
           test "$(grep -c 'service=SERVICE_PRIMARY/4 discovery=SERVICE_PRIMARY/4' /tmp/samples.txt)" -eq 12
           grep -q 'url=https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev' /tmp/samples.txt
           echo 'LIVE_ROUTE_STABLE=PASS'
-      - name: Read production D1 account status only
+      - name: Resolve production D1 and query account status only
         working-directory: service
         shell: bash
         run: |
@@ -55,24 +55,7 @@ jobs:
           LIST=$(npx wrangler d1 list --json)
           ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
           test -n "$ID"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          s=Path('wrangler.jsonc').read_text()
-          s=s.replace('"database_name": "pick-pack-1291-m1-staging"', '"database_name": "'+os.environ['D1_NAME']+'"')
-          s=s.replace('__M1_D1_DATABASE_ID__', os.environ['ID'])
-          Path('/tmp/wrangler.diag.jsonc').write_text(s)
-          PY
-        env:
-          ID: ${{ env.PROD_D1_ID }}
-      - name: Resolve D1 and query accounts
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          test -n "$ID"
+          export D1_ID="$ID"
           python3 - <<'PY'
           from pathlib import Path
           import os
@@ -83,5 +66,3 @@ jobs:
           PY
           OUT=$(npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.diag.jsonc --command "SELECT login_id,role,position,status FROM accounts WHERE login_id IN ('admin','congdv','dienhx','tamnv2','dple','dpchan','dpchoxuat') ORDER BY login_id;" --json)
           node -e 'const j=JSON.parse(process.argv[1]); for(const r of (j?.[0]?.results||[])) console.log(`account=${r.login_id} role=${r.role} position=${r.position} status=${r.status}`)' "$OUT"
-        env:
-          D1_ID: ${{ env.D1_ID }}
