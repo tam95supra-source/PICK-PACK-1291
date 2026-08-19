@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Reconcile chaos assertions with current Service contract
+        run: python3 tools/patch_m2_chaos_current_contract.py
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
