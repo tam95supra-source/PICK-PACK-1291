@@ -1,0 +1,44 @@
+name: Session2 Live Web Check
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-live-web-check-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read live Web and Service checks
+        shell: bash
+        run: |
+          set +e
+          URL='https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev'
+          OUT=/tmp/session2-live-web-check-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          code(){ curl -sS -o "$2" -w '%{http_code}' "$1"; }
+          H=$(code "$URL/health" /tmp/h); echo "health_http=$H" >> "$OUT"; jq -e '.ok==true and .environment=="production" and .generation=="m2-prod-20260819-001" and .authority.mode=="SERVICE_PRIMARY"' /tmp/h >/dev/null 2>&1; echo "health_contract=$?" >> "$OUT"
+          C=$(code "$URL/v1/capabilities" /tmp/c); echo "cap_http=$C" >> "$OUT"; jq -e '.ok==true and .business_window==7 and .mutation_batch==true and .fcm_wake==true and .import_engine==true and .realtime_protocol=="INVALIDATION_V1"' /tmp/c >/dev/null 2>&1; echo "cap_contract=$?" >> "$OUT"
+          I=$(code "$URL/" /tmp/i); echo "index_http=$I" >> "$OUT"; grep -q 'Import dữ liệu' /tmp/i; echo "index_import=$?" >> "$OUT"; grep -q 'admin-extension.js' /tmp/i; echo "index_admin_extension=$?" >> "$OUT"
+          A=$(code "$URL/app.js" /tmp/a); echo "app_http=$A" >> "$OUT"; grep -q 'DAY_CHANGED' /tmp/a; echo "app_day_changed=$?" >> "$OUT"; grep -q 'MASTER_CHANGED' /tmp/a; echo "app_master_changed=$?" >> "$OUT"
+          X=$(code "$URL/admin-extension.js" /tmp/x); echo "admin_extension_http=$X" >> "$OUT"
+          HH=$(code "$URL/history-admin.html" /tmp/hh); echo "history_http=$HH" >> "$OUT"; grep -q 'Lịch sử toàn phần' /tmp/hh; echo "history_label=$?" >> "$OUT"
+          HJ=$(code "$URL/history-admin.js" /tmp/hj); echo "history_js_http=$HJ" >> "$OUT"; grep -q '/v1/admin/business-dates' /tmp/hj; echo "history_api=$?" >> "$OUT"
+          U=$(code "$URL/v1/admin/business-dates?limit=1" /tmp/u); echo "history_unauth_http=$U" >> "$OUT"
+          T=$(code "$URL/v1/import/template?dataset=employees" /tmp/t); echo "import_unauth_http=$T" >> "$OUT"
+          echo verdict=CHECK_COMPLETE >> "$OUT"
+      - name: Commit result
+        if: always()
+        shell: bash
+        run: |
+          cp /tmp/session2-live-web-check-result.txt ops/session2-live-web-check-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-live-web-check-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record live Web check'
+          git push
