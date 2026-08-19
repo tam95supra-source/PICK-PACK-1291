@@ -1,0 +1,48 @@
+name: Session2 Beta24 OTA Live Verify
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta24-ota-live-verify-trigger.txt' ]
+
+permissions:
+  contents: write
+
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  EXPECTED_VERSION: 0.4.2-beta.24
+  EXPECTED_SIZE: '12810579'
+  EXPECTED_SHA: 9bd1e3ab1835497bce6dfdf6fce27e34d58ab98812253d8d92c4ce5a84ea9ac4
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify live Beta OTA and Stable isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-beta24-ota-live-verify-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT";echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          PHASE=BETA_DISCOVERY;trap 'rc=$?;echo "failed_phase=$PHASE" >> "$OUT";echo "failed_rc=$rc" >> "$OUT";exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.23","_app_channel":"BETA","_app_version":"0.4.2-beta.23"}' >/tmp/beta.json
+          jq -e --arg v "$EXPECTED_VERSION" --arg sha "$EXPECTED_SHA" --argjson size "$EXPECTED_SIZE" '.ok==true and .available==true and .version_name==$v and .sha256==$sha and .size==$size and (.apk_url|type=="string" and length>20)' /tmp/beta.json >/dev/null
+          echo beta_discovery=PASS >> "$OUT"
+          PHASE=BETA_DOWNLOAD
+          URL=$(jq -r '.apk_url' /tmp/beta.json)
+          CODE=$(curl -sSL --range 0-1023 -o /tmp/chunk -w '%{http_code}' "$URL");echo "beta_download_http=$CODE" >> "$OUT";[[ "$CODE" == 200 || "$CODE" == 206 ]];[[ -s /tmp/chunk ]]
+          echo beta_download=PASS >> "$OUT"
+          PHASE=STABLE
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0","_app_channel":"STABLE","_app_version":"0.0.0"}' >/tmp/stable.json
+          jq -e '.ok==true and .available==false and .reason=="NO_APK"' /tmp/stable.json >/dev/null
+          echo stable_discovery=EMPTY >> "$OUT";echo verdict=PASS >> "$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-beta24-ota-live-verify-result.txt||echo result_missing=true>/tmp/session2-beta24-ota-live-verify-result.txt
+          cp /tmp/session2-beta24-ota-live-verify-result.txt ops/session2-beta24-ota-live-verify-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-beta24-ota-live-verify-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record Beta24 OTA live verify';git push
