@@ -2,12 +2,26 @@ import { authenticate, createChallenge, createSession, internalAuthorized, logou
 import { bootstrapFromGoogle } from "./bootstrap";
 import { commitMutation, CoreError, currentAuthority, delta, transitionAuthority } from "./core";
 import { commitLegacyMutation, type LegacyMutationInput } from "./legacy";
-import { replicatePending, replicationHealth } from "./replication";
+import { replicatePending } from "./replication";
 import { RealtimeHub } from "./realtime";
 import { apiError, constantTimeEqual, json, nowIso, readJsonBody, sha256Hex } from "./util";
 import type { AuthContext, CanonicalMutationRequest } from "./domain";
 
 export { RealtimeHub };
+
+interface StatusRow {
+  business_date:string|null; sequence_no:number|null;
+  authority_epoch:number; authority_seq:number; authority_mode:string; authority_scope:string; authority_generation:string; authority_updated_at:string;
+  target_kind:string|null; target_identity:string|null; replication_schema_version:number|null; replication_state:string|null; checkpoint:string|null;
+  replication_pending_count:number|null; actual_pending_count:number|null; retry_count:number|null; last_attempt_at:string|null; last_success_at:string|null;
+  last_error_class:string|null; last_error:string|null; replication_updated_at:string|null;
+}
+
+function statusParts(row:StatusRow){
+  const authority={authority_epoch:row.authority_epoch,authority_seq:row.authority_seq,mode:row.authority_mode,scope:row.authority_scope,service_generation:row.authority_generation,updated_at:row.authority_updated_at};
+  const replication={target_kind:row.target_kind,target_identity:row.target_identity,schema_version:row.replication_schema_version,state:row.replication_state,checkpoint:row.checkpoint,pending_count:Number(row.actual_pending_count??0),retry_count:Number(row.retry_count??0),last_attempt_at:row.last_attempt_at,last_success_at:row.last_success_at,last_error_class:row.last_error_class,last_error:row.last_error,updated_at:row.replication_updated_at};
+  return{authority,replication};
+}
 
 async function ensureConfiguredGeneration(env:Env):Promise<void>{
   const a=await env.DB.prepare("SELECT service_generation FROM authority_state WHERE singleton_id=1").first<{service_generation:string}>();
@@ -21,9 +35,27 @@ async function broadcastEvent(env:Env,e:{event_id:string;event_type:string;entit
   const hub=env.REALTIME_HUB.getByName(`business:${e.business_date}`);try{return await hub.broadcast(e);}catch(err){console.log(JSON.stringify({level:"warn",kind:"realtime_broadcast_failed",event_id:e.event_id,error:String(err)}));return 0;}
 }
 
+async function healthSnapshot(env:Env):Promise<Response>{
+  const q=`SELECT a.authority_epoch,a.authority_seq,a.mode AS authority_mode,a.scope AS authority_scope,a.service_generation AS authority_generation,a.updated_at AS authority_updated_at,
+    r.target_kind,r.target_identity,r.schema_version AS replication_schema_version,r.state AS replication_state,r.checkpoint,r.pending_count AS replication_pending_count,r.retry_count,r.last_attempt_at,r.last_success_at,r.last_error_class,r.last_error,r.updated_at AS replication_updated_at,
+    (SELECT COUNT(*) FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT')) AS actual_pending_count,
+    NULL AS business_date,NULL AS sequence_no
+    FROM authority_state a LEFT JOIN replication_status r ON r.singleton_id=1 WHERE a.singleton_id=1`;
+  const result=await env.DB.prepare(q).first<StatusRow>();if(!result)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);
+  if(result.authority_generation==="UNCONFIGURED"){
+    const at=nowIso();await env.DB.prepare("UPDATE authority_state SET service_generation=?1,updated_at=?2 WHERE singleton_id=1 AND service_generation='UNCONFIGURED'").bind(env.SERVICE_GENERATION,at).run();result.authority_generation=env.SERVICE_GENERATION;result.authority_updated_at=at;
+  }
+  const {authority,replication}=statusParts(result);return json({ok:true,service:"pick-pack-1291-service",environment:result.authority_scope==="STAGING_SHADOW"?"staging-shadow":"production",generation:env.SERVICE_GENERATION,authority,replication});
+}
+
 async function realtimeTicket(request:Request,env:Env):Promise<Response>{
   const auth=await requireAuth(request,env),u=new URL(request.url),date=u.searchParams.get("business_date")||"";if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return apiError("BUSINESS_DATE_INVALID","VALIDATION",400);
-  const ticket=crypto.randomUUID(),expires=Date.now()+120_000;await env.DB.prepare("DELETE FROM realtime_tickets WHERE expires_at<?1").bind(Date.now()).run();await env.DB.prepare("INSERT INTO realtime_tickets(ticket_id,login_id,device_id,business_date,expires_at,created_at) VALUES(?1,?2,?3,?4,?5,?6)").bind(ticket,auth.login_id,auth.device_id,date,expires,nowIso()).run();return json({ok:true,ticket,expires_at:expires});
+  const ticket=crypto.randomUUID(),expires=Date.now()+120_000,createdAt=nowIso();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM realtime_tickets WHERE expires_at<?1").bind(Date.now()),
+    env.DB.prepare("INSERT INTO realtime_tickets(ticket_id,login_id,device_id,business_date,expires_at,created_at) VALUES(?1,?2,?3,?4,?5,?6)").bind(ticket,auth.login_id,auth.device_id,date,expires,createdAt),
+  ]);
+  return json({ok:true,ticket,expires_at:expires});
 }
 async function realtimeConnect(request:Request,env:Env):Promise<Response>{
   if(request.headers.get("Upgrade")!=="websocket")return apiError("WEBSOCKET_REQUIRED","VALIDATION",426);
@@ -34,18 +66,32 @@ async function realtimeConnect(request:Request,env:Env):Promise<Response>{
 
 async function bootstrapSnapshot(request:Request,env:Env):Promise<Response>{
   await requireAuth(request,env);const u=new URL(request.url),date=u.searchParams.get("business_date")||"";
-  const employees=await env.DB.prepare("SELECT mnv,full_name,phone,main_position,supplier,department,site,warehouse,start_date,note FROM employees ORDER BY mnv").all();
-  const resources=await env.DB.prepare("SELECT resource_type,resource_id,status_label,available,metadata_json FROM resources ORDER BY resource_type,resource_id").all();
-  const catalogs=await env.DB.prepare("SELECT namespace,ordinal,value FROM catalog_values ORDER BY namespace,ordinal").all();
-  const sessions=date?await env.DB.prepare("SELECT * FROM attendance_sessions WHERE business_date=?1 ORDER BY mnv").bind(date).all():{results:[]};
-  const labor=date?await env.DB.prepare("SELECT * FROM labor_sessions WHERE business_date=?1 ORDER BY mnv,start_at").bind(date).all():{results:[]};
-  const a=await currentAuthority(env.DB);return json({ok:true,authority:a,employees:employees.results??[],resources:resources.results??[],catalogs:catalogs.results??[],attendance:sessions.results??[],labor:labor.results??[]});
+  const results=await env.DB.batch([
+    env.DB.prepare("SELECT mnv,full_name,phone,main_position,supplier,department,site,warehouse,start_date,note FROM employees ORDER BY mnv"),
+    env.DB.prepare("SELECT resource_type,resource_id,status_label,available,metadata_json FROM resources ORDER BY resource_type,resource_id"),
+    env.DB.prepare("SELECT namespace,ordinal,value FROM catalog_values ORDER BY namespace,ordinal"),
+    date?env.DB.prepare("SELECT * FROM attendance_sessions WHERE business_date=?1 ORDER BY mnv").bind(date):env.DB.prepare("SELECT * FROM attendance_sessions WHERE 0"),
+    date?env.DB.prepare("SELECT * FROM labor_sessions WHERE business_date=?1 ORDER BY mnv,start_at").bind(date):env.DB.prepare("SELECT * FROM labor_sessions WHERE 0"),
+    env.DB.prepare("SELECT authority_epoch,authority_seq,mode,scope,service_generation,updated_at FROM authority_state WHERE singleton_id=1"),
+  ]);
+  const authority=results[5]?.results?.[0];if(!authority)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);
+  return json({ok:true,authority,employees:results[0]?.results??[],resources:results[1]?.results??[],catalogs:results[2]?.results??[],attendance:results[3]?.results??[],labor:results[4]?.results??[]});
 }
 async function syncStatus(request:Request,env:Env):Promise<Response>{
-  const auth=await requireAuth(request,env),a=await currentAuthority(env.DB),rep=await replicationHealth(env.DB),dates=await env.DB.prepare("SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 45").all();
-  await env.DB.prepare(`INSERT INTO client_devices(device_id,login_id,platform,app_version,channel,authority_epoch,authority_seq,service_generation,last_seen_at,last_online_at,metadata_json)
-    VALUES(?1,?2,'ANDROID','UNKNOWN','UNKNOWN',?3,?4,?5,?6,?6,'{}') ON CONFLICT(device_id) DO UPDATE SET login_id=excluded.login_id,authority_epoch=excluded.authority_epoch,authority_seq=excluded.authority_seq,service_generation=excluded.service_generation,last_seen_at=excluded.last_seen_at,last_online_at=excluded.last_online_at`).bind(auth.device_id,auth.login_id,a.authority_epoch,a.authority_seq,a.service_generation,nowIso()).run().catch(()=>undefined);
-  return json({ok:true,authority:a,server_seq:a.authority_seq,service_generation:a.service_generation,business_dates:dates.results??[],replication:rep,realtime:true,delta_endpoint:"/v1/delta",ws_endpoint:"/v1/realtime"});
+  const auth=await requireAuth(request,env),now=nowIso(),cutoff=new Date(Date.now()-60_000).toISOString();
+  const q=`WITH recent AS (SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 45)
+    SELECT recent.business_date,recent.sequence_no,
+      a.authority_epoch,a.authority_seq,a.mode AS authority_mode,a.scope AS authority_scope,a.service_generation AS authority_generation,a.updated_at AS authority_updated_at,
+      r.target_kind,r.target_identity,r.schema_version AS replication_schema_version,r.state AS replication_state,r.checkpoint,r.pending_count AS replication_pending_count,r.retry_count,r.last_attempt_at,r.last_success_at,r.last_error_class,r.last_error,r.updated_at AS replication_updated_at,
+      (SELECT COUNT(*) FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT')) AS actual_pending_count
+    FROM authority_state a CROSS JOIN recent LEFT JOIN replication_status r ON r.singleton_id=1 WHERE a.singleton_id=1 ORDER BY recent.sequence_no DESC`;
+  const heartbeat=`INSERT INTO client_devices(device_id,login_id,platform,app_version,channel,authority_epoch,authority_seq,service_generation,last_seen_at,last_online_at,metadata_json)
+    SELECT ?1,?2,'ANDROID','UNKNOWN','UNKNOWN',a.authority_epoch,a.authority_seq,a.service_generation,?3,?3,'{}' FROM authority_state a WHERE a.singleton_id=1
+    ON CONFLICT(device_id) DO UPDATE SET login_id=excluded.login_id,authority_epoch=excluded.authority_epoch,authority_seq=excluded.authority_seq,service_generation=excluded.service_generation,last_seen_at=excluded.last_seen_at,last_online_at=excluded.last_online_at
+    WHERE client_devices.last_seen_at<?4`;
+  const results=await env.DB.batch([env.DB.prepare(q),env.DB.prepare(heartbeat).bind(auth.device_id,auth.login_id,now,cutoff)]),rows=(results[0]?.results??[]) as unknown as StatusRow[],first=rows[0];
+  if(!first)throw new CoreError("AUTHORITY_STATE_MISSING","INTEGRITY",503,false);const {authority,replication}=statusParts(first),dates=rows.map(r=>({business_date:r.business_date,sequence_no:r.sequence_no}));
+  return json({ok:true,authority,server_seq:first.authority_seq,service_generation:first.authority_generation,business_dates:dates,replication,realtime:true,delta_endpoint:"/v1/delta",ws_endpoint:"/v1/realtime"});
 }
 
 async function mutate(request:Request,env:Env):Promise<Response>{
@@ -95,7 +141,7 @@ async function internalTestAccount(request:Request,env:Env):Promise<Response>{
 
 async function route(request:Request,env:Env):Promise<Response>{
   const u=new URL(request.url),p=u.pathname,method=request.method.toUpperCase();
-  if(p==="/health"&&method==="GET"){await ensureConfiguredGeneration(env);const a=await currentAuthority(env.DB),rep=await replicationHealth(env.DB);return json({ok:true,service:"pick-pack-1291-service",environment:a.scope==="STAGING_SHADOW"?"staging-shadow":"production",generation:env.SERVICE_GENERATION,authority:a,replication:rep});}
+  if(p==="/health"&&method==="GET")return healthSnapshot(env);
   if(p==="/v1/capabilities"&&method==="GET")return json({ok:true,api_version:"v1",canonical_event_schema:1,auth:"PBKDF2_HMAC_SHA256_CHALLENGE",session_model:"SINGLE_ACTIVE_DEVICE_V1",realtime:"DURABLE_OBJECT_WEBSOCKET_HIBERNATION",delta:true,offline_outbox:true,legacy_adapter:true,authority_modes:["SERVICE_PRIMARY","GOOGLE_FALLBACK","OFFLINE_LOCAL","RECONCILING"],production_cutover:(await currentAuthority(env.DB)).scope==="PRODUCTION"});
   if(p==="/v1/authority"&&method==="GET")return json({ok:true,authority:await currentAuthority(env.DB)});
   if(p==="/v1/auth/challenge"&&method==="POST"){const b=await readJsonBody<{login_id:string}>(request);return json(await createChallenge(env.DB,String(b.login_id||"").trim()));}
