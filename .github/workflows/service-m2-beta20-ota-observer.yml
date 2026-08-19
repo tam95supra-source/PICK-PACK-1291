@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 35
     env:
       GH_TOKEN: ${{ github.token }}
-      TARGET_HEAD_SHA: 63f051e51f402dfe807d6ba94833a83ba61de7c4
+      TARGET_HEAD_SHA: 357f8eea2843451cfaa577f2680f57ef8cd17ae8
       GAS_WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
       SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
       EXPECTED_VERSION: 0.4.2-beta.20
