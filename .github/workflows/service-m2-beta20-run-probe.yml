@@ -1,0 +1,34 @@
+name: Service M2 Beta20 Run Probe
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/service-m2-beta20-run-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_HEAD_SHA: 357f8eea2843451cfaa577f2680f57ef8cd17ae8
+    steps:
+      - name: Print exact Beta20 publisher run
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATA=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/service-m2-beta20-ota-publish.yml/runs?branch=agent%2Fservice-migration-m2&per_page=20")
+          node - <<'NODE' "$DATA"
+          const j=JSON.parse(process.argv[2]);
+          const x=(j.workflow_runs||[]).find(r=>r.head_sha===process.env.TARGET_HEAD_SHA&&r.event==='push');
+          if(!x){console.error('BETA20_RUN_NOT_FOUND');process.exit(1)}
+          console.log(`BETA20_PUBLISHER_RUN_ID=${x.id}`);
+          console.log(`BETA20_PUBLISHER_STATUS=${x.status}`);
+          console.log(`BETA20_PUBLISHER_CONCLUSION=${x.conclusion||''}`);
+          NODE
