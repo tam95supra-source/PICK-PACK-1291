@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import runpy
 
 ROOT=Path(__file__).resolve().parents[1]
 M2=ROOT/'app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt'
@@ -18,3 +19,6 @@ if MARK not in s:
 if 'fun audit(action:String,payload:JSONObject)' not in M2.read_text(encoding='utf-8'):
     raise SystemExit('S31B audit preservation failed')
 print('Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite')
+
+# S31 generated a compressed bridge during migration; S31D owns the final compile-safe bridge.
+runpy.run_path(str(ROOT/'tools/apply_s31d_runtime_bridge_compile_fix.py'),run_name='__main__')
