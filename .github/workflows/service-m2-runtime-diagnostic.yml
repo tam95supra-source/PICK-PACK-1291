@@ -1,37 +1,36 @@
 name: Service M2 Runtime Diagnostic
 
 on:
-  push:
-    branches: [ agent/service-migration-m2 ]
-    paths:
-      - 'ops/m2-runtime-diagnostic-trigger.txt'
   pull_request:
     branches: [ main ]
     paths:
-      - 'ops/m2-runtime-diagnostic-trigger.txt'
       - '.github/workflows/service-m2-runtime-diagnostic.yml'
+      - 'tools/s13_authority_recover.py'
+      - 'tools/apply_s13_service_url_gas_patch.py'
+      - 'ops/s13-authority-recover-trigger.txt'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: service-m2-runtime-diagnostic-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-env:
-  D1_NAME: pick-pack-1291-service-prod
-  WORKER_NAME: pick-pack-1291-service
-  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  group: s13-authority-recover-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   diagnose:
     if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 30
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,55 +38,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Resolve D1 and query runtime state directly
-        working-directory: service
+      - name: Reconcile authority and shorten workers.dev hostname
         shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          test -n "$ID"; export PROD_D1_ID="$ID"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          s=Path('wrangler.jsonc').read_text()
-          s=s.replace('"name": "pick-pack-1291-service-m1-staging"','"name": "'+os.environ['WORKER_NAME']+'"')
-          s=s.replace('"database_name": "pick-pack-1291-m1-staging"','"database_name": "'+os.environ['D1_NAME']+'"')
-          s=s.replace('__M1_D1_DATABASE_ID__',os.environ['PROD_D1_ID'])
-          Path('/tmp/wrangler.diag.jsonc').write_text(s)
-          PY
-          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler.diag.jsonc --command "SELECT * FROM authority_state WHERE singleton_id=1; SELECT * FROM replication_status WHERE singleton_id=1; SELECT COUNT(*) AS outbox_count FROM sheet_replication_outbox; SELECT name FROM d1_migrations ORDER BY id;" --json | tee /tmp/d1-runtime.json
-      - name: Probe static assets and Worker endpoints with bounded timeouts
-        shell: bash
-        run: |
-          set -euo pipefail
-          for path in / /manifest.webmanifest /v1/capabilities /v1/authority /health; do
-            echo "===== $path ====="
-            set +e
-            curl -sS --connect-timeout 5 --max-time 20 -D "/tmp/headers.$(echo "$path"|tr '/.' '__')" -o "/tmp/body.$(echo "$path"|tr '/.' '__')" -w 'HTTP=%{http_code} TOTAL=%{time_total}\n' "$SERVICE_URL$path"
-            rc=$?
-            set -e
-            echo "curl_rc=$rc"
-            cat "/tmp/headers.$(echo "$path"|tr '/.' '__')" || true
-            head -c 2000 "/tmp/body.$(echo "$path"|tr '/.' '__')" || true
-            echo
-          done
-      - name: Capture Cloudflare tail around bounded probes
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          set +e
-          timeout 45s npx wrangler tail "$WORKER_NAME" --format json >/tmp/worker-tail.log 2>&1 &
-          TPID=$!
-          sleep 6
-          curl -sS --connect-timeout 5 --max-time 15 "$SERVICE_URL/v1/authority" >/tmp/tail-authority.body 2>&1
-          curl -sS --connect-timeout 5 --max-time 15 "$SERVICE_URL/health" >/tmp/tail-health.body 2>&1
-          sleep 5
-          kill "$TPID" 2>/dev/null || true
-          wait "$TPID" 2>/dev/null || true
-          set -e
-          echo '===== authority body ====='; cat /tmp/tail-authority.body || true
-          echo '===== health body ====='; cat /tmp/tail-health.body || true
-          echo '===== worker tail ====='; cat /tmp/worker-tail.log || true
+        run: python3 tools/s13_authority_recover.py
