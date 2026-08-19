@@ -1,0 +1,43 @@
+name: Session4 Beta27 Replication D1 Diagnostic
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session4-beta27-replication-d1-diag-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read pending replication rows
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >$OUT; echo "head_sha=$GITHUB_SHA" >>$OUT
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode 'name=pick-pack-1291-service-prod' --data-urlencode 'per_page=20'); [[ "$HTTP" == 200 ]]; ID=$(jq -r '.result[]|select(.name=="pick-pack-1291-service-prod")|(.uuid//.id)' /tmp/list.json|head -1); [[ -n "$ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s4diag.jsonc',JSON.stringify(c,null,2))" "$ID"
+          SQL="SELECT a.authority_epoch,a.authority_seq,a.mode,a.scope FROM authority_state a WHERE singleton_id=1; SELECT state,pending_count,retry_count,last_error_class,substr(last_error,1,500) last_error FROM replication_status WHERE singleton_id=1; SELECT o.outbox_id,o.status,o.attempt_count,o.next_attempt_at,o.last_error_class,substr(o.last_error,1,300) last_error,e.authority_seq,e.event_type,e.origin,e.entity_type,e.entity_id FROM sheet_replication_outbox o LEFT JOIN events e ON e.event_id=o.event_id WHERE o.status IN ('PENDING','RETRY','INFLIGHT') ORDER BY o.outbox_id;"
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config .wrangler-s4diag.jsonc --command "$SQL" --json >/tmp/d1.json
+          cd ..
+          node - <<'NODE'
+          const fs=require('fs'),x=require('/tmp/d1.json'),sets=x.filter(v=>Array.isArray(v.results)).map(v=>v.results),o='/tmp/r';
+          const clean=s=>String(s??'').replace(/[A-Za-z0-9_=-]{35,}/g,'[REDACTED]').replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g,'[EMAIL]').slice(0,500);
+          const a=sets[0]?.[0]||{},r=sets[1]?.[0]||{},rows=sets[2]||[];
+          fs.appendFileSync(o,`authority=${a.mode}|${a.authority_epoch}|${a.authority_seq}|${a.scope}\nreplication=${r.state}|${r.pending_count}|${r.retry_count}|${r.last_error_class||''}\nreplication_error=${clean(r.last_error)}\n`);
+          for(const z of rows)fs.appendFileSync(o,`row=${z.outbox_id}|${z.status}|attempt=${z.attempt_count}|seq=${z.authority_seq}|${z.event_type}|${z.origin}|${z.entity_type}|${clean(z.entity_id)}|err=${clean(z.last_error)}\n`);
+          fs.appendFileSync(o,`pending_rows=${rows.length}\nverdict=DIAGNOSTIC_COMPLETE\n`);
+          NODE
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo diagnostic_failed=true >/tmp/r; cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2||true; cp /tmp/c ops/session4-beta27-replication-d1-diag-result.txt; git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session4-beta27-replication-d1-diag-result.txt;git diff --cached --quiet||git commit -m 'ops: record Beta27 replication D1 diagnostic';git push origin HEAD:agent/service-migration-m2
