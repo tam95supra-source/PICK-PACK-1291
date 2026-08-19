@@ -1,0 +1,196 @@
+name: Session2 Beta23 OTA Publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta23-ota-publish-trigger.txt' ]
+
+permissions:
+  contents: read
+concurrency:
+  group: session2-beta23-ota-publish
+  cancel-in-progress: false
+
+env:
+  EXPECTED_VERSION_NAME: 0.4.2-beta.23
+  EXPECTED_VERSION_CODE: '29'
+  EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+  BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+  STABLE_FOLDER_ID: 1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+
+jobs:
+  publish-beta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ANDROID_SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      FIREBASE_GOOGLE_APP_ID: ${{ secrets.FIREBASE_GOOGLE_APP_ID }}
+      FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+      FIREBASE_GCM_SENDER_ID: ${{ secrets.FIREBASE_GCM_SENDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Hard release configuration gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in ANDROID_SIGNING_KEY_B64 ANDROID_SIGNING_STORE_PASSWORD ANDROID_SIGNING_KEY_ALIAS ANDROID_SIGNING_KEY_PASSWORD GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN FIREBASE_PROJECT_ID FIREBASE_GOOGLE_APP_ID FIREBASE_API_KEY FIREBASE_GCM_SENDER_ID; do
+            [[ -n "${!v:-}" ]] || { echo "Missing required release binding: $v"; exit 1; }
+          done
+          grep -q 'versionCode = 29' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.23"' app/build.gradle.kts
+          grep -q 'applicationId = "vn.pickpack1291.app.beta.publicbeta"' app/build.gradle.kts
+          grep -q 'com.google.firebase:firebase-messaging' app/build.gradle.kts
+          grep -q 'M2FirebaseMessagingService' app/src/main/AndroidManifest.xml
+          grep -q 'M2BackgroundSync.catchUp' app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt
+          grep -q 'LOCAL_PENDING' app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt
+          ! grep -q 'main.postDelayed(tick, nextDelay' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+
+      - name: Fresh production Service gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" > /tmp/service.json
+          jq -e '.ok==true and .environment=="production" and .generation=="m2-prod-20260819-001" and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/service.json >/dev/null
+          curl -fsSL "$SERVICE_URL/v1/capabilities" | jq -e '.ok==true and .business_window==7 and .mutation_batch==true and .fcm_wake==true and .import_engine==true and .realtime_protocol=="INVALIDATION_V1"' >/dev/null
+          curl -fsSL "$SERVICE_URL/" | grep -q 'Import dữ liệu'
+          curl -fsSL "$SERVICE_URL/history-admin.html" | grep -q 'Lịch sử toàn phần'
+
+      - name: Acquire Google OAuth token and fresh-check OTA folders
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token')
+          [[ -n "$TOKEN" && "$TOKEN" != null ]]
+          echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          for pair in "beta:$BETA_FOLDER_ID" "stable:$STABLE_FOLDER_ID"; do
+            name=${pair%%:*}; folder=${pair#*:}
+            q=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote("\"%s\" in parents and trashed=false"%sys.argv[1]))' "$folder")
+            curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size,modifiedTime)&pageSize=1000" > "/tmp/${name}-files.json"
+          done
+          jq -e '[.files[]|select(.name|test("0\\.4\\.2-beta\\.23|beta23";"i"))]|length==0' /tmp/beta-files.json >/dev/null
+          jq -e '.files|length==0' /tmp/stable-files.json >/dev/null
+          jq -e '[.files[]|select(.name=="pick-pack-1291-public-beta-0.4.2-beta.22.apk")]|length==1' /tmp/beta-files.json >/dev/null
+          echo 'OTA preflight: Beta22 latest, Beta23 absent, Stable empty.'
+
+      - name: Build Beta23 release only
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon clean :app:assembleBetaRelease \
+            -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" \
+            -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" \
+            -PFIREBASE_API_KEY="$FIREBASE_API_KEY" \
+            -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID"
+          find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk' -print
+          APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk' | head -1)
+          [[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]]
+          echo "APK_UNSIGNED=$APK_UNSIGNED" >> "$GITHUB_ENV"
+
+      - name: Sign with locked owner signer and verify package/version
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_SIGNING_KEY_B64" | base64 -d > /tmp/release-keystore.jks
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          [[ -x "$BUILD_TOOLS/apksigner" && -x "$BUILD_TOOLS/zipalign" && -x "$BUILD_TOOLS/aapt" ]]
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/beta23-aligned.apk
+          "$BUILD_TOOLS/apksigner" sign --ks /tmp/release-keystore.jks --ks-key-alias "$ANDROID_SIGNING_KEY_ALIAS" --ks-pass "pass:$ANDROID_SIGNING_STORE_PASSWORD" --key-pass "pass:$ANDROID_SIGNING_KEY_PASSWORD" --out /tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk /tmp/beta23-aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs /tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk | tee /tmp/apksigner.txt
+          SIGNER=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/apksigner.txt | head -1 | tr '[:upper:]' '[:lower:]')
+          [[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]] || { echo "Signer mismatch"; exit 1; }
+          BADGING=$("$BUILD_TOOLS/aapt" dump badging /tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk | head -1)
+          echo "$BADGING"
+          [[ "$BADGING" == *"name='$EXPECTED_PACKAGE'"* ]]
+          [[ "$BADGING" == *"versionCode='$EXPECTED_VERSION_CODE'"* ]]
+          [[ "$BADGING" == *"versionName='$EXPECTED_VERSION_NAME'"* ]]
+          SHA=$(sha256sum /tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk | awk '{print $1}')
+          SIZE=$(stat -c%s /tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk)
+          printf '%s  %s\n' "$SHA" 'pick-pack-1291-public-beta-0.4.2-beta.23.apk' > /tmp/SHA256SUMS-beta23.txt
+          echo "APK_SHA256=$SHA" >> "$GITHUB_ENV"; echo "APK_SIZE=$SIZE" >> "$GITHUB_ENV"; echo "APK_SIGNER=$SIGNER" >> "$GITHUB_ENV"
+
+      - name: Upload Beta23 APK by Drive resumable API
+        shell: bash
+        run: |
+          set -euo pipefail
+          META=$(jq -nc --arg n 'pick-pack-1291-public-beta-0.4.2-beta.23.apk' --arg p "$BETA_FOLDER_ID" '{name:$n,parents:[$p],mimeType:"application/vnd.android.package-archive"}')
+          curl -fsS -D /tmp/apk-headers.txt -o /tmp/apk-session-body.txt -X POST 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum' \
+            -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json; charset=UTF-8' -H 'X-Upload-Content-Type: application/vnd.android.package-archive' -H "X-Upload-Content-Length: $APK_SIZE" --data "$META"
+          LOCATION=$(awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");sub(/^location:[[:space:]]*/,"");print;exit}' /tmp/apk-headers.txt)
+          [[ -n "$LOCATION" ]]
+          curl -fsSL -X PUT "$LOCATION" -H 'Content-Type: application/vnd.android.package-archive' --data-binary @/tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk > /tmp/apk-upload.json
+          jq -e --arg n 'pick-pack-1291-public-beta-0.4.2-beta.23.apk' --arg s "$APK_SIZE" '.name==$n and (.size|tostring)==$s and (.id|length)>5' /tmp/apk-upload.json >/dev/null
+          echo "APK_DRIVE_ID=$(jq -r '.id' /tmp/apk-upload.json)" >> "$GITHUB_ENV"
+
+      - name: Upload Beta23 checksum companion
+        shell: bash
+        run: |
+          set -euo pipefail
+          CS_SIZE=$(stat -c%s /tmp/SHA256SUMS-beta23.txt)
+          META=$(jq -nc --arg n 'SHA256SUMS-beta23.txt' --arg p "$BETA_FOLDER_ID" '{name:$n,parents:[$p],mimeType:"text/plain"}')
+          curl -fsS -D /tmp/cs-headers.txt -o /tmp/cs-session-body.txt -X POST 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size' \
+            -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json; charset=UTF-8' -H 'X-Upload-Content-Type: text/plain' -H "X-Upload-Content-Length: $CS_SIZE" --data "$META"
+          LOCATION=$(awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");sub(/^location:[[:space:]]*/,"");print;exit}' /tmp/cs-headers.txt)
+          [[ -n "$LOCATION" ]]
+          curl -fsSL -X PUT "$LOCATION" -H 'Content-Type: text/plain' --data-binary @/tmp/SHA256SUMS-beta23.txt > /tmp/cs-upload.json
+          jq -e --arg n 'SHA256SUMS-beta23.txt' '.name==$n and (.id|length)>5' /tmp/cs-upload.json >/dev/null
+          echo "CHECKSUM_DRIVE_ID=$(jq -r '.id' /tmp/cs-upload.json)" >> "$GITHUB_ENV"
+
+      - name: Verify Drive roundtrip and Stable lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files/$APK_DRIVE_ID?fields=id,name,size,md5Checksum,parents" > /tmp/apk-roundtrip.json
+          jq -e --arg n 'pick-pack-1291-public-beta-0.4.2-beta.23.apk' --arg s "$APK_SIZE" --arg p "$BETA_FOLDER_ID" '.name==$n and (.size|tostring)==$s and (.parents|index($p))!=null' /tmp/apk-roundtrip.json >/dev/null
+          q=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote("\"%s\" in parents and trashed=false"%sys.argv[1]))' "$STABLE_FOLDER_ID")
+          curl -fsSL -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=100" | jq -e '.files|length==0' >/dev/null
+
+      - name: Verify OTA discovery sees Beta23
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.22","current_version_code":28}' > /tmp/update.json || true
+            if grep -qi '0.4.2-beta.23' /tmp/update.json; then break; fi
+            sleep 3
+          done
+          grep -qi '0.4.2-beta.23' /tmp/update.json
+          jq -e '.ok==true' /tmp/update.json >/dev/null
+          echo 'OTA update_check exposes Beta23.'
+
+      - name: Upload verification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta23-release-evidence
+          path: |
+            /tmp/pick-pack-1291-public-beta-0.4.2-beta.23.apk
+            /tmp/SHA256SUMS-beta23.txt
+            /tmp/apksigner.txt
+            /tmp/apk-roundtrip.json
+            /tmp/update.json
+          retention-days: 14
+
+      - name: Verdict
+        run: |
+          echo "PASS Beta23: version=$EXPECTED_VERSION_NAME code=$EXPECTED_VERSION_CODE package=$EXPECTED_PACKAGE size=$APK_SIZE sha256=$APK_SHA256 signer=$APK_SIGNER drive=$APK_DRIVE_ID"
+          echo 'Stable folder remained empty; no Stable artifact was built or uploaded.'
