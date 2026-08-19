@@ -1,5 +1,6 @@
 mode=READ_ONLY
-requested_at=2026-08-19T22:07:00+07:00
+requested_at=2026-08-19T22:18:00+07:00
+retry=2
 payload=FORBIDDEN
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
