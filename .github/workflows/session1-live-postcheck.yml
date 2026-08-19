@@ -20,6 +20,7 @@ jobs:
       GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
       SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
       D1_NAME: pick-pack-1291-service-prod
+      GENERATION: m2-prod-20260819-001
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,16 +35,36 @@ jobs:
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$SERVICE_URL/health" >/tmp/h.json
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$SERVICE_URL/v1/capabilities" >/tmp/c.json
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/a.json
-          node -e 'const h=require("/tmp/h.json"),c=require("/tmp/c.json"),j=require("/tmp/a.json"),a=j.authority||j;if(!h.ok||h.environment!=="production"||h.generation!=="m2-prod-20260819-001"||!c.ok||Number(c.business_window)!==7||!c.mutation_batch||!c.fcm_wake||!c.import_engine||c.realtime_protocol!=="INVALIDATION_V1"||!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==6||a.scope!=="PRODUCTION")throw new Error("SERVICE_POSTCHECK_FAILED");console.log("SERVICE_POSTCHECK="+JSON.stringify({health:{generation:h.generation,authority:h.authority,replication:h.replication,telemetry:h.service_telemetry||null},capabilities:{business_window:c.business_window,mutation_batch:c.mutation_batch,fcm_wake:c.fcm_wake,import_engine:c.import_engine,realtime_protocol:c.realtime_protocol},authority:{mode:a.mode,epoch:a.authority_epoch,seq:a.authority_seq,scope:a.scope,generation:a.service_generation}}))'
+          node -e 'const h=require("/tmp/h.json"),c=require("/tmp/c.json"),j=require("/tmp/a.json"),a=j.authority||j,epoch=Number(a.authority_epoch);if(!h.ok||h.environment!=="production"||h.generation!==process.env.GENERATION||!c.ok||Number(c.business_window)!==7||!c.mutation_batch||!c.fcm_wake||!c.import_engine||c.realtime_protocol!=="INVALIDATION_V1"||!j.ok||a.mode!=="SERVICE_PRIMARY"||![6,8].includes(epoch)||a.scope!=="PRODUCTION"||a.service_generation!==process.env.GENERATION)throw new Error("SERVICE_POSTCHECK_FAILED");console.log("SERVICE_POSTCHECK="+JSON.stringify({health:{generation:h.generation,authority:h.authority,replication:h.replication,telemetry:h.service_telemetry||null},capabilities:{business_window:c.business_window,mutation_batch:c.mutation_batch,fcm_wake:c.fcm_wake,import_engine:c.import_engine,realtime_protocol:c.realtime_protocol},authority:{mode:a.mode,epoch:a.authority_epoch,seq:a.authority_seq,scope:a.scope,generation:a.service_generation}}))'
           : >/tmp/times
           for i in $(seq 1 15); do curl -sS --max-time 10 -o /dev/null -w '%{http_code} %{time_total}\n' "$SERVICE_URL/health" >>/tmp/times || echo '000 10' >>/tmp/times; done
           node -e 'const fs=require("fs"),rows=fs.readFileSync("/tmp/times","utf8").trim().split(/\n/).map(x=>x.trim().split(/\s+/)),ok=rows.filter(r=>r[0]==="200").map(r=>+r[1]).sort((a,b)=>a-b);if(ok.length<12)throw new Error("HEALTH_STABILITY_FAILED:"+ok.length);const med=ok[Math.floor(ok.length/2)];console.log("HEALTH_BENCH="+JSON.stringify({success:ok.length,total:rows.length,min_ms:+(ok[0]*1000).toFixed(1),median_ms:+(med*1000).toFixed(1),max_ms:+(ok.at(-1)*1000).toFixed(1)}))'
+      - name: Verify live PWA invalidation and recovery route
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$SERVICE_URL/app.js" >/tmp/app.js
+          grep -Fq "m.type==='DAY_CHANGED'" /tmp/app.js
+          grep -Fq 'INVALIDATION_V1' /tmp/app.js
+          ! grep -Fq "m.type==='DELTA'" /tmp/app.js
+          HTTP=$(curl -sS --max-time 25 -o /tmp/resume-unauth.json -w '%{http_code}' -X POST -H 'content-type: application/json' "$SERVICE_URL/internal/recovery/failback-resume" -d '{}')
+          [[ "$HTTP" == 401 ]] || { echo "FAILBACK_RESUME_ROUTE_UNEXPECTED_HTTP=$HTTP"; cat /tmp/resume-unauth.json; exit 1; }
+          echo LIVE_PWA_AND_FAILBACK_RESUME_ROUTE=PASS
       - name: Read exact GAS discovery repeatedly
         shell: bash
         run: |
           set -euo pipefail
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/service-authority.json
+          EPOCH=$(node -e 'const j=require("/tmp/service-authority.json"),a=j.authority||j;process.stdout.write(String(a.authority_epoch||""))')
           GOOD=0; TOTAL=8; : >/tmp/gas-samples
-          for i in $(seq 1 $TOTAL); do : >/tmp/g.json; curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json || true; if node -e 'try{const j=require("/tmp/g.json"),a=j.authority||{};process.exit(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7&&j.service_url===process.env.SERVICE_URL?0:1)}catch{process.exit(1)}'; then GOOD=$((GOOD+1)); node -e 'const j=require("/tmp/g.json"),a=j.authority||{};console.log(JSON.stringify({ok:true,mode:j.authority_mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:j.service_generation,client_floor:j.client_floor||null}))' >>/tmp/gas-samples; else echo '{"ok":false}' >>/tmp/gas-samples; fi; sleep 1; done
+          for i in $(seq 1 $TOTAL); do
+            : >/tmp/g.json
+            curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json || true
+            if EPOCH="$EPOCH" node -e 'try{const j=require("/tmp/g.json"),a=j.authority||{},e=Number(process.env.EPOCH),ok=e===6?(j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7):(e===8&&j.authority_mode==="SERVICE_PRIMARY"&&Number(a.authority_epoch)===8);process.exit(j.ok&&ok&&j.service_url===process.env.SERVICE_URL&&j.service_generation===process.env.GENERATION?0:1)}catch{process.exit(1)}'; then
+              GOOD=$((GOOD+1)); node -e 'const j=require("/tmp/g.json"),a=j.authority||{};console.log(JSON.stringify({ok:true,mode:j.authority_mode,epoch:a.authority_epoch,seq:a.authority_seq,generation:j.service_generation,client_floor:j.client_floor||null}))' >>/tmp/gas-samples
+            else echo '{"ok":false}' >>/tmp/gas-samples; fi
+            sleep 1
+          done
           echo "GAS_GOOD=$GOOD/$TOTAL"; cat /tmp/gas-samples
           [[ "$GOOD" -ge 5 ]] || { echo GAS_DISCOVERY_UNSTABLE; exit 1; }
       - name: Read Google fallback ledger and live GAS source
@@ -54,11 +75,12 @@ jobs:
           TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP"); [[ -n "$TOKEN" ]] || exit 1; echo "::add-mask::$TOKEN"
           RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
           curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/f.json
-          node -e 'const rows=(require("/tmp/f.json").values||[]).slice(1),p=rows.filter(r=>Number(r[1])===7&&String(r[12]||"")==="PENDING"),seq=p.map(r=>Number(r[2]));if(p.length!==3||JSON.stringify(seq)!==JSON.stringify([1,2,3]))throw new Error("FALLBACK_POSTCHECK_FAILED");console.log("FALLBACK_POSTCHECK="+JSON.stringify({epoch:7,pending:p.length,seq}))'
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/service-authority.json
+          node -e 'const rows=(require("/tmp/f.json").values||[]).slice(1),s=require("/tmp/service-authority.json"),a=s.authority||s,e=Number(a.authority_epoch),epoch=rows.filter(r=>Number(r[1])===7),p=epoch.filter(r=>String(r[12]||"")==="PENDING"),ing=epoch.filter(r=>String(r[12]||"")==="INGESTED");if(e===6){const seq=p.map(r=>Number(r[2]));if(p.length!==3||JSON.stringify(seq)!==JSON.stringify([1,2,3]))throw new Error("FALLBACK_PRE_FAILBACK_POSTCHECK_FAILED");}else if(e===8){if(p.length!==0||ing.length!==3)throw new Error("FALLBACK_POST_FAILBACK_POSTCHECK_FAILED");}else throw new Error("SERVICE_EPOCH_UNEXPECTED");console.log("FALLBACK_POSTCHECK="+JSON.stringify({service_epoch:e,pending:p.length,ingested:ing.length}))'
           SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
           curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" >/tmp/src.json
           node -e 'const j=require("/tmp/src.json"),f=(j.files||[]).find(x=>x.name==="SERVICE_MIGRATION_M2"&&x.type==="SERVER_JS"),s=f?.source||"";if(!s.includes("function ppM2SanitizePayload_")||!s.includes("payload:ppM2SanitizePayload_(body)")||!s.includes("JSON.stringify(ppM2SanitizePayload_(body||{}))"))throw new Error("GAS_SANITIZER_NOT_LIVE_SOURCE");console.log("GAS_SANITIZER_SOURCE=PASS")'
-      - name: Read production D1 migration replication and recovery lock
+      - name: Read production D1 migration replication and recovery state
         working-directory: service
         shell: bash
         run: |
@@ -66,5 +88,5 @@ jobs:
           npm install --no-audit --no-fund >/dev/null
           LIST=$(npx wrangler d1 list --json); ID=$(node -e 'const a=JSON.parse(process.argv[1]),x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST"); [[ -n "$ID" ]] || exit 1; export ID
           node -e 'const fs=require("fs");let s=fs.readFileSync("wrangler.jsonc","utf8").replace("__M1_D1_DATABASE_ID__",process.env.ID).replace("\"database_name\": \"pick-pack-1291-m1-staging\"",`\"database_name\": \"${process.env.D1_NAME}\"`);fs.writeFileSync("wrangler.postcheck.jsonc",s)'
-          npx wrangler d1 execute "$D1_NAME" --remote --config wrangler.postcheck.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT COALESCE((SELECT value FROM system_meta WHERE key='m2_reconciling'),'0') reconciling; SELECT COUNT(*) epoch7_inbox FROM fallback_event_inbox WHERE authority_epoch=7; SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1; SELECT name FROM d1_migrations ORDER BY id;" --json >/tmp/d1.json
-          node -e 'const x=require("/tmp/d1.json"),r=x.flatMap(g=>g.results||[]),a=r.find(v=>v.mode),lock=r.find(v=>Object.hasOwn(v,"reconciling")),inbox=r.find(v=>Object.hasOwn(v,"epoch7_inbox")),rep=r.find(v=>Object.hasOwn(v,"pending_count")),names=r.filter(v=>v.name).map(v=>v.name);if(!a||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==6||a.scope!=="PRODUCTION"||String(lock?.reconciling||"0")==="1"||String(rep?.state||"").toUpperCase()==="FAILED"||!names.includes("0004_session1_foundation.sql"))throw new Error("D1_POSTCHECK_FAILED");console.log("D1_POSTCHECK="+JSON.stringify({authority:{mode:a.mode,epoch:a.authority_epoch,seq:a.authority_seq,scope:a.scope,generation:a.service_generation},reconciling:lock?.reconciling,epoch7_inbox:inbox?.epoch7_inbox,replication:rep,migration:names.at(-1)}))'
+          npx wrangler d1 execute "$D1_NAME" --remote --config wrangler.postcheck.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT COALESCE((SELECT value FROM system_meta WHERE key='m2_reconciling'),'0') reconciling; SELECT COUNT(*) epoch7_inbox FROM fallback_event_inbox WHERE authority_epoch=7; SELECT ingest_status,COUNT(*) n FROM fallback_event_inbox WHERE authority_epoch=7 GROUP BY ingest_status; SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1; SELECT name FROM d1_migrations ORDER BY id; SELECT status,source_authority_epoch,target_authority_epoch FROM recovery_runs WHERE recovery_type='FAILBACK' ORDER BY started_at DESC LIMIT 1;" --json >/tmp/d1.json
+          node -e 'const x=require("/tmp/d1.json"),r=x.flatMap(g=>g.results||[]),a=r.find(v=>v.mode),lock=r.find(v=>Object.hasOwn(v,"reconciling")),inbox=r.find(v=>Object.hasOwn(v,"epoch7_inbox")),applied=r.find(v=>v.ingest_status==="APPLIED"),rep=r.find(v=>Object.hasOwn(v,"pending_count")),names=r.filter(v=>v.name).map(v=>v.name),rec=r.find(v=>Object.hasOwn(v,"target_authority_epoch"));if(!a||a.mode!=="SERVICE_PRIMARY"||![6,8].includes(Number(a.authority_epoch))||a.scope!=="PRODUCTION"||a.service_generation!==process.env.GENERATION||String(lock?.reconciling||"0")==="1"||String(rep?.state||"").toUpperCase()==="FAILED"||!names.includes("0004_session1_foundation.sql"))throw new Error("D1_POSTCHECK_FAILED");if(Number(a.authority_epoch)===6&&Number(inbox?.epoch7_inbox||0)!==0)throw new Error("D1_PRE_FAILBACK_INBOX_CHANGED");if(Number(a.authority_epoch)===8&&(Number(inbox?.epoch7_inbox||0)!==3||Number(applied?.n||0)!==3||rec?.status!=="COMPLETE"||Number(rec?.source_authority_epoch)!==7||Number(rec?.target_authority_epoch)!==8))throw new Error("D1_POST_FAILBACK_RECOVERY_INCOMPLETE");console.log("D1_POSTCHECK="+JSON.stringify({authority:{mode:a.mode,epoch:a.authority_epoch,seq:a.authority_seq,scope:a.scope,generation:a.service_generation},reconciling:lock?.reconciling,epoch7_inbox:inbox?.epoch7_inbox,applied:applied?.n||0,replication:rep,migration:names.at(-1),recovery:rec||null}))'
