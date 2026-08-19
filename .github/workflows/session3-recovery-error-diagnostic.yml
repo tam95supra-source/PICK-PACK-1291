@@ -1,0 +1,49 @@
+name: Session3 Recovery Error Diagnostic
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-recovery-error-diagnostic-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  D1_NAME: pick-pack-1291-service-prod
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read latest recovery errors only
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/list.json|head -1); [[ -n "$ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/w.jsonc',JSON.stringify(c,null,2))" "$ID"
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "SELECT status,source_authority_epoch,source_authority_seq,target_authority_epoch,error,validation_json FROM recovery_runs WHERE recovery_type='FAILBACK' ORDER BY started_at DESC LIMIT 2" --json >/tmp/rec.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "SELECT event_id,authority_seq,ingest_status,last_error FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq" --json >/tmp/inbox.json
+          cd ..
+          node - <<'NODE'
+          const fs=require('fs'),flat=p=>require(p).flatMap(x=>x.results||[]),r=flat('/tmp/rec.json'),i=flat('/tmp/inbox.json');
+          const safe=s=>String(s||'').replace(/[A-Za-z0-9_\-]{40,}/g,'[REDACTED_LONG]').replace(/token[^ ,}]*/ig,'token=[REDACTED]').slice(0,400);
+          const lines=[`checked_at=${new Date().toISOString()}`];r.forEach((x,n)=>{lines.push(`recovery${n+1}_status=${x.status||''}`);lines.push(`recovery${n+1}_error=${safe(x.error)}`)});lines.push(`inbox_status=${i.map(x=>x.authority_seq+':'+x.ingest_status).join(',')}`);lines.push(`inbox_error_count=${i.filter(x=>String(x.last_error||'')).length}`);lines.push('payload_logged=NO','verdict=DIAGNOSTIC_COMPLETE','');fs.writeFileSync('/tmp/result.txt',lines.join('\n'));
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nverdict=DIAGNOSTIC_FAILED\npayload_logged=NO\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/r; git reset --hard HEAD >/dev/null; cp /tmp/r ops/session3-recovery-error-diagnostic-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-recovery-error-diagnostic-result.txt; git diff --cached --quiet || (git commit -m 'ops: record recovery error diagnostic' && git push)
