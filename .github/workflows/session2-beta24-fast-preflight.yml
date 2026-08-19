@@ -1,0 +1,52 @@
+name: Session2 Beta24 Fast Preflight
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta24-fast-preflight-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Compose Android source transforms and validate Service
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-beta24-fast-preflight-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT";echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          PHASE=TRANSFORM;trap 'rc=$?;echo "failed_phase=$PHASE" >> "$OUT";echo "failed_rc=$rc" >> "$OUT";exit $rc' ERR
+          python3 -m py_compile tools/apply_s25_cache_sync_web_pda_fixes.py tools/apply_s26_web_session_ui_fix.py
+          python3 tools/apply_m2_android_transport_patch.py >/tmp/transform.log
+          grep -q 'S25_CACHE_FIRST_FALLBACK_SYNC' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'S25_FALLBACK_RETENTION_COMPAT' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'S25_LOCAL_LABOR_OVERLAY' app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt
+          grep -q 'Hai phiên nóng N / N-1' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          echo android_transform=PASS >> "$OUT"
+          PHASE=WEB
+          node --check service/public/app.js
+          grep -q "client_source:'WEB'" service/public/app.js
+          grep -q '.login-wrap\[hidden\]' service/public/styles.css
+          echo web_source=PASS >> "$OUT"
+          PHASE=SERVICE
+          cd service;npm install --no-audit --no-fund >/dev/null;npm run check >/dev/null;cd ..
+          echo service_typecheck=PASS >> "$OUT"
+          echo verdict=PASS >> "$OUT"
+      - name: Record sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-beta24-fast-preflight-result.txt||echo result_missing=true>/tmp/session2-beta24-fast-preflight-result.txt
+          git reset --hard HEAD >/dev/null
+          cp /tmp/session2-beta24-fast-preflight-result.txt ops/session2-beta24-fast-preflight-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-beta24-fast-preflight-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record Beta24 fast preflight';git push
