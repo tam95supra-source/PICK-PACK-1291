@@ -1,17 +1,19 @@
 from pathlib import Path
+import re
 
 api=Path('google-apps-script/PICK_PACK_API.gs')
 s=api.read_text()
-anchor="  if(action==='service_discovery')return ppJson_(ppM2Discovery_(body));"
-block="""  if(action==='service_discovery')return ppJson_(ppM2Discovery_(body));
-  if(action==='m2_internal_reconcile_status')return ppJson_(ppM2InternalReconcileStatus_(body));
-  if(action==='m2_internal_reconcile_begin')return ppJson_(ppM2InternalReconcileBegin_(body));
-  if(action==='m2_internal_reconcile_flush')return ppJson_(ppM2InternalReconcileFlush_(body));
-  if(action==='m2_internal_reconcile_complete')return ppJson_(ppM2InternalReconcileComplete_(body));
-  if(action==='m2_internal_reconcile_revert')return ppJson_(ppM2InternalReconcileRevert_(body));"""
+block="""    if (action === 'service_discovery') return ppJson_(ppM2Discovery_(body));
+    if (action === 'm2_internal_reconcile_status') return ppJson_(ppM2InternalReconcileStatus_(body));
+    if (action === 'm2_internal_reconcile_begin') return ppJson_(ppM2InternalReconcileBegin_(body));
+    if (action === 'm2_internal_reconcile_flush') return ppJson_(ppM2InternalReconcileFlush_(body));
+    if (action === 'm2_internal_reconcile_complete') return ppJson_(ppM2InternalReconcileComplete_(body));
+    if (action === 'm2_internal_reconcile_revert') return ppJson_(ppM2InternalReconcileRevert_(body));"""
 if "m2_internal_reconcile_begin" not in s:
-    if anchor not in s: raise SystemExit('GAS_DISPATCH_ANCHOR_MISSING')
-    s=s.replace(anchor,block,1)
+    pattern=r"^\s*if\s*\(\s*action\s*===\s*['\"]service_discovery['\"]\s*\)\s*return\s+ppJson_\(ppM2Discovery_\(body\)\);\s*$"
+    matches=list(re.finditer(pattern,s,re.M))
+    if len(matches)!=1: raise SystemExit(f'GAS_DISPATCH_ANCHOR_COUNT_{len(matches)}')
+    s=s[:matches[0].start()]+block+s[matches[0].end():]
 api.write_text(s)
 
 m2=Path('google-apps-script/SERVICE_MIGRATION_M2.gs')
