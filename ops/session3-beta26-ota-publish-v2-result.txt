@@ -1,0 +1,8 @@
+checked_at=2026-08-19T16:55:19Z
+head_sha=9349e413adae3876c2c4e997da9e0d3401c04ac4
+lock=PASS
+authority=SERVICE_PRIMARY_8
+failed_phase=DRIVE_GATE
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
