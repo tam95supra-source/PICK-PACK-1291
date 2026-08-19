@@ -23,6 +23,7 @@ class M2Application : Application() {
 object M2Firebase {
     private const val PREFS = "pp_m2_fcm"
     private const val KEY_PENDING_TOKEN = "pending_token"
+    private const val KEY_REGISTERED_TOKEN = "registered_token"
 
     fun configured(): Boolean = listOf(
         BuildConfig.FIREBASE_PROJECT_ID,
@@ -46,7 +47,10 @@ object M2Firebase {
             }
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
                 if (token.isNotBlank()) {
-                    app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PENDING_TOKEN, token).apply()
+                    val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    if (prefs.getString(KEY_REGISTERED_TOKEN, "") != token) {
+                        prefs.edit().putString(KEY_PENDING_TOKEN, token).apply()
+                    }
                     M2PushRegistration.flush(app)
                 }
             }
@@ -55,15 +59,28 @@ object M2Firebase {
 
     internal fun rememberToken(context: Context, token: String) {
         if (token.isBlank()) return
-        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_PENDING_TOKEN, token).apply()
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_PENDING_TOKEN, token).apply()
     }
 
     internal fun pendingToken(context: Context): String = context.applicationContext
         .getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PENDING_TOKEN, "").orEmpty()
 
+    internal fun registeredToken(context: Context): String = context.applicationContext
+        .getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_REGISTERED_TOKEN, "").orEmpty()
+
     internal fun markRegistered(context: Context, token: String) {
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getString(KEY_PENDING_TOKEN, "") == token) prefs.edit().remove(KEY_PENDING_TOKEN).apply()
+        val edit = prefs.edit().putString(KEY_REGISTERED_TOKEN, token)
+        if (prefs.getString(KEY_PENDING_TOKEN, "") == token) edit.remove(KEY_PENDING_TOKEN)
+        edit.apply()
+    }
+
+    internal fun markRevoked(context: Context, token: String) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val edit = prefs.edit()
+        if (prefs.getString(KEY_REGISTERED_TOKEN, "") == token) edit.remove(KEY_REGISTERED_TOKEN)
+        edit.apply()
     }
 }
 
@@ -94,18 +111,45 @@ object M2PushRegistration {
         val app = context.applicationContext
         val token = M2Firebase.pendingToken(app)
         if (token.length < 32) return
-        executor.execute { register(app, token) }
+        val target = serviceTarget(app) ?: return
+        executor.execute { register(app, target.first, target.second, token) }
     }
 
-    private fun register(context: Context, fcmToken: String) {
-        val discovery = M2ServiceTransport(context).discoverySnapshot() ?: return
+    /** Capture Service session synchronously so logout can clear auth immediately after scheduling revoke. */
+    fun revoke(context: Context) {
+        val app = context.applicationContext
+        val token = M2Firebase.registeredToken(app)
+        if (token.length < 32) return
+        val target = serviceTarget(app) ?: return
+        executor.execute { revokeRegistered(app, target.first, target.second, token) }
+    }
+
+    private fun serviceTarget(context: Context): Pair<String, String>? {
+        val discovery = M2ServiceTransport(context).discoverySnapshot() ?: return null
         val base = discovery.optString("service_url").trimEnd('/')
-        if (!base.startsWith("https://") || (!base.contains(".workers.dev") && !base.contains(".pages.dev"))) return
+        if (!base.startsWith("https://") || (!base.contains(".workers.dev") && !base.contains(".pages.dev"))) return null
         val serviceToken = context.getSharedPreferences("pp_m2_service_transport", Context.MODE_PRIVATE).getString("service_token", null)
-        if (serviceToken.isNullOrBlank()) return
+        if (serviceToken.isNullOrBlank()) return null
+        return base to serviceToken
+    }
+
+    private fun register(context: Context, base: String, serviceToken: String, fcmToken: String) {
+        val code = post(base, "/v1/push/register", serviceToken, JSONObject()
+            .put("fcm_token", fcmToken)
+            .put("app_version", BuildConfig.VERSION_NAME)
+            .put("channel", BuildConfig.CHANNEL))
+        if (code in 200..299) M2Firebase.markRegistered(context, fcmToken)
+    }
+
+    private fun revokeRegistered(context: Context, base: String, serviceToken: String, fcmToken: String) {
+        val code = post(base, "/v1/push/revoke", serviceToken, JSONObject().put("fcm_token", fcmToken))
+        if (code in 200..299) M2Firebase.markRevoked(context, fcmToken)
+    }
+
+    private fun post(base: String, path: String, serviceToken: String, body: JSONObject): Int {
         var conn: HttpURLConnection? = null
-        runCatching {
-            conn = (URL("$base/v1/push/register").openConnection() as HttpURLConnection).apply {
+        return runCatching {
+            conn = (URL(base + path).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 4_000
                 readTimeout = 5_000
@@ -113,14 +157,8 @@ object M2PushRegistration {
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Authorization", "Bearer $serviceToken")
             }
-            val body = JSONObject()
-                .put("fcm_token", fcmToken)
-                .put("app_version", BuildConfig.VERSION_NAME)
-                .put("channel", BuildConfig.CHANNEL)
             conn!!.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-            val code = conn!!.responseCode
-            if (code in 200..299) M2Firebase.markRegistered(context, fcmToken)
-        }
-        conn?.disconnect()
+            conn!!.responseCode
+        }.getOrDefault(-1).also { conn?.disconnect() }
     }
 }
