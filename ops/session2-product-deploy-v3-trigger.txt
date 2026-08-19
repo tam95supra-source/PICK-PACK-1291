@@ -1,1 +1,1 @@
-Trigger safe Session2 production Web/Service deploy after Beta23 source, Android compile, Service E2E, Chaos and Precutover gates passed.
+Retrigger safe Session2 production Web/Service deploy after confirmed compile PASS and deploy bindings READY.
