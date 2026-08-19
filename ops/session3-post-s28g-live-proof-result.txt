@@ -1,7 +1,7 @@
-checked_at=2026-08-19T16:34:54.908Z
-service=SERVICE_PRIMARY|8|0|PRODUCTION|m2-prod-20260819-001
-gas=SERVICE_PRIMARY|8|0|m2-prod-20260819-001
-replication=HEALTHY|0
+checked_at=2026-08-19T22:45:17.034Z
+service=SERVICE_PRIMARY|8|8|PRODUCTION|m2-prod-20260819-001
+gas=|||
+replication=HEALTHY|8
 web_history=PASS
 admin_audit_unauth_http=401
-verdict=PASS
+verdict=FAILED
