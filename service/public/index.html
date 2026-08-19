@@ -2,26 +2,53 @@
 <html lang="vi">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#3156d3"><meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#172554"><meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="manifest" href="/manifest.webmanifest"><link rel="stylesheet" href="/styles.css">
   <title>Pick Pack 1291</title>
 </head>
 <body>
   <main id="login" class="login-wrap">
-    <section class="card login-card"><h1>Pick Pack 1291</h1><p class="muted">Đăng nhập hệ thống nghiệp vụ</p>
-      <label>Tài khoản<input id="loginId" autocomplete="username"></label>
-      <label>Mật khẩu<input id="password" type="password" autocomplete="current-password"></label>
+    <section class="card login-card">
+      <div class="login-mark">PP</div><h1>Pick Pack 1291</h1><p class="muted">Hệ thống vận hành Pick Pack 1291</p>
+      <label>Tài khoản<input id="loginId" autocomplete="username" placeholder="Nhập tài khoản"></label>
+      <label>Mật khẩu<input id="password" type="password" autocomplete="current-password" placeholder="Nhập mật khẩu"></label>
       <button id="loginBtn" class="primary">ĐĂNG NHẬP</button><p id="loginError" class="error"></p>
     </section>
   </main>
-  <div id="app" hidden>
-    <header><div><strong id="greeting">Pick Pack 1291</strong><div class="statusline"><span id="netChip">Mạng</span><span id="syncChip">Đồng bộ</span><span id="serviceChip">Service</span></div></div><button id="logoutBtn" class="textbtn">Đăng xuất</button></header>
-    <section id="notice" class="notice" hidden></section>
-    <main id="content"></main>
-    <nav id="tabs">
-      <button data-tab="business" class="active">Nghiệp vụ</button><button data-tab="staff">Nhân sự</button><button data-tab="history">Lịch sử</button><button data-tab="sync">Đồng bộ</button><button data-tab="settings">Cài đặt</button>
-    </nav>
+
+  <div id="app" class="admin-app" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="brand"><span class="brand-mark">PP</span><span><strong>Pick Pack 1291</strong><small>Operations</small></span></div>
+      <nav id="tabs" class="side-nav" aria-label="Điều hướng chính">
+        <button data-tab="dashboard"><span>▦</span>Dashboard</button>
+        <button data-tab="business"><span>⇄</span>Nghiệp vụ</button>
+        <button data-tab="staff"><span>👥</span>Nhân sự</button>
+        <button data-tab="labor" data-role="ADMIN,SUPERADMIN"><span>◷</span>Công nhật</button>
+        <button data-tab="resources"><span>⌘</span>Tài nguyên</button>
+        <button data-tab="import" data-role="SUPERADMIN"><span>⇧</span>Import dữ liệu</button>
+        <button data-tab="history"><span>≡</span>Lịch sử</button>
+        <button data-tab="sync"><span>↕</span>Đồng bộ</button>
+        <button data-tab="admin" data-role="ADMIN,SUPERADMIN"><span>⚙</span>Quản trị</button>
+        <button data-tab="settings"><span>☰</span>Cài đặt</button>
+      </nav>
+      <div class="sidebar-foot"><span id="sidebarRole">—</span><small>Service-first / D1 canonical</small></div>
+    </aside>
+    <button id="drawerOverlay" class="drawer-overlay" aria-label="Đóng menu"></button>
+
+    <section class="workspace">
+      <header class="topbar">
+        <button id="menuBtn" class="icon-btn" aria-label="Mở menu">☰</button>
+        <div class="topbar-title"><strong id="pageTitle">Dashboard</strong><span id="greeting">Pick Pack 1291</span></div>
+        <div class="statusline"><span id="netChip">Mạng</span><span id="syncChip">Đồng bộ</span><span id="serviceChip">Service</span></div>
+        <button id="logoutBtn" class="textbtn">Đăng xuất</button>
+      </header>
+      <section id="notice" class="notice" hidden></section>
+      <main id="content" class="content"></main>
+      <footer>Copyright 2026 - tamnv2 - Chuyên viên Pick Pack 1291 - Supra DCHY</footer>
+    </section>
   </div>
+
   <dialog id="conflictDialog"><h3>Cần xử lý xung đột</h3><pre id="conflictText"></pre><button id="conflictClose" class="primary">ĐÃ HIỂU</button></dialog>
+  <dialog id="confirmDialog"><h3 id="confirmTitle">Xác nhận</h3><div id="confirmBody"></div><div class="toolbar"><button id="confirmCancel" class="secondary">HỦY</button><button id="confirmOk" class="primary">XÁC NHẬN</button></div></dialog>
   <script type="module" src="/app.js"></script>
 </body></html>
