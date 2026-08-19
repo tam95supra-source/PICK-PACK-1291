@@ -43,17 +43,29 @@ async function replayRow(db:D1Database,env:Env,row:InboxRow):Promise<void>{
 // Only an exact semantic match is canonicalized as a no-op audit event. We never turn arbitrary
 // conflicts into success, and we intentionally do not enqueue this reconciliation event back to
 // Google because the source fallback row already lives there.
+// S28B_SQL_SEMANTIC_REFLECTED_ENTER
+// Use the same SQL semantic comparison proven by the production diagnostic. This avoids
+// divergent legacy alias/normalization logic between recovery code and the D1 gate.
 async function recordAlreadyReflectedEnter(db:D1Database,row:InboxRow):Promise<boolean>{
   const e=parseEnvelope(row.event_json);if(e.action!=="enter")return false;
-  const p=JSON.parse(e.payload_json) as Record<string,unknown>,mnv=String(p.mnv??"").trim();if(!mnv)return false;
-  const cur=await db.prepare(`SELECT session_id,state,version,shift,work_choice,COALESCE(pda_serial,'') pda_serial,COALESCE(user_pick,'') user_pick,COALESCE(pack_table,'') pack_table,COALESCE(user_pack,'') user_pack FROM attendance_sessions WHERE mnv=?1 AND business_date=?2`).bind(mnv,e.business_date).first<{session_id:string;state:string;version:number;shift:string;work_choice:string;pda_serial:string;user_pick:string;pack_table:string;user_pack:string}>();
-  if(!cur||cur.state!=="ACTIVE")return false;
-  const txt=(v:unknown,max=240)=>String(v??"").trim().slice(0,max);
-  const expected={shift:txt(p.shift,80),work_choice:workChoice(p.work_choice),pda_serial:txt(p.pda_serial??p.pda,180),user_pick:txt(p.user_pick??p.userPick,180),pack_table:txt(p.pack_table??p.packTable,180),user_pack:txt(p.user_pack??p.userPack,180)};
-  if(cur.shift!==expected.shift||cur.work_choice!==expected.work_choice||cur.pda_serial!==expected.pda_serial||cur.user_pick!==expected.user_pick||cur.pack_table!==expected.pack_table||cur.user_pack!==expected.user_pack)return false;
+  const cur=await db.prepare(`WITH f AS (
+    SELECT json_extract(event_json,'$.business_date') d,
+      json_extract(json_extract(event_json,'$.payload_json'),'$.mnv') mnv,
+      COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.shift'),'') shift,
+      CASE WHEN UPPER(TRIM(COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.work_choice'),'')))='PICK' THEN 'PICK'
+           WHEN UPPER(TRIM(COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.work_choice'),'')))='PACK' THEN 'PACK' ELSE 'KHONG' END work_choice,
+      COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.pda_serial'),json_extract(json_extract(event_json,'$.payload_json'),'$.pda'),'') pda_serial,
+      COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.user_pick'),json_extract(json_extract(event_json,'$.payload_json'),'$.userPick'),'') user_pick,
+      COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.pack_table'),json_extract(json_extract(event_json,'$.payload_json'),'$.packTable'),'') pack_table,
+      COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.user_pack'),json_extract(json_extract(event_json,'$.payload_json'),'$.userPack'),'') user_pack
+    FROM fallback_event_inbox WHERE event_id=?1 AND authority_epoch=?2 AND authority_seq=?3
+  ) SELECT f.mnv,s.session_id,s.state,s.version,
+      CASE WHEN s.shift=f.shift AND s.work_choice=f.work_choice AND COALESCE(s.pda_serial,'')=f.pda_serial AND COALESCE(s.user_pick,'')=f.user_pick AND COALESCE(s.pack_table,'')=f.pack_table AND COALESCE(s.user_pack,'')=f.user_pack THEN 1 ELSE 0 END semantic_match
+    FROM f LEFT JOIN attendance_sessions s ON s.business_date=f.d AND s.mnv=f.mnv`).bind(row.event_id,row.authority_epoch,row.authority_seq).first<{mnv:string;session_id:string|null;state:string|null;version:number|null;semantic_match:number}>();
+  if(!cur||!cur.session_id||cur.state!=="ACTIVE"||Number(cur.semantic_match)!==1)return false;
   const a=await currentAuthority(db);if(a.authority_epoch!==row.authority_epoch||a.authority_seq!==row.authority_seq-1)throw new Error(`FALLBACK_REFLECTED_SEQ_STATE_INVALID:${a.authority_epoch}/${a.authority_seq}:${row.authority_seq}`);
-  const committed=nowIso(),payload=sanitizeSensitive({original_action:e.action,mnv,resolution:"ALREADY_REFLECTED_NOOP",source:"GOOGLE_FALLBACK"}) as Record<string,unknown>;
-  const base={event_id:row.event_id,event_type:"FALLBACK_RECONCILED_DUPLICATE",entity_type:"ATTENDANCE_SESSION",entity_id:cur.session_id,business_date:e.business_date,authority_epoch:row.authority_epoch,authority_seq:row.authority_seq,service_generation:row.service_generation,base_version:cur.version,new_version:cur.version,actor_id:e.actor,actor_role:e.role,device_id:e.device_id||"gas-fallback",occurred_at:e.occurred_at||committed,committed_at:committed,payload_json:JSON.stringify(payload),idempotency_key:`fallback-reconciled:${row.event_id}`,origin:"GOOGLE_FALLBACK_RECONCILED",schema_version:1};
+  const committed=nowIso(),payload=sanitizeSensitive({original_action:e.action,mnv:cur.mnv,resolution:"ALREADY_REFLECTED_NOOP",source:"GOOGLE_FALLBACK"}) as Record<string,unknown>,v=Number(cur.version??0);
+  const base={event_id:row.event_id,event_type:"FALLBACK_RECONCILED_DUPLICATE",entity_type:"ATTENDANCE_SESSION",entity_id:cur.session_id,business_date:e.business_date,authority_epoch:row.authority_epoch,authority_seq:row.authority_seq,service_generation:row.service_generation,base_version:v,new_version:v,actor_id:e.actor,actor_role:e.role,device_id:e.device_id||"gas-fallback",occurred_at:e.occurred_at||committed,committed_at:committed,payload_json:JSON.stringify(payload),idempotency_key:`fallback-reconciled:${row.event_id}`,origin:"GOOGLE_FALLBACK_RECONCILED",schema_version:1};
   const checksum=await sha256Hex(JSON.stringify(base));
   await db.batch([
     db.prepare("UPDATE authority_state SET authority_seq=?1,updated_at=?2 WHERE singleton_id=1 AND authority_epoch=?3 AND authority_seq=?4").bind(row.authority_seq,committed,row.authority_epoch,row.authority_seq-1),
