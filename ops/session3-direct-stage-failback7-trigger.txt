@@ -1,0 +1,8 @@
+confirmation=OWNER_LOCKED_M2_FAILBACK
+expected_service=SERVICE_PRIMARY|6|4
+expected_google=GOOGLE_FALLBACK|7|7
+target_epoch=8
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
+requested_at=2026-08-19T22:02:00+07:00
+reason=OWNER_SERVICE_PRIMARY_AND_GAS_URLFETCH_FLUSH_BROKEN
