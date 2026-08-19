@@ -1,0 +1,9 @@
+checked_at=2026-08-19T13:39:14Z
+head_sha=38241ebd312052165bdad04c8c9d49f4fd5418dc
+service_authority=SERVICE_PRIMARY|6|4|PRODUCTION|m2-prod-20260819-001
+web_live=PASS
+gas_authority=GOOGLE_FALLBACK|7|5|m2-prod-20260819-001
+beta_ota=0.4.2-beta.25
+beta_download=PASS
+stable_ota=EMPTY
+verdict=PASS
