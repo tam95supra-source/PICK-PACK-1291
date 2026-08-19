@@ -5,6 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 api=ROOT/'google-apps-script/PICK_PACK_API.gs'
 m2=ROOT/'google-apps-script/SERVICE_MIGRATION_M2.gs'
 
+# The GAS manifest explicitly grants script.external_request before this probe is deployed.
 s=api.read_text()
 route="    if (action === 'm2_bridge_probe_internal') return ppJson_(ppM2BridgeProbeInternal_(body));\n"
 if route not in s:
