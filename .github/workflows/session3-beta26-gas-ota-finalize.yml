@@ -28,7 +28,14 @@ jobs:
           OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=AUTHORITY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
           curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" >/tmp/h.json
           curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
-          node -e 'const h=require("/tmp/h.json"),g=require("/tmp/g.json"),a=h.authority||{},ga=g.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)throw Error("AUTHORITY_GATE")'
+          node - <<'NODE'
+          const fs=require('fs'),h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{},o='/tmp/r';
+          const val=(x)=>String(x??'').replace(/[\r\n|]/g,' ').slice(0,120);
+          fs.appendFileSync(o,`service_probe=${val(a.mode)}|${val(a.authority_epoch)}|${val(a.authority_seq)}|${val(a.scope)}|rep=${val(h.replication?.state)}:${val(h.replication?.pending_count)}\n`);
+          fs.appendFileSync(o,`gas_probe=ok:${val(g.ok)}|top:${val(g.authority_mode)}:${val(g.authority_epoch)}|nested:${val(ga.mode)}:${val(ga.authority_epoch)}|err:${val(g.error?.code||g.error)}\n`);
+          fs.appendFileSync(o,`gas_keys=${Object.keys(g).sort().filter(k=>!/token|secret|password|url/i.test(k)).slice(0,30).join(',')}\n`);
+          if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)throw Error("AUTHORITY_GATE");
+          NODE
           echo authority=PASS >> "$OUT"
       - name: Activate Beta27 OTA through GAS and verify public bytes
         shell: bash
