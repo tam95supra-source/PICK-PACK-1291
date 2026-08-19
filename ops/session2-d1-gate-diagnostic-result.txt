@@ -1,5 +1,5 @@
-checked_at=2026-08-19T13:40:21Z
-head_sha=ccda2460bb0013d14b6d35ec920ff652b5ed4a32
+checked_at=2026-08-19T14:21:52Z
+head_sha=9ad2c8997cf1b657a390427a7cf843a62eb4c348
 d1_bindings=READY
 cf_d1_list_http=200
 cf_d1_list_success=true
