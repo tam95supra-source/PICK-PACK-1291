@@ -27,7 +27,7 @@ jobs:
           set -Eeuo pipefail
           OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=AUTHORITY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
           curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" >/tmp/h.json
-          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          curl -fsSL --post302 --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
           node - <<'NODE'
           const fs=require('fs'),h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{},o='/tmp/r';
           const val=(x)=>String(x??'').replace(/[\r\n|]/g,' ').slice(0,120);
@@ -42,7 +42,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           OUT=/tmp/r; PHASE=OTA; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
-          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.26"}' >/tmp/ota.json
+          curl -fsSL --post302 --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.26"}' >/tmp/ota.json
           jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and .available==true and .version_name==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and (.apk_url|length)>20' /tmp/ota.json >/dev/null
           URL=$(jq -r '.apk_url' /tmp/ota.json)
           curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/public.apk
@@ -55,7 +55,7 @@ jobs:
           set -Eeuo pipefail
           OUT=/tmp/r; PHASE=FINAL; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
           curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json
-          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json
+          curl -fsSL --post302 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json
           node -e 'const h=require("/tmp/h2.json"),g=require("/tmp/g2.json"),a=h.authority||{},ga=g.authority||{};if(a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)process.exit(1)'
           echo final_authority=SERVICE_PRIMARY_8 >> "$OUT"; echo replication=HEALTHY_0 >> "$OUT"; echo stable=UNTOUCHED_BY_WORKFLOW >> "$OUT"; echo merge_pr38=UNTOUCHED >> "$OUT"; echo verdict=PASS >> "$OUT"
       - name: Record
