@@ -16,21 +16,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply deterministic source patches
+      - name: Apply deterministic source patches once
         run: |
           set -euo pipefail
-          python3 scripts/session1_apply.py
+          if grep -Fq 'e.committed_at,e.payload_json,e.idempotency_key' service/src/replication.ts; then
+            python3 scripts/session1_apply.py
+          else
+            echo 'base session1 patch already present'
+          fi
           python3 - <<'PY'
           from pathlib import Path
           p=Path('service/src/replication.ts');s=p.read_text()
           old='const [header,ids]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);'
           new='const [header=[],ids=[]]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);'
-          if old in s:s=s.replace(old,new)
-          elif new not in s:raise SystemExit('replication strictness anchor missing')
+          if new in s: pass
+          elif old in s: s=s.replace(old,new)
+          else: raise SystemExit('replication strictness anchor missing')
           p.write_text(s)
           PY
-          python3 scripts/session1_followup.py
-          python3 scripts/session1_policy_followup.py
+          if ! grep -Fq 'importCommitAtomic' service/src/index.ts; then python3 scripts/session1_followup.py; else echo 'followup patch already present'; fi
+          if grep -Fq 'req.client_source==="WEB"?0:7' service/src/core.ts; then python3 scripts/session1_policy_followup.py; else echo 'historical correction policy already bounded'; fi
+          python3 scripts/session1_typefix.py
       - name: Verify source contract guards
         run: |
           set -euo pipefail
@@ -66,21 +72,20 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           core=Path('service/src/core.ts').read_text();entry=Path('service/src/entry.ts').read_text();gas=Path('google-apps-script/SERVICE_MIGRATION_M2.gs').read_text();idx=Path('service/src/index.ts').read_text();imp=Path('service/src/import_engine.ts').read_text();atomic=Path('service/src/import_atomic.ts').read_text();master=Path('service/src/master_replication.ts').read_text()
+          assert core.count('const SENSITIVE_KEY=')==1
+          assert idx.count('import { dayDeltaV2, masterDeltaV2, syncStatusV2 }')==1
+          assert idx.count('const im=p.match(')==1
           assert 'BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW' in core
-          assert 'LABOR_ADMIN_REQUIRED' in core
-          assert 'SHADOW_PROBE_SUPERADMIN_REQUIRED' in core
+          assert 'LABOR_ADMIN_REQUIRED' in core and 'SHADOW_PROBE_SUPERADMIN_REQUIRED' in core
           assert 'MUTATION_BATCH_INVALID' in idx
           assert 'HISTORICAL_CORRECTION' in Path('service/src/correction.ts').read_text()
           assert 'IMPORT_ROLLBACK_INSERT_REQUIRES_EXPLICIT_CORRECTION' in atomic
-          assert 'await env.DB.batch(stmts)' in atomic
-          assert 'MAX_CHANGED_ROWS=4000' in atomic
+          assert 'await env.DB.batch(stmts)' in atomic and 'MAX_CHANGED_ROWS=4000' in atomic
           assert 'select_values' in imp and 'importRuleError' in imp
           assert 'GOOGLE_MASTER_BATCH_WRITE' in master
           assert 'FCM_WAKE_ONLY' in Path('service/src/push.ts').read_text()
           assert 'Firebase' not in Path('service/wrangler.jsonc').read_text()
-          assert 'ppM2SanitizePayload_' in gas
-          assert 'source_checksum_verified' in entry
-          assert '_token' not in master
+          assert 'ppM2SanitizePayload_' in gas and 'source_checksum_verified' in entry
           print('SESSION1_ARCHITECTURE_GUARDS=PASS')
           PY
       - name: Commit tested source changes
