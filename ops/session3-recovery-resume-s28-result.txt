@@ -1,0 +1,9 @@
+checked_at=2026-08-19T15:17:28Z
+source_check=PASS
+source_persist=PASS
+precheck=PASS
+deploy=PASS
+failed_phase=RESUME
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
