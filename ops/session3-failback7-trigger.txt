@@ -5,5 +5,6 @@ expected_pending=7
 target_epoch=8
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
-requested_at=2026-08-19T21:24:00+07:00
+requested_at=2026-08-19T21:41:00+07:00
 reason=OWNER_SERVICE_PRIMARY_IF_HEALTHY
+retry=2
