@@ -1,10 +1,15 @@
-checked_at=2026-08-19T22:30:24Z
-head_sha=f478bd8e1fb4c39828cdaed6fa4243a111841dc6
+checked_at=2026-08-19T22:32:54Z
+head_sha=cacb45d8367a452f6326a7bbd432c401d8729ecb
 config=PASS
 failed_phase=BUILD
 failed_rc=1
 compiler_excerpt_begin
-> Task :app:generateS10Operations FAILED
-S31A unexpected executable content before call executor
-BUILD FAILED in 21s
+Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor
+Applied S31 strict Service-first non-blocking PDA hot path + background-only authority fallback + RTT split
+Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
+Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt:13:1042 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+> Task :app:compileBetaReleaseKotlin FAILED
+   > Compilation error. See log for more details
+BUILD FAILED in 1m 20s
 compiler_excerpt_end
