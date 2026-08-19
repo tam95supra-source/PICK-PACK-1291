@@ -1,1 +1,1 @@
-Run expanded sanitized read-only release diagnostic for current Web/Beta23 bindings and Drive state.
+Run corrected sanitized release diagnostic for current Web/Beta23 bindings and Drive state.
