@@ -59,28 +59,7 @@ jobs:
           echo "GAS_BRIDGE_SHARED_SECRET=$BRIDGE" >> "$GITHUB_ENV"
           echo "SERVICE_TOKEN_SECRET=$SERVICE" >> "$GITHUB_ENV"
           echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
-      - name: Bind existing production D1 without authority changes
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          test -n "$ID"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          s=Path('wrangler.jsonc').read_text()
-          s=s.replace('"main": "src/entry.ts"','"main": "src/entry_hotfix.ts"')
-          s=s.replace('"name": "pick-pack-1291-service-m1-staging"','"name": "'+os.environ['WORKER_NAME']+'"')
-          s=s.replace('"SERVICE_GENERATION": "m2-precutover-20260819-001"','"SERVICE_GENERATION": "'+os.environ['SERVICE_GENERATION']+'"')
-          s=s.replace('"database_name": "pick-pack-1291-m1-staging"','"database_name": "'+os.environ['D1_NAME']+'"')
-          s=s.replace('__M1_D1_DATABASE_ID__',os.environ['ID'])
-          Path('wrangler.hotfix.jsonc').write_text(s)
-          PY
-        env:
-          ID: ${{ env.PROD_D1_ID }}
-      - name: Resolve D1 id and build config
+      - name: Resolve existing production D1 and build code-only config
         working-directory: service
         shell: bash
         run: |
