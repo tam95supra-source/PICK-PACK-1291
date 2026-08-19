@@ -45,9 +45,15 @@ jobs:
               C=$(curl -sS --max-time 25 -o "/tmp/$n.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size,modifiedTime)&pageSize=1000")
               echo "${n}_http=$C" >> "$OUT"
               echo "${n}_count=$(jq -r '.files|length//-1' /tmp/$n.json 2>/dev/null)" >> "$OUT"
+              echo "${n}_reason=$(jq -r '.error.errors[0].reason//.error.status//""' /tmp/$n.json 2>/dev/null | tr '\n' ' ' | cut -c1-120)" >> "$OUT"
+              echo "${n}_message=$(jq -r '.error.message//""' /tmp/$n.json 2>/dev/null | tr '\n' ' ' | cut -c1-220)" >> "$OUT"
             done
-            echo "stable_empty=$(jq -r 'if (.files|length)==0 then "YES" else "NO" end' /tmp/stable.json 2>/dev/null)" >> "$OUT"
-            echo "beta26_exact_count=$(jq -r --arg n "$APK_NAME" --arg c "$CHECKSUM_NAME" '[.files[]|select(.name==$n or .name==$c)]|length' /tmp/beta.json 2>/dev/null)" >> "$OUT"
+            if jq -e '.files|type=="array"' /tmp/stable.json >/dev/null 2>&1; then
+              echo "stable_empty=$(jq -r 'if (.files|length)==0 then "YES" else "NO" end' /tmp/stable.json)" >> "$OUT"
+            else echo stable_empty=UNKNOWN >> "$OUT"; fi
+            if jq -e '.files|type=="array"' /tmp/beta.json >/dev/null 2>&1; then
+              echo "beta26_exact_count=$(jq -r --arg n "$APK_NAME" --arg c "$CHECKSUM_NAME" '[.files[]|select(.name==$n or .name==$c)]|length' /tmp/beta.json)" >> "$OUT"
+            else echo beta26_exact_count=UNKNOWN >> "$OUT"; fi
           fi
           echo verdict=READ_ONLY_COMPLETE >> "$OUT"
       - name: Record sanitized result
