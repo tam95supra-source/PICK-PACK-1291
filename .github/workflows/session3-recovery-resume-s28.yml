@@ -1,0 +1,153 @@
+name: Session3 Recovery Resume S28
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-recovery-resume-s28-trigger.txt]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: session3-recovery-resume-s28
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  PROD_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+  GENERATION: m2-prod-20260819-001
+
+jobs:
+  resume:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Owner lock, patch source, compile
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result.txt; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo OWNER_LOCK >/tmp/phase
+          grep -qx 'confirmation=OWNER_LOCKED_M2_FAILBACK_RESUME' ops/session3-recovery-resume-s28-trigger.txt
+          grep -qx 'expected_state=RECONCILING|7|0' ops/session3-recovery-resume-s28-trigger.txt
+          grep -qx 'expected_inbox=PENDING|7' ops/session3-recovery-resume-s28-trigger.txt
+          grep -qx 'expected_seq1_semantic_match=YES' ops/session3-recovery-resume-s28-trigger.txt
+          grep -qx 'target_epoch=8' ops/session3-recovery-resume-s28-trigger.txt
+          grep -qx 'stable=FORBIDDEN' ops/session3-recovery-resume-s28-trigger.txt
+          grep -qx 'merge_pr38=FORBIDDEN' ops/session3-recovery-resume-s28-trigger.txt
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN SIGNING_STORE_PASSWORD; do [[ -n "${!v:-}" ]]; done
+          python3 tools/apply_s28_recovery_reflected_enter.py
+          grep -q 'S28_REFLECTED_ENTER_RECONCILIATION' service/src/recovery.ts
+          cd service; npm install --no-audit --no-fund >/dev/null; npm run check >/dev/null; cd ..
+          echo source_check=PASS >> "$OUT"
+
+      - name: Persist patched recovery source before production deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo SOURCE_PERSIST >/tmp/phase
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/src/recovery.ts
+          if ! git diff --cached --quiet; then git commit -m 'fix: reconcile exact reflected fallback enter on resume'; fi
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          echo source_persist=PASS >> /tmp/result.txt
+
+      - name: Fresh recovery safety gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo PRECHECK >/tmp/phase
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/service.json
+          node -e 'const j=require("/tmp/service.json"),a=j.authority||j;if(!j.ok||a.mode!=="RECONCILING"||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==0||a.scope!=="PRODUCTION"||a.service_generation!==process.env.GENERATION)throw Error("SERVICE_STATE_CHANGED")'
+          curl -fsSL --retry 5 --retry-delay 2 --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gas.json
+          node -e 'const j=require("/tmp/gas.json"),a=j.authority||{};if(!j.ok||j.authority_mode!=="RECONCILING"||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==7)throw Error("GAS_STATE_CHANGED")'
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          D1_ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/list.json|head -1); [[ -n "$D1_ID" ]]; export D1_ID
+          cd service
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.env.D1_ID;delete c.secrets;fs.writeFileSync('.wrangler-s28-recovery.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s28-recovery.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT value reconciling FROM system_meta WHERE key='m2_reconciling'; SELECT authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq; WITH f AS (SELECT json_extract(event_json,'$.business_date') d,json_extract(json_extract(event_json,'$.payload_json'),'$.mnv') mnv,COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.shift'),'') shift,CASE WHEN UPPER(TRIM(COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.work_choice'),'')))='PICK' THEN 'PICK' WHEN UPPER(TRIM(COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.work_choice'),'')))='PACK' THEN 'PACK' ELSE 'KHONG' END work_choice,COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.pda_serial'),json_extract(json_extract(event_json,'$.payload_json'),'$.pda'),'') pda_serial,COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.user_pick'),json_extract(json_extract(event_json,'$.payload_json'),'$.userPick'),'') user_pick,COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.pack_table'),json_extract(json_extract(event_json,'$.payload_json'),'$.packTable'),'') pack_table,COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.user_pack'),json_extract(json_extract(event_json,'$.payload_json'),'$.userPack'),'') user_pack FROM fallback_event_inbox WHERE authority_epoch=7 AND authority_seq=1) SELECT s.state,s.version,CASE WHEN s.shift=f.shift AND s.work_choice=f.work_choice AND COALESCE(s.pda_serial,'')=f.pda_serial AND COALESCE(s.user_pick,'')=f.user_pick AND COALESCE(s.pack_table,'')=f.pack_table AND COALESCE(s.user_pack,'')=f.user_pack THEN 1 ELSE 0 END semantic_match FROM f LEFT JOIN attendance_sessions s ON s.business_date=f.d AND s.mnv=f.mnv; SELECT state,pending_count FROM replication_status WHERE singleton_id=1" --json >/tmp/d1.json
+          cd ..
+          node - <<'NODE'
+          const x=require('/tmp/d1.json'),s=x.filter(v=>Array.isArray(v.results)).map(v=>v.results);if(s.length<5)throw Error('D1_QUERY_SHAPE');const a=s[0][0]||{},lock=s[1][0]||{},i=s[2],m=s[3][0]||{},r=s[4][0]||{};
+          if(a.mode!=='RECONCILING'||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==0||a.scope!=='PRODUCTION')throw Error('D1_AUTHORITY_GATE');if(String(lock.reconciling)!=='1')throw Error('RECOVERY_LOCK_MISSING');if(i.length!==7||i.some((v,n)=>Number(v.authority_seq)!==n+1||v.ingest_status!=='PENDING'))throw Error('INBOX_GATE');if(m.state!=='ACTIVE'||Number(m.semantic_match)!==1)throw Error('SEQ1_SEMANTIC_GATE');if(r.state!=='HEALTHY'||Number(r.pending_count)!==0)throw Error('REPLICATION_GATE');
+          NODE
+          echo precheck=PASS >> /tmp/result.txt
+
+      - name: Deploy recovery code without authority mutation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo DEPLOY >/tmp/phase
+          cd service
+          npx wrangler deploy --config .wrangler-s28-recovery.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          cd ..
+          for i in 1 2 3 4 5; do curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/afterdeploy.json && node -e 'const j=require("/tmp/afterdeploy.json"),a=j.authority||j;process.exit(j.ok&&a.mode==="RECONCILING"&&Number(a.authority_epoch)===7&&Number(a.authority_seq)===0?0:1)' && break; sleep 2; done
+          node -e 'const j=require("/tmp/afterdeploy.json"),a=j.authority||j;if(!j.ok||a.mode!=="RECONCILING"||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==0)throw Error("DEPLOY_CHANGED_AUTHORITY")'
+          echo deploy=PASS >> /tmp/result.txt
+
+      - name: Resume exact recovery and complete GAS epoch8
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo RESUME >/tmp/phase
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}')
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1"|sha256sum|awk '{print $1}')
+          echo "::add-mask::$ADMIN"; echo "::add-mask::$BRIDGE"
+          curl -fsS --max-time 120 -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback-resume" -d '{"fallback_epoch":7,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"SESSION3_S28_EXACT_REFLECTED_RESUME"}' >/tmp/resume.json
+          node -e 'const j=require("/tmp/resume.json"),a=j.authority||{};if(!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||Number(a.authority_seq)!==0)throw Error("RESUME_NOT_EPOCH8")'
+          BODY=$(node -e 'process.stdout.write(JSON.stringify({action:"m2_internal_reconcile_complete",_bridge_secret:process.argv[1],confirmation:"OWNER_LOCKED_M2_FAILBACK",authority_epoch:8,service_generation:process.env.GENERATION,service_url:process.env.SERVICE_URL}))' "$BRIDGE")
+          curl -fsSL --max-time 30 -H 'content-type: application/json' "$GAS_URL" -d "$BODY" >/tmp/complete.json
+          node -e 'const j=require("/tmp/complete.json");if(!j.ok||j.authority_mode!=="SERVICE_PRIMARY"||Number(j.authority_epoch)!==8)throw Error("GAS_COMPLETE_FAILED")'
+          echo resume=PASS >> /tmp/result.txt
+
+      - name: Final convergence and Google ledger proof
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo FINAL_VERIFY >/tmp/phase
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/sa.json
+          curl -fsSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/ga.json
+          OAUTH=$(curl -fsS --max-time 25 https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$OAUTH"); [[ -n "$TOKEN" ]]; echo "::add-mask::$TOKEN"
+          RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
+          curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$PROD_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/gl.json
+          cd service
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s28-recovery.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope FROM authority_state WHERE singleton_id=1; SELECT authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq; SELECT authority_seq,event_type,origin FROM events WHERE authority_epoch=7 ORDER BY authority_seq; SELECT status,source_authority_epoch,source_authority_seq,target_authority_epoch FROM recovery_runs WHERE recovery_type='FAILBACK' ORDER BY started_at DESC LIMIT 1; SELECT state,pending_count FROM replication_status WHERE singleton_id=1" --json >/tmp/finald1.json
+          rm -f .wrangler-s28-recovery.jsonc
+          cd ..
+          node - <<'NODE'
+          const sa=require('/tmp/sa.json'),a=sa.authority||sa,g=require('/tmp/ga.json'),ga=g.authority||{},x=require('/tmp/finald1.json'),s=x.filter(v=>Array.isArray(v.results)).map(v=>v.results),da=s[0][0]||{},inbox=s[1],ev=s[2],rec=s[3][0]||{},rep=s[4][0]||{},rows=(require('/tmp/gl.json').values||[]).slice(1),ge=rows.filter(r=>Number(r[1])===7);
+          if(a.mode!=='SERVICE_PRIMARY'||Number(a.authority_epoch)!==8||Number(a.authority_seq)!==0)throw Error('SERVICE_FINAL');if(g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==8||Number(ga.authority_seq)!==0)throw Error('GAS_FINAL');if(da.mode!=='SERVICE_PRIMARY'||Number(da.authority_epoch)!==8||Number(da.authority_seq)!==0)throw Error('D1_FINAL');if(inbox.length!==7||inbox.some(v=>v.ingest_status!=='APPLIED'))throw Error('INBOX_FINAL');if(ev.length!==7||ev.some((v,n)=>Number(v.authority_seq)!==n+1)||ev[0].event_type!=='FALLBACK_RECONCILED_DUPLICATE'||ev[0].origin!=='GOOGLE_FALLBACK_RECONCILED')throw Error('EVENT_FINAL');if(rec.status!=='COMPLETE'||Number(rec.source_authority_epoch)!==7||Number(rec.source_authority_seq)!==7||Number(rec.target_authority_epoch)!==8)throw Error('RECOVERY_FINAL');if(rep.state!=='HEALTHY'||Number(rep.pending_count)!==0)throw Error('REPLICATION_FINAL');if(ge.length!==7||ge.some(r=>String(r[12]||'')!=='INGESTED'))throw Error('GOOGLE_LEDGER_FINAL');
+          NODE
+          printf 'service_authority=SERVICE_PRIMARY|8|0|PRODUCTION|%s\ngas_authority=SERVICE_PRIMARY|8|0|%s\nepoch7_inbox=APPLIED|7\nepoch7_events=7\nseq1_resolution=FALLBACK_RECONCILED_DUPLICATE\nrecovery=COMPLETE|7|7|8\nreplication=HEALTHY|0\ngoogle_ledger=INGESTED|7\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' "$GENERATION" "$GENERATION" >> /tmp/result.txt
+          echo PASS >/tmp/phase
+
+      - name: Record sanitized result
+        if: always()
+        shell: bash
+        run: |
+          if ! grep -q '^verdict=' /tmp/result.txt 2>/dev/null; then printf 'failed_phase=%s\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=FAILED_OR_STOPPED\n' "$(cat /tmp/phase 2>/dev/null||echo BOOTSTRAP)" >> /tmp/result.txt; fi
+          cp /tmp/result.txt /tmp/result.copy
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/result.copy ops/session3-recovery-resume-s28-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-recovery-resume-s28-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record S28 recovery resume result' && git push origin HEAD:agent/service-migration-m2)
