@@ -1,21 +1,19 @@
 package vn.pickpack1291.app.beta
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import org.json.JSONObject
 
 /**
- * Foreground Service/D1 revision watcher with WebSocket wakeups and polling fallback.
+ * Event-driven foreground Service/D1 revision synchronizer.
  *
- * Contract:
- * - starts with an immediate sync when an Activity enters foreground;
- * - never overlaps requests;
- * - foreground Service primary also opens a realtime ticket/WebSocket;
- * - any DELTA immediately wakes the manifest/day sync path;
- * - polling remains as reconnect/fallback protection;
- * - when app leaves foreground, WebSocket closes and any in-flight request drains safely.
+ * Normal triggers are: foreground start, network reconnect, DAY_CHANGED / MASTER_CHANGED realtime
+ * invalidations, pending outbox work and explicit/manual refresh. There is no periodic "anything
+ * changed?" polling loop. A single bounded recovery retry is allowed after a failed foreground read.
  */
 class ForegroundSyncCoordinator(
     context: Context,
@@ -45,48 +43,77 @@ class ForegroundSyncCoordinator(
         fun onAuthExpired()
     }
 
+    private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
-    private val prefs = context.applicationContext.getSharedPreferences("foreground_sync", Context.MODE_PRIVATE)
+    private val prefs = app.getSharedPreferences("foreground_sync", Context.MODE_PRIVATE)
     private val cursorKey = "server_seq_${BuildConfig.CHANNEL}"
     private val masterCursorKey = "master_revision_${BuildConfig.CHANNEL}"
+    private val connectivity = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private var state = State.SUSPENDED
     private var inFlight = false
-    private var idlePolls = 0
+    private var wakePending = false
     private var lastSeq = prefs.getLong(cursorKey, 0L)
     private var lastMasterRevision = prefs.getLong(masterCursorKey, 0L)
     private var generation = 0L
-    private val realtime = M2RealtimeClient(context.applicationContext) {
+    private var networkCallbackRegistered = false
+    private var failureRetriesRemaining = 0
+
+    private val dayRealtime = M2RealtimeClient(app, M2RealtimeClient.Scope.DAY) { invalidation ->
         main.post {
-            if (state == State.ACTIVE) {
-                idlePolls = 0
-                main.removeCallbacks(tick)
-                if (!inFlight) main.post(tick)
+            if (state != State.ACTIVE) return@post
+            val seq = invalidation.optLong("authority_seq", 0L)
+            if (seq > lastSeq || invalidation.optLong("day_revision", 0L) > 0L) requestSync()
+        }
+    }
+    private val masterRealtime = M2RealtimeClient(app, M2RealtimeClient.Scope.MASTER) { invalidation ->
+        main.post {
+            if (state != State.ACTIVE) return@post
+            val revision = invalidation.optLong("revision", 0L)
+            if (revision > 0L) requestSync()
+        }
+    }
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            main.post {
+                if (state == State.ACTIVE) {
+                    failureRetriesRemaining = 1
+                    M2WorkScheduler.schedule(app)
+                    requestSync()
+                }
             }
         }
     }
 
-    private val tick = Runnable { poll() }
-
     fun start() {
         check(Looper.myLooper() == Looper.getMainLooper()) { "ForegroundSyncCoordinator.start must run on main thread" }
-        if (api.token == null) return
-        if (state == State.ACTIVE) return
+        if (api.token == null || state == State.ACTIVE) return
         generation += 1
         state = State.ACTIVE
-        idlePolls = 0
-        main.removeCallbacks(tick)
-        main.post(tick)
+        wakePending = false
+        failureRetriesRemaining = 1
+        registerNetworkCallback()
+        requestSync()
     }
 
     fun stop() {
         check(Looper.myLooper() == Looper.getMainLooper()) { "ForegroundSyncCoordinator.stop must run on main thread" }
         generation += 1
-        main.removeCallbacks(tick)
-        realtime.stop()
+        wakePending = false
+        main.removeCallbacksAndMessages(null)
+        dayRealtime.stop()
+        masterRealtime.stop()
+        unregisterNetworkCallback()
         state = if (inFlight) State.DRAINING else State.SUSPENDED
     }
 
-    private fun poll() {
+    /** Explicit/manual/event wake. Coalesces concurrent invalidations into one follow-up read. */
+    fun requestSync() {
+        if (state != State.ACTIVE || api.token == null) return
+        if (inFlight) { wakePending = true; return }
+        syncOnce()
+    }
+
+    private fun syncOnce() {
         if (state != State.ACTIVE || inFlight || api.token == null) return
         inFlight = true
         val requestGeneration = generation
@@ -98,14 +125,16 @@ class ForegroundSyncCoordinator(
 
                 if (result.code == 401) {
                     state = State.SUSPENDED
-                    realtime.stop()
-                    main.removeCallbacks(tick)
+                    dayRealtime.stop()
+                    masterRealtime.stop()
+                    unregisterNetworkCallback()
                     listener.onAuthExpired()
                     return@post
                 }
 
                 val body = result.json
                 if (result.ok && body != null) {
+                    failureRetriesRemaining = 1
                     val seq = body.optLong("server_seq", lastSeq)
                     val changed = seq != lastSeq
                     val masterRevision = body.optLong("master_revision", lastMasterRevision)
@@ -113,17 +142,15 @@ class ForegroundSyncCoordinator(
                     if (changed) {
                         lastSeq = seq
                         prefs.edit().putLong(cursorKey, seq).apply()
-                        idlePolls = 0
                     }
                     if (masterChanged) {
                         lastMasterRevision = masterRevision
                         prefs.edit().putLong(masterCursorKey, masterRevision).apply()
-                        idlePolls = 0
-                    } else if (!changed) {
-                        idlePolls = (idlePolls + 1).coerceAtMost(1000)
                     }
                     val businessDate = body.optString("business_date")
-                    if (businessDate.isNotBlank()) realtime.start(businessDate)
+                    if (businessDate.isNotBlank()) dayRealtime.start(businessDate)
+                    masterRealtime.start()
+                    M2WorkScheduler.schedule(app)
 
                     if (state == State.ACTIVE && requestGeneration == generation) {
                         listener.onStatus(
@@ -157,25 +184,37 @@ class ForegroundSyncCoordinator(
                             error = result.error ?: "SYNC_FAILED",
                         )
                     )
+                    if (failureRetriesRemaining > 0) {
+                        failureRetriesRemaining -= 1
+                        main.postDelayed({ requestSync() }, 10_000L)
+                    }
                 }
 
                 if (state == State.DRAINING || requestGeneration != generation) {
-                    realtime.stop()
+                    dayRealtime.stop()
+                    masterRealtime.stop()
+                    unregisterNetworkCallback()
                     state = State.SUSPENDED
                     return@post
                 }
 
-                if (state == State.ACTIVE) main.postDelayed(tick, nextDelay(result.ok))
+                if (wakePending && state == State.ACTIVE) {
+                    wakePending = false
+                    main.post { requestSync() }
+                }
             }
         }
     }
 
-    private fun nextDelay(success: Boolean): Long {
-        if (!success) return 5_000L
-        return when {
-            idlePolls <= 3 -> 1_500L
-            idlePolls <= 12 -> 2_500L
-            else -> 4_000L
-        }
+    private fun registerNetworkCallback() {
+        if (networkCallbackRegistered) return
+        runCatching { connectivity.registerDefaultNetworkCallback(networkCallback) }
+            .onSuccess { networkCallbackRegistered = true }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (!networkCallbackRegistered) return
+        runCatching { connectivity.unregisterNetworkCallback(networkCallback) }
+        networkCallbackRegistered = false
     }
 }
