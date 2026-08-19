@@ -6,110 +6,35 @@ on:
     branches: [ main ]
     paths:
       - 'ops/gas-deploy-trigger.txt'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'ops/gas-deploy-trigger.txt'
 
 concurrency:
   group: gas-live-deploy
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  deploy:
+  deploy_bao_hang_receiver:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
-      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      BH_SCRIPT_ID: 12zMDmEl7EXcHOV7skWy8XY95Uk3k3zwSlv2A_aokbRWkyUoc-ArOxu55
+      BH_DEPLOYMENT_ID: AKfycbwb8Hcdg7tp0jqHLZU6kW5hkEclDC9d29DGvPuwcxvZbR9t9xnrWzaIYe8UZET-D_yI
+      BH_WEB_URL: https://script.google.com/macros/s/AKfycbwb8Hcdg7tp0jqHLZU6kW5hkEclDC9d29DGvPuwcxvZbR9t9xnrWzaIYe8UZET-D_yI/exec
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Validate current GAS source
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q "forgot_password" google-apps-script/PICK_PACK_API.gs
-          grep -q "delivery:'ACCOUNT_EMAIL'" google-apps-script/PICK_PACK_API.gs
-          grep -q "a.email||PP.RESET_ADMIN_EMAIL" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
-          grep -q "script.send_mail" google-apps-script/appsscript.json
-          grep -q "function ppAuthorizeMail_" google-apps-script/AUTH_HELPERS.gs
-          grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
-          grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
-          ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
-          python3 -m py_compile tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s13_shared_history_gas_patch.py tools/apply_s15_local_first_gas_patch.py tools/apply_s17_sqlite_recovery_gas_patch.py
-          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
-          node --check /tmp/PICK_PACK_API.js
-          echo 'Current GAS source gates: PASS'
-
-      - name: Apply S12 report, S13 history, S15 local-first and S17 recovery transforms
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S12 report transform already present; skip.'
-          else
-            python3 tools/apply_s12_gas_patch.py
-          fi
-          if grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S12 health marker already present; skip.'
-          else
-            python3 tools/apply_s12_gas_health_patch.py
-          fi
-          if grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S13 shared history transform already present; skip.'
-          else
-            python3 tools/apply_s13_shared_history_gas_patch.py
-          fi
-          if grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S15 local-first transform already present; skip.'
-          else
-            python3 tools/apply_s15_local_first_gas_patch.py
-          fi
-          if grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S17 SQLite recovery transform already present; skip.'
-          else
-            python3 tools/apply_s17_sqlite_recovery_gas_patch.py
-          fi
-          grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
-          grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
-          grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
-          grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs
-          grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'history_shared'" google-apps-script/PICK_PACK_API.gs
-          grep -q "LỊCH SỬ NGHIỆP VỤ" google-apps-script/PICK_PACK_API.gs
-          grep -q "Shared operational history only" google-apps-script/PICK_PACK_API.gs
-          grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'sync_day'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'sync_bootstrap'" google-apps-script/PICK_PACK_API.gs
-          grep -q "sync_engine:'S15_LOCAL_FIRST_45D'" google-apps-script/PICK_PACK_API.gs
-          grep -q "retention_days:45" google-apps-script/PICK_PACK_API.gs
-          grep -q "editable_days:2" google-apps-script/PICK_PACK_API.gs
-          grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs
-          grep -q "recovery_engine:'S17_SQLITE_RECOVERY'" google-apps-script/PICK_PACK_API.gs
-          grep -q "legacy_sqlite_recovery:true" google-apps-script/PICK_PACK_API.gs
-          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S17.js
-          node --check /tmp/PICK_PACK_API_S17.js
-          echo 'S12 + S13 + S15 + S17 GAS transform + syntax: PASS'
-
-      - name: Exchange OAuth and normalize IDs
+      - name: Exchange Google OAuth
         id: auth
         shell: bash
         run: |
           set -euo pipefail
-          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
-          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
-          DEPLOYMENT_ID="$RAW"
-          if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
           RESP=$(curl -fsS https://oauth2.googleapis.com/token \
             -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
@@ -117,84 +42,114 @@ jobs:
             --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
             --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
-          [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
-          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
-          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
-          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
-      - name: Update Apps Script source and deployment
+      - name: Verify exact Bao Hang Apps Script
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/content" > /tmp/live.json
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/deployments/$BH_DEPLOYMENT_ID" > /tmp/deployment.json
+          python3 - <<'PY'
+          import json, os
+          live=json.load(open('/tmp/live.json'))
+          dep=json.load(open('/tmp/deployment.json'))
+          sid=os.environ['BH_SCRIPT_ID']
+          assert dep.get('deploymentConfig',{}).get('scriptId') == sid, 'DEPLOYMENT_SCRIPT_ID_MISMATCH'
+          src=[f for f in live.get('files',[]) if f.get('type')=='SERVER_JS']
+          matches=[f for f in src if "const BH_PROJECT = 'bao-hang-1291';" in f.get('source','') and 'function doPost(e)' in f.get('source','')]
+          assert len(matches)==1, 'BAO_HANG_SOURCE_SIGNATURE_MISMATCH:'+str(len(matches))
+          assert 'tiny-boat-19315489' in matches[0].get('source',''), 'NEON_SCOPE_MISMATCH'
+          print('BAO_HANG_SCRIPT_ID=PASS')
+          print('DEPLOYMENT_SCRIPT_MATCH=PASS')
+          PY
+
+      - name: Patch receiver and preserve live files
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-all-errors https://raw.githubusercontent.com/tam95supra-source/bao-hang-1291/main/google-apps-script/STAFF_SOURCE_BRIDGE_RECEIVER.gs -o /tmp/receiver.gs
+          grep -q 'function staffSourceBridgeReceive_' /tmp/receiver.gs
+          python3 - <<'PY'
+          import json, pathlib
+          live=json.load(open('/tmp/live.json'))
+          receiver=pathlib.Path('/tmp/receiver.gs').read_text()
+          files=live.get('files',[])
+          main=[]; receiver_files=[]
+          for f in files:
+              src=f.get('source','')
+              if f.get('type')=='SERVER_JS' and "const BH_PROJECT = 'bao-hang-1291';" in src and 'function doPost(e)' in src: main.append(f)
+              if f.get('type')=='SERVER_JS' and 'function staffSourceBridgeReceive_' in src: receiver_files.append(f)
+          assert len(main)==1
+          route="if (action === 'staff-source-ping' || action === 'staff-source-structure-ping') return json_(staffSourceBridgeReceive_(body));"
+          src=main[0]['source']
+          if route not in src:
+              needle="if (action === 'ping') return json_({ok:true,project:BH_PROJECT,provider:'NEON_FIREBASE_GOOGLE',staff_sheet_id:BH_STAFF_SHEET_ID,staff_sheet_name:BH_STAFF_SHEET_NAME});"
+              assert needle in src, 'PING_ROUTE_ANCHOR_NOT_FOUND'
+              main[0]['source']=src.replace(needle, needle+'\n    '+route, 1)
+          out=[]; replaced=False
+          for f in files:
+              if f in receiver_files:
+                  if not replaced:
+                      g=dict(f); g['name']='STAFF_SOURCE_BRIDGE_RECEIVER'; g['source']=receiver; out.append(g); replaced=True
+                  continue
+              out.append(f)
+          if not replaced: out.append({'name':'STAFF_SOURCE_BRIDGE_RECEIVER','type':'SERVER_JS','source':receiver})
+          pathlib.Path('/tmp/patched.json').write_text(json.dumps({'files':out},ensure_ascii=False))
+          for i,f in enumerate(out):
+              if f.get('type')=='SERVER_JS': pathlib.Path('/tmp/check_'+str(i)+'.js').write_text(f.get('source',''))
+          PY
+          for f in /tmp/check_*.js; do node --check "$f" >/dev/null; done
+          echo 'LIVE_PATCH_SYNTAX=PASS'
+
+      - name: Deploy receiver to existing Bao Hang web app
         id: deploy
         shell: bash
         env:
-          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
-          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
           ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          b=Path('google-apps-script'); files=[]
-          for p in sorted(b.glob('*.gs')):
-              files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
-          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
-          Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
-          PY
-          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
-          [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
-          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 validated live API"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          H=$(curl -sS -o /tmp/update.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/patched.json "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/update.out; exit 1; }
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Bao Hang 1291 source-driven staff receiver"}' "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/versions")
           [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
           V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
-          python3 - "$SCRIPT_ID" "$V" <<'PY'
+          python3 - "$BH_SCRIPT_ID" "$V" <<'PY'
           import json,sys
-          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API'}}))
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Bao Hang 1291 live worker'}}))
           PY
-          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/deployments/$BH_DEPLOYMENT_ID")
           [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Deployment version $V: PASS"
 
-      - name: Read live WEB_APP URL
-        id: webapp
+      - name: Verify live receiver and record proof
         shell: bash
         env:
-          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
-          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID" > /tmp/deployment.json
-          python3 - <<'PY' > /tmp/weburl
-          import json
-          j=json.load(open('/tmp/deployment.json')); eps=j.get('entryPoints',[])
-          web=[e.get('webApp',{}) for e in eps if e.get('entryPointType')=='WEB_APP']
-          assert web and web[0].get('url'), 'WEB_APP entry point missing'
-          cfg=web[0].get('entryPointConfig',{})
-          assert cfg.get('access')=='ANYONE_ANONYMOUS', cfg
-          assert cfg.get('executeAs')=='USER_DEPLOYING', cfg
-          print(web[0]['url'])
-          PY
-          URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: Verify live S17 recovery health, account reset route and OTA isolation
-        shell: bash
-        env:
-          WEB_URL: ${{ steps.webapp.outputs.url }}
+          GAS_VERSION: ${{ steps.deploy.outputs.version }}
         run: |
           set -euo pipefail
           OK=false
           for i in $(seq 1 15); do
-            curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"health"}' > /tmp/h.json || true
-            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json && grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/h.json && grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/h.json && grep -q '"sync_engine":"S15_LOCAL_FIRST_45D"' /tmp/h.json && grep -q '"retention_days":45' /tmp/h.json && grep -q '"editable_days":2' /tmp/h.json && grep -q '"recovery_engine":"S17_SQLITE_RECOVERY"' /tmp/h.json; then OK=true; break; fi
-            sleep 4
+            curl -fsSL -H 'content-type: application/json' "$BH_WEB_URL" -d '{"action":"ping"}' > /tmp/ping.json || true
+            if jq -e '.ok == true and .project == "bao-hang-1291" and .provider == "NEON_FIREBASE_GOOGLE"' /tmp/ping.json >/dev/null 2>&1; then OK=true; break; fi
+            sleep 3
           done
-          [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' > /tmp/reset.json
-          grep -q '"ok":true' /tmp/reset.json
-          grep -q '"delivery":"ACCOUNT_EMAIL"' /tmp/reset.json
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta.json
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta.json; grep -q '"channel":"BETA"' /tmp/beta.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable.json; grep -q '"channel":"STABLE"' /tmp/stable.json
-          echo 'Live S17 recovery health + reset route + OTA channel isolation: PASS'
+          [[ "$OK" == true ]] || { cat /tmp/ping.json; exit 1; }
+          curl -fsSL -H 'content-type: application/json' "$BH_WEB_URL" -d '{"action":"staff-source-ping","event_id":"probe-20260820","source_id":"1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78","source_tab":"DANH SÁCH NHÂN SỰ","row_start":2,"row_end":2}' > /tmp/probe.json
+          jq -e '.ok == false and .error == "STAFF_BRIDGE_OAUTH_REQUIRED"' /tmp/probe.json >/dev/null
+          python3 - <<'PY'
+          import datetime, hashlib, json, os
+          sid=os.environ['BH_SCRIPT_ID']
+          proof={'status':'PASS','mode':'SOURCE_DRIVEN_DELTA_V1','script_id_sha256':hashlib.sha256(sid.encode()).hexdigest(),'deployment_match':True,'receiver_route_probe':'STAFF_BRIDGE_OAUTH_REQUIRED','gas_version':int(os.environ['GAS_VERSION']),'verified_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          open('ops/bao-hang-receiver-deploy-proof.json','w').write(json.dumps(proof,ensure_ascii=False,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/bao-hang-receiver-deploy-proof.json
+          git commit -m 'chore(gas): record Bao Hang receiver live proof'
+          git pull --rebase origin main
+          git push origin HEAD:main
