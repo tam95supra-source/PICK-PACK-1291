@@ -14,6 +14,7 @@ concurrency:
 
 env:
   SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
   BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
   STABLE_FOLDER_ID: 1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4
 
@@ -21,9 +22,10 @@ jobs:
   diagnose:
     runs-on: ubuntu-latest
     env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       ANDROID_SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
       ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
-      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
       ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -43,17 +45,32 @@ jobs:
           echo "checked_at=$(date -u +%FT%TZ)" >> "$OUT"
           echo "head_sha=$GITHUB_SHA" >> "$OUT"
 
-          missing=""
-          for v in ANDROID_SIGNING_KEY_B64 ANDROID_SIGNING_STORE_PASSWORD ANDROID_SIGNING_KEY_ALIAS ANDROID_SIGNING_KEY_PASSWORD GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN FIREBASE_PROJECT_ID FIREBASE_GOOGLE_APP_ID FIREBASE_API_KEY FIREBASE_GCM_SENDER_ID; do
-            [[ -n "${!v:-}" ]] || missing="${missing}${missing:+,}${v}"
+          missing_deploy=""
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do
+            [[ -n "${!v:-}" ]] || missing_deploy="${missing_deploy}${missing_deploy:+,}${v}"
           done
-          if [[ -n "$missing" ]]; then echo "release_bindings=MISSING:$missing" >> "$OUT"; else echo "release_bindings=READY" >> "$OUT"; fi
+          [[ -z "$missing_deploy" ]] && echo "deploy_bindings=READY" >> "$OUT" || echo "deploy_bindings=MISSING:$missing_deploy" >> "$OUT"
+
+          missing_release=""
+          for v in ANDROID_SIGNING_KEY_B64 ANDROID_SIGNING_STORE_PASSWORD ANDROID_SIGNING_KEY_PASSWORD GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN FIREBASE_PROJECT_ID FIREBASE_GOOGLE_APP_ID FIREBASE_API_KEY FIREBASE_GCM_SENDER_ID; do
+            [[ -n "${!v:-}" ]] || missing_release="${missing_release}${missing_release:+,}${v}"
+          done
+          [[ -z "$missing_release" ]] && echo "release_bindings=READY_ALIAS_DERIVABLE" >> "$OUT" || echo "release_bindings=MISSING:$missing_release" >> "$OUT"
 
           curl -fsSL --max-time 15 "$SERVICE_URL/health" >/tmp/health.json
           if [[ $? -eq 0 ]] && jq -e '.ok==true and .environment=="production" and .generation=="m2-prod-20260819-001"' /tmp/health.json >/dev/null 2>&1; then
             echo "service_health=PASS" >> "$OUT"
             jq -r '"service_authority="+(.authority.mode//"UNKNOWN")+" epoch="+((.authority.authority_epoch//0)|tostring)+" seq="+((.authority.authority_seq//0)|tostring)' /tmp/health.json >> "$OUT"
           else echo "service_health=FAIL" >> "$OUT"; fi
+
+          curl -fsSL --max-time 15 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gas.json
+          if [[ $? -eq 0 ]] && jq -e '.ok==true' /tmp/gas.json >/dev/null 2>&1; then
+            python3 - <<'PY' >> "$OUT"
+import json
+j=json.load(open('/tmp/gas.json'));a=j.get('authority') or {}
+print('gas_authority=%s epoch=%s seq=%s'%((j.get('authority_mode') or a.get('mode') or 'UNKNOWN'),(j.get('authority_epoch') or a.get('authority_epoch') or 0),(j.get('authority_seq') or a.get('authority_seq') or 0)))
+PY
+          else echo "gas_discovery=FAIL" >> "$OUT"; fi
 
           curl -fsSL --max-time 15 "$SERVICE_URL/v1/capabilities" >/tmp/cap.json
           if [[ $? -eq 0 ]] && jq -e '.ok==true and .business_window==7 and .mutation_batch==true and .fcm_wake==true and .import_engine==true and .realtime_protocol=="INVALIDATION_V1"' /tmp/cap.json >/dev/null 2>&1; then echo "capabilities=PASS" >> "$OUT"; else echo "capabilities=FAIL" >> "$OUT"; fi
@@ -65,10 +82,15 @@ jobs:
             if [[ -n "$TOKEN" ]]; then
               for pair in "beta:$BETA_FOLDER_ID" "stable:$STABLE_FOLDER_ID"; do
                 name=${pair%%:*}; folder=${pair#*:}; q=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote("\"%s\" in parents and trashed=false"%sys.argv[1]))' "$folder")
-                curl -fsSL --max-time 15 -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=1000" > "/tmp/$name.json"
+                curl -fsSL --max-time 15 -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size,parents)&pageSize=1000" > "/tmp/$name.json"
               done
               if jq -e '[.files[]|select(.name|test("0\\.4\\.2-beta\\.23|beta23";"i"))]|length>0' /tmp/beta.json >/dev/null; then echo "beta23_drive=PRESENT" >> "$OUT"; else echo "beta23_drive=ABSENT" >> "$OUT"; fi
-              if jq -e '.files|length==0' /tmp/stable.json >/dev/null; then echo "stable_drive=EMPTY" >> "$OUT"; else echo "stable_drive=NONEMPTY" >> "$OUT"; fi
+              if jq -e '.files|length==0' /tmp/stable.json >/dev/null; then
+                echo "stable_drive=EMPTY" >> "$OUT"
+              else
+                echo "stable_drive=NONEMPTY" >> "$OUT"
+                jq -r '.files[].name' /tmp/stable.json | sed 's/^/stable_item=/' >> "$OUT"
+              fi
             else echo "drive_oauth=FAIL" >> "$OUT"; fi
           else echo "drive_oauth=NOT_CHECKED_MISSING_BINDINGS" >> "$OUT"; fi
 
