@@ -1,0 +1,56 @@
+name: Session3 Post Direct Failback Diagnostic
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-post-direct-failback-diagnostic-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  D1_NAME: pick-pack-1291-service-prod
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Capture read-only recovery state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/sa.json
+          curl -fsSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/ga.json
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/list.json|head -1); [[ -n "$ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/w.jsonc',JSON.stringify(c,null,2))" "$ID"
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1" --json >/tmp/a.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "SELECT authority_seq,ingest_status,last_error FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq" --json >/tmp/i.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "SELECT recovery_type,status,source_authority_epoch,source_authority_seq,target_authority_epoch,error FROM recovery_runs WHERE recovery_type='FAILBACK' ORDER BY started_at DESC LIMIT 3" --json >/tmp/rec.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1" --json >/tmp/r.json
+          cd ..
+          node - <<'NODE'
+          const fs=require('fs'),flat=p=>require(p).flatMap(x=>x.results||[]),sa=require('/tmp/sa.json'),s=sa.authority||sa,g=require('/tmp/ga.json'),ga=g.authority||{},a=flat('/tmp/a.json')[0]||{},i=flat('/tmp/i.json'),rec=flat('/tmp/rec.json'),r=flat('/tmp/r.json')[0]||{};
+          const statusCounts={};for(const x of i)statusCounts[x.ingest_status]=(statusCounts[x.ingest_status]||0)+1;
+          const recent=rec.map(x=>`${x.status||''}:${x.source_authority_epoch||0}:${x.source_authority_seq||0}:${x.target_authority_epoch||0}`).join(',');
+          const lines=[`checked_at=${new Date().toISOString()}`,`service_http_authority=${s.mode||''}|${s.authority_epoch||0}|${s.authority_seq||0}`,`gas_discovery=${g.authority_mode||ga.mode||''}|${ga.authority_epoch||0}|${ga.authority_seq||0}`,`d1_authority=${a.mode||''}|${a.authority_epoch||0}|${a.authority_seq||0}|${a.scope||''}`,`epoch7_inbox_count=${i.length}`,`epoch7_status=${Object.entries(statusCounts).map(([k,v])=>k+'='+v).join(',')}`,`epoch7_last_error_count=${i.filter(x=>String(x.last_error||'').length>0).length}`,`recovery_recent=${recent}`,`replication=${r.state||''}|${r.pending_count||0}|${r.retry_count||0}|${r.last_error_class||''}`,`verdict=DIAGNOSTIC_COMPLETE`,''];fs.writeFileSync('/tmp/result.txt',lines.join('\n'));
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nverdict=DIAGNOSTIC_FAILED\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/r; git reset --hard HEAD >/dev/null; cp /tmp/r ops/session3-post-direct-failback-diagnostic-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-post-direct-failback-diagnostic-result.txt; git diff --cached --quiet || (git commit -m 'ops: record post direct-failback diagnostic' && git push)
