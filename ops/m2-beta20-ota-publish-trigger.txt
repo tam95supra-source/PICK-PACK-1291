@@ -1,0 +1,11 @@
+confirmation=OWNER_LOCKED_M2_BETA20_OTA_PUBLISH
+target_version=0.4.2-beta.20
+target_version_code=26
+expected_sha256=ed5b98afeaf962b1081faaab4c710afa00f2fc80981b76666a86d8bee856502e
+expected_signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+channel=BETA
+stable_publish=false
+candidate_run_id=32205829548
+candidate_artifact_id=9349144530
+requested_by=owner
+run=2026-08-19T08:46:00+07:00
