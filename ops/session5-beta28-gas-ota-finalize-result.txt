@@ -1,0 +1,9 @@
+checked_at=2026-08-19T23:55:41Z
+head_sha=1389fc4805eeaf014c79c87f6d43b13f84802cfa
+service_probe=SERVICE_PRIMARY|8|15|PRODUCTION|rep=HEALTHY:7
+gas_probe=ok:false|top::NaN|nested::|err:UNAUTHORIZED
+failed_phase=AUTHORITY
+failed_rc=1
+stable=UNTOUCHED_BY_WORKFLOW
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
