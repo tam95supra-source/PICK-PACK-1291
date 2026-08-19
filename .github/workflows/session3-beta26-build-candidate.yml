@@ -49,14 +49,14 @@ jobs:
           test -s app/google-services.json
           jq -e --arg p "$EXPECTED_PACKAGE" --arg project "$EXPECTED_FIREBASE_PROJECT_ID" '.project_info.project_id==$project and ([.client[]|select(.client_info.android_client_info.package_name==$p)]|length)==1' app/google-services.json >/dev/null
           FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json);FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json);FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json);FIREBASE_API_KEY=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
-          grep -q 'versionCode = 32' app/build.gradle.kts;grep -q 'versionName = "0.4.2-beta.26"' app/build.gradle.kts;grep -q 'apply_s29_owner_localfirst_history.py' app/build.gradle.kts;grep -q 'apply_s30_admin_audit_android.py' app/build.gradle.kts
+          grep -q 'versionCode = 32' app/build.gradle.kts;grep -q 'versionName = "0.4.2-beta.26"' app/build.gradle.kts;grep -q 'apply_s29_owner_localfirst_history.py' app/build.gradle.kts;grep -q 'apply_s30_canonical_admin_audit.py' app/build.gradle.kts
           echo config=PASS >> "$OUT"
           PHASE=BUILD
           gradle --no-daemon --build-cache :app:assembleBetaRelease -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" -PFIREBASE_API_KEY="$FIREBASE_API_KEY" -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID" >/tmp/gradle.log
           grep -q 'S29_OWNER_LOCALFIRST_HISTORY' app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt
           grep -q 'S29_OWNER_LOCALFIRST_HISTORY' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'S30_DURABLE_ADMIN_AUDIT' app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
-          grep -q 'S30_DURABLE_ADMIN_AUDIT' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+          grep -q 'S30_CANONICAL_ADMIN_AUDIT' app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
+          grep -q 'S30_CANONICAL_ADMIN_AUDIT' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk'|head -1);[[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]];echo build=PASS >> "$OUT"
           PHASE=SIGN
           printf '%s' "$ANDROID_SIGNING_KEY_B64"|base64 -d >/tmp/release.jks
