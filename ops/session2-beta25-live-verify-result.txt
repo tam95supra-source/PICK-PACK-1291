@@ -1,8 +1,8 @@
-checked_at=2026-08-19T13:39:14Z
-head_sha=38241ebd312052165bdad04c8c9d49f4fd5418dc
+checked_at=2026-08-19T14:20:57Z
+head_sha=7799ce2da8d9b5de427b047e22b0bcded78bf0af
 service_authority=SERVICE_PRIMARY|6|4|PRODUCTION|m2-prod-20260819-001
 web_live=PASS
-gas_authority=GOOGLE_FALLBACK|7|5|m2-prod-20260819-001
+gas_authority=GOOGLE_FALLBACK|7|7|m2-prod-20260819-001
 beta_ota=0.4.2-beta.25
 beta_download=PASS
 stable_ota=EMPTY
