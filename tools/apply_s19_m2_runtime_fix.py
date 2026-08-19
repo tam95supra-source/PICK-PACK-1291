@@ -62,6 +62,7 @@ if marker not in s:
           "account_upsert" -> accountUpsert(payload)
           else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
       }
+      if (!usedService && action in M2ServiceTransport.OPERATIONAL) m2Transport.acknowledgeFallback(payload.optString("event_id"), result.ok, result.error)
       if (usedService && result.ok && result.code != 202) m2Runtime.recordDirect()
       else if (!usedService && (action in M2RuntimeBridge.DIRECT_READS || action in M2ServiceTransport.OPERATIONAL || action in M2ServiceTransport.SYNC_ACTIONS)) m2Runtime.recordFallback(m2?.error)
 '''
