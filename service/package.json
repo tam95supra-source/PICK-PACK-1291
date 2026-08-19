@@ -7,6 +7,9 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run cf:types && npm run typecheck"
   },
+  "dependencies": {
+    "fflate": "0.8.3"
+  },
   "devDependencies": {
     "typescript": "5.9.2",
     "wrangler": "4.119.0"
