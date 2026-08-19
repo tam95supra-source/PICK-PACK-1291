@@ -72,6 +72,10 @@ async function revisions(db:D1Database,limit=45){
   const res=await db.prepare(q).bind(cap).all<RevisionRow>();const rows=(res.results??[]).map(r=>({business_date:r.business_date,sequence_no:r.sequence_no}));const out:Record<string,number>={};
   for(const r of res.results??[])out[r.business_date]=Math.max(1,Number(r.max_seq??0));return{rows,out,floor:rows.length?rows[rows.length-1]!.business_date:""};
 }
+async function revisionForDate(db:D1Database,date:string):Promise<number|null>{
+  const row=await db.prepare(`SELECT b.business_date,MAX(COALESCE(e.authority_seq,0)) AS max_seq FROM business_dates b LEFT JOIN events e ON e.business_date=b.business_date WHERE b.business_date=?1 GROUP BY b.business_date`).bind(date).first<{business_date:string;max_seq:number|null}>();
+  return row?Math.max(1,Number(row.max_seq??0)):null;
+}
 
 async function loadDaysBulk(db:D1Database,wanted:string[],rev:Record<string,number>):Promise<Record<string,unknown>[]>{
   if(!wanted.length)return[];const marks=inParams(wanted.length);
@@ -85,14 +89,14 @@ async function loadDaysBulk(db:D1Database,wanted:string[],rev:Record<string,numb
     db.prepare(laborSql).bind(...wanted).all<LaborRow>(),
     db.prepare(eventSql).bind(...wanted).all<EventRaw>(),
   ]);
-  const sessionsByDate=new Map<string,Array<Record<string,unknown>>>(),laborByDate=new Map<string,LaborRow[]>(),eventsByDate=new Map<string,CompatEvent[]>(),staff=new Map<string,Employee>();
+  const sessionsByDate=new Map<string,Array<Record<string,unknown>>>(),sessionByKey=new Map<string,Record<string,unknown>>(),laborByDate=new Map<string,LaborRow[]>(),eventsByDate=new Map<string,CompatEvent[]>(),staff=new Map<string,Employee>();
   for(const s of sessionsRaw.results??[]){
-    const emp=employeeFromJoined(s);staff.set(`${s.business_date}|${s.mnv}`,emp);const row={id:s.session_id,business_date:s.business_date,mnv:s.mnv,employee_snapshot:emp,shift:s.shift,work_choice:s.work_choice,pda_serial:s.pda_serial,user_pick:s.user_pick,pack_table:s.pack_table,user_pack:s.user_pack,state:s.state,enter_at:s.enter_at,exit_at:s.exit_at,entered_by:s.entered_by,exited_by:s.exited_by,version:s.version};
-    const list=sessionsByDate.get(s.business_date)??[];list.push(row);sessionsByDate.set(s.business_date,list);
+    const emp=employeeFromJoined(s),key=`${s.business_date}|${s.mnv}`;staff.set(key,emp);const row={id:s.session_id,business_date:s.business_date,mnv:s.mnv,employee_snapshot:emp,shift:s.shift,work_choice:s.work_choice,pda_serial:s.pda_serial,user_pick:s.user_pick,pack_table:s.pack_table,user_pack:s.user_pack,state:s.state,enter_at:s.enter_at,exit_at:s.exit_at,entered_by:s.entered_by,exited_by:s.exited_by,version:s.version};
+    sessionByKey.set(key,row);const list=sessionsByDate.get(s.business_date)??[];list.push(row);sessionsByDate.set(s.business_date,list);
   }
   for(const l of laborRaw.results??[]){const list=laborByDate.get(l.business_date)??[];list.push(l);laborByDate.set(l.business_date,list);}
   for(const e of eventRaw.results??[]){
-    let p:Record<string,unknown>={};try{p=JSON.parse(e.payload_json) as Record<string,unknown>;}catch{}const mnv=String(p.mnv??""),session=(sessionsByDate.get(e.business_date)??[]).find(x=>String(x.mnv??"")===mnv),emp=staff.get(`${e.business_date}|${mnv}`);
+    let p:Record<string,unknown>={};try{p=JSON.parse(e.payload_json) as Record<string,unknown>;}catch{}const mnv=String(p.mnv??""),key=`${e.business_date}|${mnv}`,session=sessionByKey.get(key),emp=staff.get(key);
     const item:CompatEvent={event_id:e.event_id,mnv,full_name:emp?.full_name??"",shift:String(session?.shift??p.shift??""),event_type:e.event_type,label:labelFor(e.event_type),at:e.committed_at,at_iso:e.committed_at,actor:e.actor_id,detail:String(p.note??p.labor_type??""),authority_seq:e.authority_seq};const list=eventsByDate.get(e.business_date)??[];list.push(item);eventsByDate.set(e.business_date,list);
   }
   return wanted.map(date=>{
@@ -111,7 +115,7 @@ export async function compatSyncStatus(db:D1Database):Promise<Record<string,unkn
 }
 
 export async function compatDay(db:D1Database,date:string):Promise<Record<string,unknown>>{
-  const rev=await revisions(db);if(!date||!(date in rev.out))throw new CoreError("DATE_OUTSIDE_RETENTION","VALIDATION",400);const days=await loadDaysBulk(db,[date],rev.out);return days[0]??{business_date:date,day_revision:rev.out[date]??1,snapshot_engine:"S15_LOCAL_FIRST_45D_SERVICE",sessions:[],labor:[],events:[],history:history([]),report:{ok:true,business_date:date,reports:{}}};
+  const revision=date?await revisionForDate(db,date):null;if(revision===null)throw new CoreError("DATE_OUTSIDE_RETENTION","VALIDATION",400);const days=await loadDaysBulk(db,[date],{[date]:revision});return days[0]??{business_date:date,day_revision:revision,snapshot_engine:"S15_LOCAL_FIRST_45D_SERVICE",sessions:[],labor:[],events:[],history:history([]),report:{ok:true,business_date:date,reports:{}}};
 }
 
 export async function compatBootstrap(db:D1Database,dates?:unknown[]):Promise<Record<string,unknown>>{
