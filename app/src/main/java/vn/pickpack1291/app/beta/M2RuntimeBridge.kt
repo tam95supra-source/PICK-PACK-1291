@@ -44,7 +44,8 @@ class M2RuntimeBridge(context: Context) {
     fun directRead(action:String,payload:JSONObject,gasToken:String?):M2ServiceTransport.TransportResult {
         if(action !in DIRECT_READS)return M2ServiceTransport.TransportResult(false,false,0,null,null)
         val d=transport.discoverySnapshot() ?: return M2ServiceTransport.TransportResult(false,false,0,null,"DISCOVERY_UNAVAILABLE")
-        val mode=d.optString("authority_mode"),base=d.optString("service_url").trimEnd('/')
+        val mode=d.optString("authority_mode")
+        val base=d.optString("service_url").trimEnd('/')
         prefs.edit().putString(KEY_AUTHORITY_MODE,mode).putString(KEY_SERVICE_URL,base).apply()
         if(mode!="SERVICE_PRIMARY"||!validServiceUrl(base))return M2ServiceTransport.TransportResult(false,false,0,null,null)
         if(!ensureServiceSession(gasToken))return M2ServiceTransport.TransportResult(false,false,0,null,"SERVICE_SESSION_UNAVAILABLE")
