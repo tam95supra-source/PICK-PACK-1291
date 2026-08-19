@@ -22,6 +22,10 @@
             </intent-filter>
         </service>
         <activity
+            android:name=".PdaImportActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
             android:name=".OperationsActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
