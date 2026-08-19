@@ -1,0 +1,9 @@
+checked_at=2026-08-19T12:53:57Z
+health_http=200
+app_http=200
+app_web_source=PASS
+css_http=200
+css_hidden=PASS
+sync_unauth_http=401
+capabilities_http=200
+verdict=PASS

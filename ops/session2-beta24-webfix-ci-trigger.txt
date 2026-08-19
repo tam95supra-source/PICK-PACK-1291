@@ -1,0 +1,6 @@
+requested_at=2026-08-19T19:46:00+07:00
+scope=beta24-cache-first-web-session
+publish=false
+deploy=false
+stable=false
+attempt=2

@@ -1,0 +1,8 @@
+checked_at=2026-08-19T11:38:14Z
+head_sha=dfaf84b7dcefa8777bd8c2f54bac6d3cc5e6edaa
+source_gate=PASS
+credential_gate=PASS
+d1_resolve=PASS
+authority_gate=PASS
+failed_phase=FALLBACK_GATE
+failed_rc=1

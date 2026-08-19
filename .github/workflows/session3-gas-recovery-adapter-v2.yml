@@ -1,0 +1,85 @@
+name: Session3 GAS Recovery Adapter V2
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-gas-recovery-adapter-v2-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Deploy with phase checkpoints
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/result.txt
+          printf 'checked_at=%s\nscope=RECOVERY_ADAPTER_ONLY\n' "$(date -u +%FT%TZ)" > "$OUT"
+          fail(){ echo "failed_phase=$1" >> "$OUT"; echo verdict=FAILED_OR_STOPPED >> "$OUT"; exit 0; }
+          for v in CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID; do [[ -n "${!v:-}" ]] || fail SECRET_GATE; done
+          echo secret_gate=PASS >> "$OUT"
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}'); echo "::add-mask::$BRIDGE"
+          RESP=$(curl -sS --max-time 25 https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'try{const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")}catch{}' "$RESP"); [[ -n "$TOKEN" ]] || fail OAUTH_TOKEN
+          echo "::add-mask::$TOKEN"; echo oauth=PASS >> "$OUT"
+          curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/pre.json
+          node -e 'const j=require("/tmp/pre.json"),a=j.authority||{};process.exit(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7&&Number(a.authority_seq)===7?0:1)' || fail PRE_AUTHORITY
+          echo pre_authority=GOOGLE_FALLBACK\|7\|7 >> "$OUT"
+          python3 scripts/session1_patch_gas_internal_recovery.py >/tmp/patch.out 2>&1 || fail PATCH_SOURCE
+          echo patch_source=PASS >> "$OUT"
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t '); DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          HTTP=$(curl -sS --max-time 25 -o /tmp/live.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          echo script_get_http=$HTTP >> "$OUT"; [[ "$HTTP" == 200 ]] || fail SCRIPT_GET
+          node -e 'const fs=require("fs"),j=require("/tmp/live.json"),files=j.files||[],map={SERVICE_MIGRATION_M2:fs.readFileSync("google-apps-script/SERVICE_MIGRATION_M2.gs","utf8"),PICK_PACK_API:fs.readFileSync("google-apps-script/PICK_PACK_API.gs","utf8")};for(const f of files)if(f.type==="SERVER_JS"&&map[f.name])f.source=map[f.name];for(const k of Object.keys(map))if(!files.some(f=>f.name===k))process.exit(2);fs.writeFileSync("/tmp/patched.json",JSON.stringify({files}))' || fail BUILD_PATCH_PAYLOAD
+          PUT=$(curl -sS --max-time 25 -o /tmp/put.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/patched.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          echo source_put_http=$PUT >> "$OUT"; [[ "$PUT" == 200 ]] || fail SOURCE_PUT
+          VER=$(curl -sS --max-time 25 -o /tmp/ver.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"description":"Session3 recovery adapter v2"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          echo version_create_http=$VER >> "$OUT"; [[ "$VER" == 200 ]] || fail VERSION_CREATE
+          V=$(node -e 'try{const j=require("/tmp/ver.json");process.stdout.write(String(j.versionNumber||""))}catch{}'); [[ -n "$V" ]] || fail VERSION_NUMBER
+          echo version_number=$V >> "$OUT"
+          node -e 'const fs=require("fs");fs.writeFileSync("/tmp/deploy.json",JSON.stringify({deploymentConfig:{scriptId:process.argv[1],versionNumber:Number(process.argv[2]),manifestFileName:"appsscript",description:"Session3 recovery adapter v2"}}))' "$SCRIPT_ID" "$V"
+          DEP=$(curl -sS --max-time 25 -o /tmp/dep.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          echo deployment_update_http=$DEP >> "$OUT"; [[ "$DEP" == 200 ]] || fail DEPLOYMENT_UPDATE
+          OK=0
+          for i in $(seq 1 15); do
+            curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"m2_internal_reconcile_status\",\"_bridge_secret\":\"$BRIDGE\"}" >/tmp/probe.json || true
+            if node -e 'try{const j=require("/tmp/probe.json");process.exit(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(j.authority_epoch)===7&&Number(j.fallback_seq)===7&&Number(j.pending)===7?0:1)}catch{process.exit(1)}'; then OK=1; break; fi
+            sleep 3
+          done
+          [[ "$OK" == 1 ]] || fail LIVE_PROBE
+          echo adapter=READY >> "$OUT"
+          echo authority=GOOGLE_FALLBACK\|7\|7 >> "$OUT"
+          echo pending=7 >> "$OUT"
+          echo authority_change=NONE >> "$OUT"
+          echo stable=UNTOUCHED >> "$OUT"
+          echo verdict=PASS >> "$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nfailed_phase=BOOTSTRAP\nverdict=FAILED_OR_STOPPED\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/result.copy
+          git reset --hard HEAD >/dev/null
+          cp /tmp/result.copy ops/session3-gas-recovery-adapter-v2-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-gas-recovery-adapter-v2-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record GAS recovery adapter v2 result' && git push)

@@ -1,1 +1,3 @@
-release-preflight=2026-08-18T16:03:00+07:00
+release-preflight=2026-08-19T08:44:00+07:00
+target=0.4.2-beta.20
+purpose=S13 final signed Beta20 artifact after S21 and GAS scope fixes

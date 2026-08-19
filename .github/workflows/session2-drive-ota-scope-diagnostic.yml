@@ -1,0 +1,58 @@
+name: Session2 Drive OTA Scope Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-drive-ota-scope-diagnostic-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+      STABLE_FOLDER_ID: 1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Drive scopes and folder visibility read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=/tmp/session2-drive-ota-scope-diagnostic-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token'|jq -r '.access_token');[[ -n "$TOKEN" && "$TOKEN" != null ]]
+          curl -fsSL --get https://oauth2.googleapis.com/tokeninfo --data-urlencode "access_token=$TOKEN" >/tmp/tokeninfo.json
+          python3 - <<'PY'
+          import json
+          s=set(str(json.load(open('/tmp/tokeninfo.json')).get('scope','')).split())
+          def y(x):return 'YES' if x else 'NO'
+          write={'https://www.googleapis.com/auth/drive','https://www.googleapis.com/auth/drive.file'}
+          read=write|{'https://www.googleapis.com/auth/drive.readonly','https://www.googleapis.com/auth/drive.metadata.readonly'}
+          with open('/tmp/session2-drive-ota-scope-diagnostic-result.txt','a') as f:
+            f.write('drive_read_scope='+y(bool(s&read))+'\n')
+            f.write('drive_write_scope='+y(bool(s&write))+'\n')
+            f.write('drive_file_scope='+y('https://www.googleapis.com/auth/drive.file' in s)+'\n')
+            f.write('drive_full_scope='+y('https://www.googleapis.com/auth/drive' in s)+'\n')
+          PY
+          for name in beta stable; do
+            if [[ "$name" == beta ]]; then folder="$BETA_FOLDER_ID"; else folder="$STABLE_FOLDER_ID"; fi
+            HTTP=$(curl -sS -o "/tmp/$name.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" --get 'https://www.googleapis.com/drive/v3/files' --data-urlencode "q='$folder' in parents and trashed=false" --data-urlencode 'fields=files(id,name,size,modifiedTime)' --data-urlencode 'pageSize=1000')
+            echo "${name}_http=$HTTP" >> "$OUT"
+            if [[ "$HTTP" == 200 ]]; then
+              COUNT=$(jq '.files|length' "/tmp/$name.json");echo "${name}_count=$COUNT" >> "$OUT"
+              if [[ "$name" == beta ]];then jq -r '[.files[].name|select(test("0\\.4\\.2-beta\\.23|beta23";"i"))]|length' "/tmp/$name.json"|sed 's/^/beta23_count=/' >> "$OUT";fi
+            fi
+          done
+      - name: Commit result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-drive-ota-scope-diagnostic-result.txt||echo diagnostic_failed=true>/tmp/session2-drive-ota-scope-diagnostic-result.txt
+          cp /tmp/session2-drive-ota-scope-diagnostic-result.txt ops/session2-drive-ota-scope-diagnostic-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-drive-ota-scope-diagnostic-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record Drive OTA scope diagnostic';git push

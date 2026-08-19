@@ -1,0 +1,171 @@
+name: Session3 Direct Stage Failback7
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-direct-stage-failback7-trigger.txt]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: session3-direct-stage-failback7
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+  GENERATION: m2-prod-20260819-001
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Resolve protected credentials and production D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo OWNER_LOCK >/tmp/phase
+          grep -qx 'confirmation=OWNER_LOCKED_M2_FAILBACK' ops/session3-direct-stage-failback7-trigger.txt
+          grep -qx 'expected_service=SERVICE_PRIMARY|6|4' ops/session3-direct-stage-failback7-trigger.txt
+          grep -qx 'expected_google=GOOGLE_FALLBACK|7|7' ops/session3-direct-stage-failback7-trigger.txt
+          grep -qx 'target_epoch=8' ops/session3-direct-stage-failback7-trigger.txt
+          grep -qx 'stable=FORBIDDEN' ops/session3-direct-stage-failback7-trigger.txt
+          grep -qx 'merge_pr38=FORBIDDEN' ops/session3-direct-stage-failback7-trigger.txt
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN SIGNING_STORE_PASSWORD; do [[ -n "${!v:-}" ]]; done
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1"|sha256sum|awk '{print $1}')
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}')
+          echo "::add-mask::$BRIDGE"; echo "::add-mask::$ADMIN"; echo "BRIDGE=$BRIDGE" >> "$GITHUB_ENV"; echo "ADMIN=$ADMIN" >> "$GITHUB_ENV"
+          OAUTH=$(curl -fsS --max-time 25 https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$OAUTH"); [[ -n "$TOKEN" ]]; echo "::add-mask::$TOKEN"; echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          HTTP=$(curl -sS -o /tmp/d1list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          D1_ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/d1list.json|head -1); [[ -n "$D1_ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/wrangler-fb7.jsonc',JSON.stringify(c,null,2))" "$D1_ID"; cd ..
+
+      - name: Fresh authority ledger and D1 gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo PRECHECK >/tmp/phase
+          curl -fsS --max-time 25 "$SERVICE_URL/health" >/tmp/h.json
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/a.json
+          node -e 'const h=require("/tmp/h.json"),j=require("/tmp/a.json"),a=j.authority||j;if(!h.ok||h.environment!=="production"||h.generation!==process.env.GENERATION||!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==6||Number(a.authority_seq)!==4||a.scope!=="PRODUCTION")throw Error("SERVICE_GATE")'
+          curl -fsSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node -e 'const j=require("/tmp/g.json"),a=j.authority||{};if(!j.ok||j.authority_mode!=="GOOGLE_FALLBACK"||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==7)throw Error("GAS_GATE")'
+          RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
+          curl -fsS --max-time 25 -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/f.json
+          node - <<'NODE'
+          const fs=require('fs'),rows=(require('/tmp/f.json').values||[]).slice(1),e=[];rows.forEach((r,i)=>{if(Number(r[1])===7)e.push({row:i+2,r})});
+          const seq=e.map(x=>Number(x.r[2])),st=e.map(x=>String(x.r[12]||''));if(e.length!==7||JSON.stringify(seq)!==JSON.stringify([1,2,3,4,5,6,7])||st.some(x=>x!=='PENDING'))throw Error('LEDGER_GATE');
+          fs.writeFileSync('/tmp/epoch7.json',JSON.stringify(e));
+          NODE
+          cd service
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1" --json >/tmp/d1a.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq" --json >/tmp/d1i.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT state,pending_count FROM replication_status WHERE singleton_id=1" --json >/tmp/d1r.json
+          cd ..
+          node - <<'NODE'
+          const flat=p=>require(p).flatMap(x=>x.results||[]),a=flat('/tmp/d1a.json')[0]||{},i=flat('/tmp/d1i.json'),r=flat('/tmp/d1r.json')[0]||{};
+          if(a.mode!=='SERVICE_PRIMARY'||Number(a.authority_epoch)!==6||Number(a.authority_seq)!==4||a.scope!=='PRODUCTION'||a.service_generation!==process.env.GENERATION)throw Error('D1_AUTH');
+          if(i.some(x=>Number(x.authority_seq)!==1)||i.some(x=>x.ingest_status!=='PENDING')||i.length>1)throw Error('D1_INBOX_UNEXPECTED');
+          if(r.state!=='HEALTHY'||Number(r.pending_count)!==0)throw Error('D1_REPLICATION');
+          NODE
+
+      - name: Begin reconcile and direct-stage all seven events
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo DIRECT_STAGE >/tmp/phase
+          curl -fsSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"m2_internal_reconcile_begin\",\"_bridge_secret\":\"$BRIDGE\",\"confirmation\":\"OWNER_LOCKED_M2_FAILBACK\"}" >/tmp/begin.json
+          node -e 'const j=require("/tmp/begin.json");if(!j.ok||j.authority_mode!=="RECONCILING"||Number(j.authority_epoch)!==7||Number(j.fallback_seq)!==7)throw Error("BEGIN_FAILED")'
+          node - <<'NODE'
+          const fs=require('fs'),e=require('/tmp/epoch7.json');for(const x of e){const r=x.r;const body={event_id:String(r[0]),authority_epoch:7,authority_seq:Number(r[2]),service_generation:String(r[3]),event:{action:String(r[4]),business_date:String(r[5]),actor:String(r[6]),role:String(r[7]),device_id:String(r[8]),occurred_at:String(r[9]),payload_json:String(r[10])},checksum:String(r[11])};fs.writeFileSync(`/tmp/e${r[2]}.json`,JSON.stringify(body));}
+          NODE
+          for S in 1 2 3 4 5 6 7; do
+            H=$(curl -sS --max-time 40 -o /tmp/o$S.json -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-gas-bridge-secret: $BRIDGE" --data-binary @/tmp/e$S.json "$SERVICE_URL/internal/fallback/ingest" || true)
+            [[ "$H" =~ ^2 ]] || { node -e 'const fs=require("fs");let j={};try{j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"))}catch{};console.error("INGEST_FAIL",process.argv[2],j?.error?.code||j?.error||"")' /tmp/o$S.json "$H"; exit 1; }
+            node -e 'const j=require(process.argv[1]);if(!j.ok)process.exit(1)' /tmp/o$S.json
+          done
+          cd service
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq" --json >/tmp/afterstage.json
+          cd ..
+          node -e 'const r=require("/tmp/afterstage.json").flatMap(x=>x.results||[]);if(r.length!==7||r.some((x,i)=>Number(x.authority_seq)!==i+1||x.ingest_status!=="PENDING"))throw Error("STAGE_VERIFY")'
+
+      - name: Mark exactly staged Google rows INGESTED
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo GOOGLE_MARK_INGESTED >/tmp/phase
+          node - <<'NODE'
+          const fs=require('fs'),e=require('/tmp/epoch7.json');const data=e.map(x=>({range:`'__PP_M2_FALLBACK_EVENTS'!M${x.row}:M${x.row}`,majorDimension:'ROWS',values:[['INGESTED']]}));fs.writeFileSync('/tmp/mark.json',JSON.stringify({valueInputOption:'RAW',data}));
+          NODE
+          curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'content-type: application/json' --data-binary @/tmp/mark.json "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values:batchUpdate" >/tmp/markout.json
+          RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
+          curl -fsS --max-time 25 -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/f2.json
+          node -e 'const e=(require("/tmp/f2.json").values||[]).slice(1).filter(r=>Number(r[1])===7);if(e.length!==7||e.some(r=>String(r[12])!=="INGESTED"))throw Error("GOOGLE_MARK_VERIFY")'
+
+      - name: Apply Service recovery and complete GAS authority epoch8
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo SERVICE_FAILBACK >/tmp/phase
+          H=$(curl -sS --max-time 120 -o /tmp/fb.json -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback" -d '{"fallback_epoch":7,"expected_service_epoch":6,"confirmation":"OWNER_LOCKED_M2_FAILBACK","initiated_by":"SESSION3_DIRECT_STAGE"}' || true)
+          if [[ ! "$H" =~ ^2 ]]; then
+            curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/state.json
+            STATE=$(node -e 'const j=require("/tmp/state.json"),a=j.authority||j;if(a.mode==="RECONCILING"&&Number(a.authority_epoch)===7)process.stdout.write("RESUME");else process.stdout.write("STOP")')
+            [[ "$STATE" == RESUME ]] || exit 1
+            curl -fsS --max-time 120 -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback-resume" -d '{"fallback_epoch":7,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"SESSION3_DIRECT_STAGE_RESUME"}' >/tmp/resume.json
+            node -e 'const j=require("/tmp/resume.json");if(!j.ok)throw Error("RESUME_FAILED")'
+          fi
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/a8.json
+          node -e 'const j=require("/tmp/a8.json"),a=j.authority||j;if(!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||Number(a.authority_seq)!==0||a.scope!=="PRODUCTION")throw Error("SERVICE_EPOCH8")'
+          BODY=$(node -e 'process.stdout.write(JSON.stringify({action:"m2_internal_reconcile_complete",_bridge_secret:process.env.BRIDGE,confirmation:"OWNER_LOCKED_M2_FAILBACK",authority_epoch:8,service_generation:process.env.GENERATION,service_url:process.env.SERVICE_URL}))')
+          curl -fsSL --max-time 30 -H 'content-type: application/json' "$GAS_URL" -d "$BODY" >/tmp/gcomplete.json
+          node -e 'const j=require("/tmp/gcomplete.json");if(!j.ok||j.authority_mode!=="SERVICE_PRIMARY"||Number(j.authority_epoch)!==8)throw Error("GAS_EPOCH8")'
+
+      - name: Final convergence proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo FINAL_VERIFY >/tmp/phase
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/af.json
+          curl -fsSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gf.json
+          cd service
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq" --json >/tmp/ifinal.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT state,pending_count FROM replication_status WHERE singleton_id=1" --json >/tmp/rfinal.json
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/wrangler-fb7.jsonc --command "SELECT status,source_authority_epoch,source_authority_seq,target_authority_epoch FROM recovery_runs WHERE recovery_type='FAILBACK' ORDER BY started_at DESC LIMIT 1" --json >/tmp/recfinal.json
+          cd ..
+          node - <<'NODE'
+          const flat=p=>require(p).flatMap(x=>x.results||[]),sa=require('/tmp/af.json'),a=sa.authority||sa,g=require('/tmp/gf.json'),ga=g.authority||{},i=flat('/tmp/ifinal.json'),r=flat('/tmp/rfinal.json')[0]||{},rec=flat('/tmp/recfinal.json')[0]||{};
+          if(a.mode!=='SERVICE_PRIMARY'||Number(a.authority_epoch)!==8||Number(a.authority_seq)!==0)throw Error('SERVICE_FINAL');if(g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==8||Number(ga.authority_seq)!==0)throw Error('GAS_FINAL');if(i.length!==7||i.some(x=>x.ingest_status!=='APPLIED'))throw Error('INBOX_FINAL');if(r.state!=='HEALTHY'||Number(r.pending_count)!==0)throw Error('REPLICATION_FINAL');if(rec.status!=='COMPLETE'||Number(rec.source_authority_epoch)!==7||Number(rec.source_authority_seq)!==7||Number(rec.target_authority_epoch)!==8)throw Error('RECOVERY_FINAL');
+          NODE
+          printf 'checked_at=%s\nservice_authority=SERVICE_PRIMARY|8|0|PRODUCTION|%s\ngas_authority=SERVICE_PRIMARY|8|0|%s\nepoch7_google=INGESTED|7\nepoch7_d1=APPLIED|7\nreplication=HEALTHY|0\nrecovery=COMPLETE|7|7|8\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' "$(date -u +%FT%TZ)" "$GENERATION" "$GENERATION" >/tmp/result.txt
+          echo PASS >/tmp/phase
+
+      - name: Record sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nfailed_phase=%s\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=FAILED_OR_STOPPED\n' "$(date -u +%FT%TZ)" "$(cat /tmp/phase 2>/dev/null||echo BOOTSTRAP)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/r
+          git reset --hard HEAD >/dev/null
+          cp /tmp/r ops/session3-direct-stage-failback7-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-direct-stage-failback7-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record direct-stage epoch7 failback result' && git push)

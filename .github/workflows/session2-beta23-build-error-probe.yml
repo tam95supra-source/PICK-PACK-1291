@@ -1,0 +1,52 @@
+name: Session2 Beta23 Build Error Probe
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta23-build-error-probe-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Run Beta release compile and sanitize failure
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/session2-beta23-build-error-probe-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json)
+          FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json)
+          FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p 'vn.pickpack1291.app.beta.publicbeta' '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json)
+          FIREBASE_API_KEY=$(jq -r --arg p 'vn.pickpack1291.app.beta.publicbeta' '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
+          chmod +x ./gradlew
+          ./gradlew --no-daemon clean :app:assembleBetaRelease -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" -PFIREBASE_API_KEY="$FIREBASE_API_KEY" -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID" >/tmp/build.out 2>/tmp/build.err
+          RC=$?
+          echo "build_rc=$RC" >> "$OUT"
+          if [[ $RC -eq 0 ]];then echo build=PASS >> "$OUT";else
+            echo build=FAIL >> "$OUT"
+            python3 - <<'PY'
+          import re
+          s=open('/tmp/build.out',errors='replace').read()+"\n"+open('/tmp/build.err',errors='replace').read()
+          keep=[]
+          for line in s.splitlines():
+              if re.search(r'(^e:|FAILURE:|What went wrong|Execution failed|error:|Unresolved reference|Could not resolve|Manifest merger|Duplicate class|A problem occurred|Task .* FAILED)',line,re.I):
+                  line=re.sub(r'AIza[0-9A-Za-z_-]+','<api-key-redacted>',line)
+                  keep.append(line[:360])
+          with open('/tmp/session2-beta23-build-error-probe-result.txt','a') as f:f.write('build_error='+(' | '.join(keep[-16:])[:4500] or 'NO_MATCHING_ERROR_LINE')+'\n')
+          PY
+          fi
+      - name: Commit result
+        if: always()
+        shell: bash
+        run: |
+          cp /tmp/session2-beta23-build-error-probe-result.txt ops/session2-beta23-build-error-probe-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-beta23-build-error-probe-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record Beta23 build error probe';git push

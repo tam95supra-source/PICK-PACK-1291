@@ -1,0 +1,18 @@
+checked_at=2026-08-19T16:28:28Z
+head_sha=616898d7c91a08f841c12c80ff28add9a45a0a77
+source=PASS
+state=PASS
+d1=PASS
+deploy_error=YES
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mThe entry-point file at "src/entry_product.ts" was not found.[0m
+
+  
+  This might mean that your entry-point file needs to be generated (which is the general case when a framework is being used).
+  If that's the case please run your project's build command and try again.
+
+
+🪵  Logs were written to "/home/runner/.config/.wrangler/logs/wrangler-2026-08-19_16-28-44_479.log"
+failed_phase=DEPLOY
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

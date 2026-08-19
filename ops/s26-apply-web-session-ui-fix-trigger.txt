@@ -1,0 +1,4 @@
+requested_at=2026-08-19T19:36:00+07:00
+scope=web-session-ui-source-only
+no_failback=true
+no_stable=true

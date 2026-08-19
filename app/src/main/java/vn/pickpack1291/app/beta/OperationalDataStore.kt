@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteDatabaseLockedException
 import android.database.sqlite.SQLiteOpenHelper
+import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -13,17 +14,23 @@ import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Device-side operational snapshot store.
+ * Device-side operational store for the Service-provided business window N..N-6.
  *
- * Google Sheets remains authoritative. Every OperationalDataStore instance shares one process-wide
- * SQLiteOpenHelper/connection pool. This is required on Android 11 PDA builds: opening two helpers
- * for the same database can race while SQLite negotiates journal_mode and throw SQLITE_BUSY.
- *
- * Each cached row is a complete snapshot for one business date at a server day_revision. Replacing
- * one date is atomic, so report/history readers never observe a half-updated day.
+ * The historical DB filename is intentionally retained so an installed Beta upgrades in place and
+ * cannot lose a durable mutation outbox. Retention is semantic, not filename-based: applyBusinessWindow
+ * prunes day snapshots to the exact Service business sequence while leaving pending mutations intact.
  */
 class OperationalDataStore(context: Context) {
     private val helper = helper(context.applicationContext)
+
+    data class PendingMutation(
+        val eventId: String,
+        val body: JSONObject,
+        val exclusive: Boolean,
+        val status: String,
+        val attemptCount: Int,
+        val queuedAt: Long,
+    )
 
     fun saveDay(snapshot: JSONObject) = withDbLock {
         val date = snapshot.optString("business_date").trim()
@@ -40,9 +47,7 @@ class OperationalDataStore(context: Context) {
         try {
             db.insertWithOnConflict("day_snapshot", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
+        } finally { db.endTransaction() }
         MEMORY[date] = copy
     }
 
@@ -66,25 +71,14 @@ class OperationalDataStore(context: Context) {
                 db.insertWithOnConflict("day_snapshot", null, values, SQLiteDatabase.CONFLICT_REPLACE)
             }
             db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
+        } finally { db.endTransaction() }
         copies.forEach { (date, copy) -> MEMORY[date] = copy }
     }
 
     fun loadDay(date: String): JSONObject? {
         MEMORY[date]?.let { return JSONObject(it.toString()) }
         return withDbLock {
-            readableDb().query(
-                "day_snapshot",
-                arrayOf("snapshot_json"),
-                "business_date=?",
-                arrayOf(date),
-                null,
-                null,
-                null,
-                "1",
-            ).use { c ->
+            readableDb().query("day_snapshot", arrayOf("snapshot_json"), "business_date=?", arrayOf(date), null, null, null, "1").use { c ->
                 if (!c.moveToFirst()) return@withDbLock null
                 val parsed = runCatching { JSONObject(c.getString(0)) }.getOrNull() ?: return@withDbLock null
                 MEMORY[date] = parsed
@@ -95,34 +89,38 @@ class OperationalDataStore(context: Context) {
 
     fun availableDates(): List<String> = withDbLock {
         val out = ArrayList<String>()
-        readableDb().query(
-            "day_snapshot",
-            arrayOf("business_date"),
-            null,
-            null,
-            null,
-            null,
-            "business_date DESC",
-        ).use { c -> while (c.moveToNext()) out += c.getString(0) }
+        readableDb().query("day_snapshot", arrayOf("business_date"), null, null, null, null, "business_date DESC").use { c -> while (c.moveToNext()) out += c.getString(0) }
         out
     }
 
     fun revisions(): Map<String, Long> = withDbLock {
         val out = LinkedHashMap<String, Long>()
-        readableDb().query(
-            "day_snapshot",
-            arrayOf("business_date", "day_revision"),
-            null,
-            null,
-            null,
-            null,
-            "business_date DESC",
-        ).use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getLong(1) }
+        readableDb().query("day_snapshot", arrayOf("business_date", "day_revision"), null, null, null, null, "business_date DESC").use { c -> while (c.moveToNext()) out[c.getString(0)] = c.getLong(1) }
         out
     }
 
     fun revision(date: String): Long = revisions()[date] ?: 0L
 
+    /** Apply the exact canonical Service business window. No calendar comparison/subtraction. */
+    fun applyBusinessWindow(remoteDates: List<String>, retentionEpoch: Long) = withDbLock {
+        val exact = remoteDates.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(7)
+        if (exact.isEmpty()) return@withDbLock
+        val db = writableDb()
+        val local = ArrayList<String>()
+        db.query("day_snapshot", arrayOf("business_date"), null, null, null, null, null).use { c -> while (c.moveToNext()) local += c.getString(0) }
+        db.beginTransaction()
+        try {
+            local.filter { it !in exact }.forEach { date -> db.delete("day_snapshot", "business_date=?", arrayOf(date)) }
+            val window = JSONArray().apply { exact.forEach { put(it) } }.toString()
+            db.insertWithOnConflict("sync_meta", null, ContentValues().apply { put("meta_key", "business_window"); put("meta_value", window) }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.insertWithOnConflict("sync_meta", null, ContentValues().apply { put("meta_key", "retention_epoch"); put("meta_value", retentionEpoch.toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        MEMORY.keys.filter { it !in exact }.forEach { MEMORY.remove(it) }
+        pruneResolvedLocked(db)
+    }
+
+    /** Legacy helpers retained for binary/source compatibility; exact-window code should use applyBusinessWindow. */
     fun dropBefore(retentionFloor: String) = withDbLock {
         if (retentionFloor.isBlank()) return@withDbLock
         writableDb().delete("day_snapshot", "business_date < ?", arrayOf(retentionFloor))
@@ -130,32 +128,15 @@ class OperationalDataStore(context: Context) {
     }
 
     fun dropDatesNotIn(remoteDates: Set<String>, retentionFloor: String) = withDbLock {
-        if (retentionFloor.isBlank()) return@withDbLock
+        if (remoteDates.isEmpty()) return@withDbLock
         val db = writableDb()
-        db.delete("day_snapshot", "business_date < ?", arrayOf(retentionFloor))
-        MEMORY.keys.filter { it < retentionFloor }.forEach { MEMORY.remove(it) }
-
         val local = ArrayList<String>()
-        db.query(
-            "day_snapshot",
-            arrayOf("business_date"),
-            null,
-            null,
-            null,
-            null,
-            "business_date DESC",
-        ).use { c -> while (c.moveToNext()) local += c.getString(0) }
-
+        db.query("day_snapshot", arrayOf("business_date"), null, null, null, null, null).use { c -> while (c.moveToNext()) local += c.getString(0) }
         db.beginTransaction()
         try {
-            local.filter { it >= retentionFloor && it !in remoteDates }.forEach { date ->
-                db.delete("day_snapshot", "business_date=?", arrayOf(date))
-                MEMORY.remove(date)
-            }
+            local.filter { it !in remoteDates }.forEach { date -> db.delete("day_snapshot", "business_date=?", arrayOf(date)); MEMORY.remove(date) }
             db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
+        } finally { db.endTransaction() }
     }
 
     fun putMeta(key: String, value: String) = withDbLock {
@@ -164,14 +145,105 @@ class OperationalDataStore(context: Context) {
     }
 
     fun meta(key: String): String? = withDbLock {
-        readableDb().query("sync_meta", arrayOf("meta_value"), "meta_key=?", arrayOf(key), null, null, null, "1").use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
+        readableDb().query("sync_meta", arrayOf("meta_value"), "meta_key=?", arrayOf(key), null, null, null, "1").use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }
+
+    fun saveAuthority(authority: JSONObject) {
+        putMeta("authority_epoch", authority.optLong("authority_epoch", 0L).toString())
+        putMeta("authority_seq", authority.optLong("authority_seq", 0L).toString())
+        putMeta("authority_mode", authority.optString("mode"))
+        putMeta("service_generation", authority.optString("service_generation"))
+    }
+
+    fun authorityEpoch(): Long = meta("authority_epoch")?.toLongOrNull() ?: 0L
+    fun authoritySeq(): Long = meta("authority_seq")?.toLongOrNull() ?: 0L
+    fun authorityMode(): String = meta("authority_mode") ?: "OFFLINE_LOCAL"
+    fun serviceGeneration(): String = meta("service_generation") ?: ""
+
+    fun enqueueMutation(event: JSONObject, exclusive: Boolean) = withDbLock {
+        val eventId = event.optString("event_id").trim()
+        require(eventId.isNotBlank()) { "EVENT_ID_REQUIRED" }
+        val now = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put("event_id", eventId)
+            put("body_json", event.toString())
+            put("exclusive", if (exclusive) 1 else 0)
+            put("status", "LOCAL_PENDING")
+            put("attempt_count", 0)
+            put("next_attempt_at", now)
+            put("queued_at", now)
+            put("updated_at", now)
         }
+        writableDb().insertWithOnConflict("mutation_outbox", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+    }
+
+    fun pendingMutations(limit: Int = 100): List<PendingMutation> = withDbLock {
+        val out = ArrayList<PendingMutation>()
+        val now = System.currentTimeMillis().toString()
+        readableDb().query(
+            "mutation_outbox",
+            arrayOf("event_id", "body_json", "exclusive", "status", "attempt_count", "queued_at"),
+            "status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') AND next_attempt_at <= ?",
+            arrayOf(now), null, null, "queued_at ASC", limit.coerceIn(1, 500).toString(),
+        ).use { c ->
+            while (c.moveToNext()) {
+                runCatching { JSONObject(c.getString(1)) }.getOrNull()?.let { body ->
+                    out += PendingMutation(c.getString(0), body, c.getInt(2) == 1, c.getString(3), c.getInt(4), c.getLong(5))
+                }
+            }
+        }
+        out
+    }
+
+    fun markMutationSynced(eventId: String) = markMutationResolved(eventId, "CONFIRMED", "")
+    fun markMutationRejected(eventId: String, error: String) = markMutationResolved(eventId, "REJECTED", error)
+    fun markMutationReviewRequired(eventId: String, error: String) = markMutationResolved(eventId, "REVIEW_REQUIRED", error)
+
+    private fun markMutationResolved(eventId: String, status: String, error: String) = withDbLock {
+        val now = System.currentTimeMillis()
+        writableDb().execSQL(
+            "UPDATE mutation_outbox SET status=?,last_error=?,updated_at=? WHERE event_id=?",
+            arrayOf(status, error.take(1200), now, eventId),
+        )
+    }
+
+    fun markMutationRetry(eventId: String, error: String, delayMs: Long) = withDbLock {
+        val now = System.currentTimeMillis()
+        writableDb().execSQL(
+            "UPDATE mutation_outbox SET status='RETRY',attempt_count=attempt_count+1,next_attempt_at=?,last_error=?,updated_at=? WHERE event_id=?",
+            arrayOf(now + delayMs.coerceIn(1_000L, 15 * 60_000L), error.take(600), now, eventId),
+        )
+    }
+
+    /** Compatibility mapping: old CONFLICT becomes the owner-visible REVIEW_REQUIRED state. */
+    fun markMutationConflict(eventId: String, error: String) = markMutationReviewRequired(eventId, error)
+
+    fun pendingMutationCount(): Int = withDbLock {
+        readableDb().rawQuery("SELECT COUNT(*) FROM mutation_outbox WHERE status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL')", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+    }
+
+    fun conflicts(limit: Int = 100): List<JSONObject> = withDbLock {
+        val out = ArrayList<JSONObject>()
+        readableDb().query("mutation_outbox", arrayOf("event_id","body_json","status","last_error","updated_at"), "status IN ('REVIEW_REQUIRED','REJECTED','CONFLICT')", null, null, null, "updated_at DESC", limit.coerceIn(1,500).toString()).use { c ->
+            while (c.moveToNext()) out += JSONObject()
+                .put("event_id",c.getString(0))
+                .put("body",runCatching{JSONObject(c.getString(1))}.getOrNull())
+                .put("status",if(c.getString(2)=="CONFLICT")"REVIEW_REQUIRED" else c.getString(2))
+                .put("error",c.getString(3))
+                .put("updated_at",c.getLong(4))
+        }
+        out
     }
 
     fun businessDate(): String = isoDate(Date())
+    fun latestBusinessDate(): String = meta("business_date")?.takeIf { it.isNotBlank() } ?: availableDates().firstOrNull() ?: businessDate()
+    fun previousBusinessDate(): String = availableDates().drop(1).firstOrNull() ?: latestBusinessDate()
 
-    fun previousBusinessDate(): String = isoDate(Date(System.currentTimeMillis() - 86_400_000L))
+    private fun pruneResolvedLocked(db: SQLiteDatabase) {
+        val now = System.currentTimeMillis()
+        db.delete("mutation_outbox", "status='CONFIRMED' AND updated_at < ?", arrayOf((now - 7L * 86_400_000L).toString()))
+        db.delete("mutation_outbox", "status IN ('REJECTED','REVIEW_REQUIRED') AND updated_at < ?", arrayOf((now - 30L * 86_400_000L).toString()))
+    }
 
     private fun readableDb(): SQLiteDatabase = openWithRetry { helper.readableDatabase }
     private fun writableDb(): SQLiteDatabase = openWithRetry { helper.writableDatabase }
@@ -179,9 +251,7 @@ class OperationalDataStore(context: Context) {
     private fun <T> openWithRetry(block: () -> T): T {
         var last: SQLiteDatabaseLockedException? = null
         repeat(4) { attempt ->
-            try {
-                return block()
-            } catch (e: SQLiteDatabaseLockedException) {
+            try { return block() } catch (e: SQLiteDatabaseLockedException) {
                 last = e
                 if (attempt < 3) Thread.sleep((40L shl attempt).coerceAtMost(320L))
             }
@@ -189,54 +259,53 @@ class OperationalDataStore(context: Context) {
         throw last ?: IllegalStateException("SQLITE_OPEN_FAILED")
     }
 
-    private fun isoDate(date: Date): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone(TZ)
-    }.format(date)
+    private fun isoDate(date: Date): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone(TZ) }.format(date)
 
     private class DbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
-        init {
-            // Explicitly keep one rollback-journal connection pool. Some Android 11 PDA SQLite builds
-            // throw SQLITE_BUSY when multiple helpers negotiate PRAGMA journal_mode concurrently.
-            setWriteAheadLoggingEnabled(false)
-        }
-
-        override fun onCreate(db: SQLiteDatabase) {
-            db.execSQL(
-                """CREATE TABLE day_snapshot(
-                    business_date TEXT PRIMARY KEY NOT NULL,
-                    day_revision INTEGER NOT NULL,
-                    snapshot_json TEXT NOT NULL,
-                    saved_at INTEGER NOT NULL
-                )""".trimIndent()
-            )
-            db.execSQL("CREATE INDEX idx_day_snapshot_saved ON day_snapshot(saved_at)")
-            db.execSQL(
-                """CREATE TABLE sync_meta(
-                    meta_key TEXT PRIMARY KEY NOT NULL,
-                    meta_value TEXT NOT NULL
-                )""".trimIndent()
-            )
-        }
-
+        init { setWriteAheadLoggingEnabled(false) }
+        override fun onCreate(db: SQLiteDatabase) { createV1(db); createV2(db) }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            db.execSQL("DROP TABLE IF EXISTS day_snapshot")
-            db.execSQL("DROP TABLE IF EXISTS sync_meta")
-            onCreate(db)
+            // Never drop day_snapshot or mutation_outbox during an installed-Beta upgrade.
+            if (oldVersion < 2) createV2(db)
+        }
+        private fun createV1(db: SQLiteDatabase) {
+            db.execSQL("""CREATE TABLE IF NOT EXISTS day_snapshot(
+                business_date TEXT PRIMARY KEY NOT NULL,
+                day_revision INTEGER NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                saved_at INTEGER NOT NULL
+            )""".trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_day_snapshot_saved ON day_snapshot(saved_at)")
+            db.execSQL("""CREATE TABLE IF NOT EXISTS sync_meta(
+                meta_key TEXT PRIMARY KEY NOT NULL,
+                meta_value TEXT NOT NULL
+            )""".trimIndent())
+        }
+        private fun createV2(db: SQLiteDatabase) {
+            db.execSQL("""CREATE TABLE IF NOT EXISTS mutation_outbox(
+                event_id TEXT PRIMARY KEY NOT NULL,
+                body_json TEXT NOT NULL,
+                exclusive INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at INTEGER NOT NULL,
+                queued_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                last_error TEXT
+            )""".trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_mutation_outbox_due ON mutation_outbox(status,next_attempt_at,queued_at)")
         }
     }
 
     companion object {
+        // Legacy filename retained intentionally for in-place migration; semantics are exact N..N-6.
         private const val DB_NAME = "pp_operational_45d.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
         private const val TZ = "Asia/Bangkok"
         private val DB_LOCK = Any()
         private val MEMORY = ConcurrentHashMap<String, JSONObject>()
         @Volatile private var HELPER: DbHelper? = null
-
-        private fun helper(context: Context): DbHelper = HELPER ?: synchronized(DB_LOCK) {
-            HELPER ?: DbHelper(context.applicationContext).also { HELPER = it }
-        }
-
+        private fun helper(context: Context): DbHelper = HELPER ?: synchronized(DB_LOCK) { HELPER ?: DbHelper(context.applicationContext).also { HELPER = it } }
         private inline fun <T> withDbLock(block: () -> T): T = synchronized(DB_LOCK) { block() }
     }
 }

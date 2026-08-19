@@ -1,0 +1,3 @@
+requested_at=2026-08-19T19:55:00+07:00
+scope=live-web-assets-auth
+read_only=true

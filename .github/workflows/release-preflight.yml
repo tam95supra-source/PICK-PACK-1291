@@ -3,11 +3,7 @@ name: Release Preflight - Beta and Stable
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-    paths:
-      - 'ops/release-preflight-trigger.txt'
-  pull_request:
-    branches: [ main ]
+    branches: [agent/service-migration-m2]
     paths:
       - 'ops/release-preflight-trigger.txt'
 
@@ -23,29 +19,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
       GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
     steps:
       - uses: actions/checkout@v4
-      - name: Probe live API and Drive OTA channels
+      - name: Verify Service-first production authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 2 "$SERVICE_URL/health" > /tmp/service-health.json
+          jq -e '.ok == true and .environment == "production" and .authority.mode == "SERVICE_PRIMARY" and .authority.scope == "PRODUCTION" and (.generation|length>0)' /tmp/service-health.json >/dev/null
+          echo 'PASS - Service production authority is healthy.'
+
+      - name: Verify GAS compatibility and Drive OTA isolation
         shell: bash
         run: |
           set -euo pipefail
           grep -q "OTA_BETA_FOLDER_ID: '1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg'" google-apps-script/PICK_PACK_API.gs
           grep -q "OTA_STABLE_FOLDER_ID: '1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4'" google-apps-script/PICK_PACK_API.gs
-          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/health.json
-          grep -q '"ok":true' /tmp/health.json
-          grep -q '"mode":"APP_GSHEET"' /tmp/health.json
-          grep -q '"sheet_read":true' /tmp/health.json
-          grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/health.json
-          grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/health.json
-          grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/health.json
+          curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/gas-health.json
+          jq -e '.ok == true and .sheet_read == true and .auth_session_model == "SINGLE_ACTIVE_DEVICE_V1"' /tmp/gas-health.json >/dev/null
+          jq -e '.report_engine == "S12_CURRENT_DAY" and .history_engine == "S13_SHARED_SESSION"' /tmp/gas-health.json >/dev/null
           curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta-ota.json
           curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable-ota.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta-ota.json
-          grep -q '"channel":"BETA"' /tmp/beta-ota.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable-ota.json
-          grep -q '"channel":"STABLE"' /tmp/stable-ota.json
-          echo 'PASS - live S12 report + S13 shared history + Beta/Stable OTA isolation.'
+          jq -e '.ok == true and .source == "GOOGLE_DRIVE" and .channel == "BETA"' /tmp/beta-ota.json >/dev/null
+          jq -e '.ok == true and .source == "GOOGLE_DRIVE" and .channel == "STABLE" and .available == false' /tmp/stable-ota.json >/dev/null
+          echo 'PASS - GAS compatibility health and Beta/Stable Drive OTA isolation verified.'
+          echo 'NOTE - GAS compatibility labels are not production authority assertions; Service/D1 is the normal-mode authority.'
 
   android-release:
     runs-on: ubuntu-latest
@@ -73,7 +73,7 @@ jobs:
           ! grep -R 'BetaApiClient()' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -n 'TransitionManager.beginDelayedTransition' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
-          ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
+          ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech' app/src google-apps-script service 2>/dev/null
 
       - name: Read version metadata from source
         id: meta
@@ -105,10 +105,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${ANDROID_HOME:-}" \
-             && -f "$ANDROID_HOME/platforms/android-36/android.jar" \
-             && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-             && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
             echo "Using preinstalled Android SDK: $ANDROID_HOME"
             echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
             exit 0
@@ -151,8 +148,7 @@ jobs:
           grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt
           grep -q "versionCode='$STABLE_CODE'" /tmp/stable.txt
           grep -q "versionName='$STABLE_NAME'" /tmp/stable.txt
-          printf 'commit=%s\nbeta_name=%s\nbeta_code=%s\nstable_name=%s\nstable_code=%s\n' \
-            "$GITHUB_SHA" "$BETA_NAME" "$BETA_CODE" "$STABLE_NAME" "$STABLE_CODE" > app/build/outputs/apk/release-metadata.txt
+          printf 'commit=%s\nbeta_name=%s\nbeta_code=%s\nstable_name=%s\nstable_code=%s\n' "$GITHUB_SHA" "$BETA_NAME" "$BETA_CODE" "$STABLE_NAME" "$STABLE_CODE" > app/build/outputs/apk/release-metadata.txt
           sha256sum "$BETA" "$STABLE" >> app/build/outputs/apk/release-metadata.txt
 
       - name: Upload authoritative unsigned Beta candidate
@@ -178,9 +174,7 @@ jobs:
         shell: bash
         run: |
           READY=true
-          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do
-            [[ -n "${!v:-}" ]] || READY=false
-          done
+          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]] || READY=false; done
           echo "ready=$READY" >> "$GITHUB_OUTPUT"
           echo "Signing secrets ready: $READY"
 
@@ -236,6 +230,6 @@ jobs:
     timeout-minutes: 2
     steps:
       - run: |
-          echo 'PASS - live gates and Android release validation completed in parallel.'
-          echo 'Reuse the uploaded Beta/Stable artifacts; do not rebuild before signing/publish.'
+          echo 'PASS - Service-first live gates, GAS compatibility/OTA isolation, and Android release validation completed.'
+          echo 'Reuse uploaded validation artifacts; do not rebuild before a deliberate publish step.'
           echo 'No Google Drive OTA publish is performed by this workflow.'

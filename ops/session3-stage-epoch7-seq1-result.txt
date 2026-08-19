@@ -1,0 +1,12 @@
+checked_at=2026-08-19T14:59:49.755Z
+http=200
+ok=true
+duplicate=false
+staged_for_failback=true
+error_code=
+epoch=7
+seq=1
+payload_logged=NO
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=STAGED_OR_DUPLICATE

@@ -1,0 +1,10 @@
+checked_at=2026-08-19T15:05:53.848Z
+service_http_authority=RECONCILING|7|0
+gas_discovery=RECONCILING|7|7
+d1_authority=RECONCILING|7|0|PRODUCTION
+epoch7_inbox_count=7
+epoch7_status=PENDING=7
+epoch7_last_error_count=0
+recovery_recent=FAILED:7:7:8,FAILED:7:7:8,COMPLETE:5:2:6
+replication=HEALTHY|0|0|
+verdict=DIAGNOSTIC_COMPLETE

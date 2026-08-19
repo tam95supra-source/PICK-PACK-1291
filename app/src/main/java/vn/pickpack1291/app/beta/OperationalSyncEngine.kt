@@ -6,11 +6,11 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /**
- * Revision-driven foreground synchronizer for the 45-day local operational store.
+ * Revision-driven synchronizer for the exact Service-provided seven-business-session window N..N-6.
  *
- * The UI never calls this class to load a screen. Foreground sync compares tiny server day
- * revisions, then atomically replaces only changed dates. On first bootstrap N/N-1 are fetched
- * first so the current operation/report screens become useful before the older immutable window.
+ * The Service business sequence is authoritative. No calendar-day subtraction is used to invent
+ * N-1/N-2 dates. The local store prunes only day snapshots; durable pending mutations are separate
+ * and survive retention changes/upgrades.
  */
 class OperationalSyncEngine(
     context: Context,
@@ -35,32 +35,36 @@ class OperationalSyncEngine(
         retentionEpoch: Long,
         dayRevisions: JSONObject,
     ) {
-        if (businessDate.isBlank() || retentionFloor.isBlank()) return
+        if (businessDate.isBlank()) return
         val revisions = LinkedHashMap<String, Long>()
         val keys = dayRevisions.keys()
         while (keys.hasNext()) {
-            val date = keys.next()
-            if (date >= retentionFloor && date <= businessDate) revisions[date] = dayRevisions.optLong(date, 0L)
+            val date = keys.next().trim()
+            if (date.isNotBlank()) revisions[date] = dayRevisions.optLong(date, 0L)
         }
-        val manifest = Manifest(businessDate, retentionFloor, retentionEpoch, revisions)
+        // Contract lock: PDA operational cache is the latest seven business sessions, never more.
+        val exactWindow = revisions.entries
+            .sortedByDescending { it.key }
+            .take(7)
+            .associateTo(LinkedHashMap()) { it.key to it.value }
+        if (exactWindow.isEmpty()) return
+        val canonicalBusinessDate = if (businessDate in exactWindow) businessDate else exactWindow.keys.first()
+        val canonicalFloor = exactWindow.keys.last()
+        val manifest = Manifest(canonicalBusinessDate, canonicalFloor, retentionEpoch, exactWindow)
         synchronized(lock) {
             if (inFlight) {
-                // Keep only the newest manifest that arrived while a reconciliation is active.
-                // The manifest currently being processed must never enqueue itself again.
                 pending = manifest
                 return
             }
             inFlight = true
         }
-        // Never open/query SQLite from the main/UI thread. A shared single-thread executor also
-        // serializes the initial local reconciliation across transient Activity recreation.
         SYNC_EXECUTOR.execute { process(manifest) }
     }
 
     private fun process(manifest: Manifest) {
         try {
-            store.dropBefore(manifest.retentionFloor)
-            store.dropDatesNotIn(manifest.revisions.keys, manifest.retentionFloor)
+            store.applyBusinessWindow(manifest.revisions.keys.toList(), manifest.retentionEpoch)
+            store.putMeta("business_date", manifest.businessDate)
             store.putMeta("retention_floor", manifest.retentionFloor)
             store.putMeta("retention_epoch", manifest.retentionEpoch.toString())
 
@@ -77,29 +81,25 @@ class OperationalSyncEngine(
 
             val localEmpty = local.isEmpty()
             if (localEmpty) {
-                val previous = previousDate(manifest.businessDate)
-                val hot = listOf(manifest.businessDate, previous).filter { it in missingOrChanged }
+                // Use the first two actual Service business dates, not calendar today-minus-one.
+                val hot = manifest.revisions.keys.sortedDescending().take(2).filter { it in missingOrChanged }
                 syncDayQueue(hot, linkedSetOf()) { changed ->
                     val stillMissing = manifest.revisions
                         .filter { (date, rev) -> store.revision(date) != rev }
                         .keys
                         .sortedDescending()
-                    if (stillMissing.isEmpty()) finish()
-                    else syncBootstrap(stillMissing, changed)
+                    if (stillMissing.isEmpty()) finish() else syncBootstrap(stillMissing, changed)
                 }
                 return
             }
 
-            // Normal steady state only N/N-1 should mutate. Fetch those dates independently so all
-            // foreground PDAs converge after one revision poll without retransmitting immutable days.
             if (missingOrChanged.size <= 2) {
                 syncDayQueue(missingOrChanged, linkedSetOf()) { finish() }
             } else {
                 syncBootstrap(missingOrChanged, linkedSetOf())
             }
         } catch (_: Throwable) {
-            // Local cache failure must never crash the operational app. Leave revisions stale and
-            // let the next foreground poll retry after the device/database becomes available.
+            // Event/reconnect/manual triggers retry later; never crash the operational UI.
             finish()
         }
     }
@@ -122,11 +122,8 @@ class OperationalSyncEngine(
                         listener(setOf(date))
                     }
                 }
-                // Start the next download before ending this one so the direction indicator does
-                // not flicker between sequential changed-day requests.
                 syncDayQueue(dates.drop(1), changed, done)
             } catch (_: Throwable) {
-                // Keep stale revision; next poll retries this date.
                 syncDayQueue(dates.drop(1), changed, done)
             } finally {
                 SyncDirectionTracker.endDownload()
@@ -139,7 +136,7 @@ class OperationalSyncEngine(
         changed: LinkedHashSet<String>,
     ) {
         if (dates.isEmpty()) { finish(); return }
-        val payload = JSONObject().put("dates", JSONArray().apply { dates.take(45).forEach { put(it) } })
+        val payload = JSONObject().put("dates", JSONArray().apply { dates.take(7).forEach { put(it) } })
         SyncDirectionTracker.beginDownload()
         api.call("sync_bootstrap", payload) { result ->
             try {
@@ -149,8 +146,11 @@ class OperationalSyncEngine(
                     val synced = LinkedHashSet<String>()
                     for (i in 0 until array.length()) {
                         val day = array.optJSONObject(i) ?: continue
-                        snapshots += day
-                        day.optString("business_date").takeIf { it.isNotBlank() }?.let { synced += it }
+                        val date = day.optString("business_date")
+                        if (date in dates) {
+                            snapshots += day
+                            synced += date
+                        }
                     }
                     store.saveDays(snapshots)
                     changed += synced
@@ -158,7 +158,6 @@ class OperationalSyncEngine(
                 }
                 finish()
             } catch (_: Throwable) {
-                // Keep stale revisions; next poll retries the bootstrap.
                 finish()
             } finally {
                 SyncDirectionTracker.endDownload()
@@ -180,11 +179,6 @@ class OperationalSyncEngine(
             JSONObject().apply { next.revisions.forEach { (d, r) -> put(d, r) } },
         )
     }
-
-    private fun previousDate(iso: String): String = runCatching {
-        val f = java.time.format.DateTimeFormatter.ISO_LOCAL_DATE
-        java.time.LocalDate.parse(iso, f).minusDays(1).format(f)
-    }.getOrDefault(iso)
 
     companion object {
         private val SYNC_EXECUTOR = Executors.newSingleThreadExecutor { runnable ->

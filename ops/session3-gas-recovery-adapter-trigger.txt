@@ -1,0 +1,8 @@
+scope=RECOVERY_ADAPTER_ONLY
+expected_mode=GOOGLE_FALLBACK
+expected_epoch=7
+expected_seq=7
+expected_pending=7
+authority_change=FORBIDDEN
+stable=FORBIDDEN
+requested_at=2026-08-19T21:29:00+07:00

@@ -1,0 +1,34 @@
+name: Session3 Apply S30 Web
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-apply-s30-web-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Apply and syntax-check Web history
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_s30_web_readable_history.py
+          grep -q 'S30_WEB_READABLE_HISTORY' service/public/app.js
+          node --check service/public/app.js
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/public/app.js
+          git diff --cached --quiet || git commit -m 'feat: apply readable Web history'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          printf 'web_history=PASS\nsyntax=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' > /tmp/r
+          cp /tmp/r ops/session3-apply-s30-web-result.txt;git add ops/session3-apply-s30-web-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S30 Web source gate'
+          git pull --rebase origin agent/service-migration-m2;git push origin HEAD:agent/service-migration-m2

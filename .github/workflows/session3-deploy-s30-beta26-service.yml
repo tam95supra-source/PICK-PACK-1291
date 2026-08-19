@@ -1,0 +1,72 @@
+name: Session3 Deploy S30 Beta26 Service
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-deploy-s30-beta26-service-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session3-production-service-deploy
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Source and authority gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;echo "checked_at=$(date -u +%FT%TZ)" > "$OUT";echo "head_sha=$GITHUB_SHA" >> "$OUT";PHASE=SOURCE;trap 'rc=$?;echo failed_phase=$PHASE >> "$OUT";echo failed_rc=$rc >> "$OUT";exit $rc' ERR
+          grep -q 'S30_CANONICAL_ADMIN_AUDIT' service/src/admin_audit.ts;grep -q '/v1/admin-audit' service/src/entry.ts;grep -q 'replicateAdminAudit' service/src/replication.ts;grep -q 'S30_WEB_READABLE_HISTORY' service/public/app.js
+          node --check service/public/app.js
+          cd service;npm install --no-audit --no-fund >/dev/null;npm run check >/dev/null;cd ..;echo source=PASS >> "$OUT"
+          PHASE=AUTHORITY
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node -e 'const h=require("/tmp/h.json"),g=require("/tmp/g.json"),a=h.authority||{},ga=g.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)!==8)throw Error("AUTHORITY_NOT_EPOCH8")'
+          echo authority=PASS >> "$OUT"
+      - name: Deploy latest S30 Service/Web
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;PHASE=DEPLOY;trap 'rc=$?;echo failed_phase=$PHASE >> "$OUT";echo failed_rc=$rc >> "$OUT";exit $rc' ERR
+          cd service
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))");[[ -n "$ID" ]];export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('/tmp/w-s30.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler deploy --config /tmp/w-s30.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          cd ..;echo deploy=PASS >> "$OUT"
+      - name: Live verify and drain replication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;PHASE=VERIFY;trap 'rc=$?;echo failed_phase=$PHASE >> "$OUT";echo failed_rc=$rc >> "$OUT";exit $rc' ERR
+          for i in 1 2 3 4 5;do curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json&&node -e 'const h=require("/tmp/h2.json"),a=h.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8)process.exit(1)'&&break;sleep 2;done
+          [[ "$(curl -sS -o /tmp/audit-unauth -w '%{http_code}' -X POST -H 'content-type: application/json' "$SERVICE_URL/v1/admin-audit" -d '{"action":"staff_upsert"}')" == 401 ]]
+          curl -fsSL "$SERVICE_URL/app.js" >/tmp/app.js;grep -q 'S30_WEB_READABLE_HISTORY' /tmp/app.js
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}');echo "::add-mask::$ADMIN"
+          for i in 1 2 3 4 5;do curl -fsSL -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" >/tmp/repl.json || true;curl -fsSL "$SERVICE_URL/health" >/tmp/h3.json;P=$(jq -r '.replication.pending_count//999' /tmp/h3.json);S=$(jq -r '.replication.state//""' /tmp/h3.json);[[ "$P" == 0 && "$S" == HEALTHY ]]&&break;sleep 2;done
+          jq -e '.replication.state=="HEALTHY" and (.replication.pending_count|tonumber)==0' /tmp/h3.json >/dev/null
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json;node -e 'const g=require("/tmp/g2.json"),a=g.authority||{};if(g.authority_mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8)process.exit(1)'
+          echo live_verify=PASS >> "$OUT";echo replication=HEALTHY_0 >> "$OUT";echo stable=UNTOUCHED >> "$OUT";echo merge_pr38=UNTOUCHED >> "$OUT";echo verdict=PASS >> "$OUT"
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result||echo result_missing=true>/tmp/result;grep -q '^verdict=' /tmp/result||{ echo stable=UNTOUCHED >>/tmp/result;echo merge_pr38=UNTOUCHED >>/tmp/result;echo verdict=FAILED_OR_STOPPED >>/tmp/result; }
+          cp /tmp/result /tmp/r;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2||true;cp /tmp/r ops/session3-deploy-s30-beta26-service-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session3-deploy-s30-beta26-service-result.txt;git diff --cached --quiet||git commit -m 'ops: record S30 Beta26 Service deploy';git push origin HEAD:agent/service-migration-m2

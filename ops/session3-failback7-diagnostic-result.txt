@@ -1,0 +1,10 @@
+checked_at=2026-08-19T14:44:56Z
+mode=READ_ONLY
+secret_gate=PASS
+oauth=PASS
+service=PASS|SERVICE_PRIMARY|6|4
+gas=PASS|GOOGLE_FALLBACK|7|7
+adapter=PASS|pending7
+ledger=PASS|7_pending
+failed_phase=D1_QUERY
+verdict=DIAGNOSTIC_COMPLETE

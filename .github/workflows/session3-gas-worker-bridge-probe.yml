@@ -1,0 +1,51 @@
+name: Session3 GAS Worker Bridge Probe
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-gas-worker-bridge-probe-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - name: Probe bridge auth without acceptable epoch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"
+          EVENT_ID=00000000-0000-0000-0000-000000000000
+          EPOCH=0; SEQ=1; GEN=probe-invalid-epoch; ACTION=probe; DATE=2000-01-01; ACTOR=probe; ROLE=ADMIN; DEVICE=probe; AT=2000-01-01T00:00:00.000Z; PAYLOAD='{}'
+          RAW="$EVENT_ID|$EPOCH|$SEQ|$GEN|$ACTION|$DATE|$ACTOR|$ROLE|$DEVICE|$AT|$PAYLOAD"
+          CHECKSUM=$(printf '%s' "$RAW" | sha256sum | awk '{print $1}')
+          node -e 'const fs=require("fs");fs.writeFileSync("/tmp/body.json",JSON.stringify({event_id:process.argv[1],authority_epoch:0,authority_seq:1,service_generation:"probe-invalid-epoch",event:{action:"probe",business_date:"2000-01-01",actor:"probe",role:"ADMIN",device_id:"probe",occurred_at:"2000-01-01T00:00:00.000Z",payload_json:"{}"},checksum:process.argv[2]}))' "$EVENT_ID" "$CHECKSUM"
+          HTTP=$(curl -sS --max-time 25 -o /tmp/body.out -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-gas-bridge-secret: $BRIDGE" --data-binary @/tmp/body.json "$SERVICE_URL/internal/fallback/ingest" || true)
+          CODE=$(node -e 'try{const j=require("/tmp/body.out");process.stdout.write(String(j?.error?.code||j?.error||""))}catch{}')
+          VERDICT=UNKNOWN
+          if [[ "$HTTP" == 409 && "$CODE" == FALLBACK_EPOCH_NOT_ACCEPTABLE ]]; then VERDICT=BRIDGE_AUTH_PASS; fi
+          if [[ "$HTTP" == 401 && "$CODE" == GAS_BRIDGE_UNAUTHORIZED ]]; then VERDICT=BRIDGE_AUTH_FAIL; fi
+          printf 'checked_at=%s\nhttp=%s\nerror_code=%s\nverdict=%s\nwrite_performed=NO_INVALID_EPOCH\n' "$(date -u +%FT%TZ)" "$HTTP" "$CODE" "$VERDICT" >/tmp/result.txt
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nverdict=PROBE_FAILED\nwrite_performed=NO\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/result.copy
+          git reset --hard HEAD >/dev/null
+          cp /tmp/result.copy ops/session3-gas-worker-bridge-probe-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-gas-worker-bridge-probe-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record GAS Worker bridge auth probe' && git push)

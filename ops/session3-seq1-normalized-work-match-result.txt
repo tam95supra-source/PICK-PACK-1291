@@ -1,0 +1,6 @@
+checked_at=2026-08-19T15:13:58.775Z
+state=ACTIVE
+normalized_work_match=1
+semantic_work_match=YES
+payload_logged=NO
+verdict=DIAGNOSTIC_COMPLETE

@@ -1,0 +1,5 @@
+requested_at=2026-08-19T19:52:00+07:00
+scope=web-session-isolation-login-overlay
+migration=0005_web_session_isolation.sql
+no_failback=true
+no_stable=true

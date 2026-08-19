@@ -1,0 +1,104 @@
+name: Service M2 Beta19 OTA Verify
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/m2-beta19-ota-verify-trigger.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-beta19-ota-verify
+  cancel-in-progress: true
+
+env:
+  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  BETA_VERSION: 0.4.2-beta.19
+  BETA_VERSION_CODE: '25'
+  PREVIOUS_BETA_VERSION: 0.4.2-beta.18
+  STABLE_VERSION: 0.4.2-stable.0
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+      - name: Read owner OTA verification lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ops/m2-beta19-ota-verify-trigger.txt
+          grep -qx 'confirmation=OWNER_LOCKED_M2_OTA_VERIFY' ops/m2-beta19-ota-verify-trigger.txt
+          grep -qx "target_version=$BETA_VERSION" ops/m2-beta19-ota-verify-trigger.txt
+          SHA=$(sed -n 's/^expected_sha256=//p' ops/m2-beta19-ota-verify-trigger.txt | tail -1 | tr 'A-F' 'a-f' | tr -d '[:space:]')
+          [[ "$SHA" =~ ^[0-9a-f]{64}$ ]]
+          EPOCH=$(sed -n 's/^expected_epoch=//p' ops/m2-beta19-ota-verify-trigger.txt | tail -1 | tr -d '[:space:]')
+          [[ "$EPOCH" =~ ^[0-9]+$ ]]
+          echo "EXPECTED_BETA_SHA256=$SHA" >> "$GITHUB_ENV"
+          echo "EXPECTED_EPOCH=$EPOCH" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify discovery and Beta18 to Beta19 OTA response
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 15); do
+            curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/discovery.json || true
+            if node -e 'const j=require("/tmp/discovery.json");process.exit(j.ok&&j.authority_mode==="SERVICE_PRIMARY"&&j.service_url===process.env.SERVICE_URL&&j.authority?.authority_epoch===Number(process.env.EXPECTED_EPOCH)?0:1)'; then OK=true; break; fi
+            sleep 3
+          done
+          [[ "$OK" == true ]] || { cat /tmp/discovery.json; exit 1; }
+          OK=false
+          for i in $(seq 1 15); do
+            curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$PREVIOUS_BETA_VERSION\"}" >/tmp/ota-beta18.json || true
+            if node -e 'const j=require("/tmp/ota-beta18.json");process.exit(j.ok&&j.available===true&&j.version_name===process.env.BETA_VERSION&&String(j.sha256||"").toLowerCase()===process.env.EXPECTED_BETA_SHA256&&j.apk_url?0:1)'; then OK=true; break; fi
+            sleep 4
+          done
+          [[ "$OK" == true ]] || { cat /tmp/ota-beta18.json; exit 1; }
+          URL=$(node -e 'const j=require("/tmp/ota-beta18.json");process.stdout.write(j.apk_url)')
+          curl -fL --retry 5 --retry-delay 2 --retry-all-errors "$URL" -o /tmp/ota-beta19.apk
+          [[ "$(sha256sum /tmp/ota-beta19.apk | awk '{print $1}')" == "$EXPECTED_BETA_SHA256" ]]
+      - name: Verify downloaded package version signer and self-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="${ANDROID_HOME}/build-tools/36.0.0"; test -x "$BT/aapt"; test -x "$BT/apksigner"
+          "$BT/aapt" dump badging /tmp/ota-beta19.apk >/tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionCode='$BETA_VERSION_CODE'" /tmp/badge.txt
+          grep -q "versionName='$BETA_VERSION'" /tmp/badge.txt
+          "$BT/apksigner" verify --verbose --print-certs /tmp/ota-beta19.apk >/tmp/cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$BETA_VERSION\"}" >/tmp/ota-self.json
+          node -e 'const j=require("/tmp/ota-self.json");if(!j.ok||j.available!==false||j.version_name!==process.env.BETA_VERSION)throw new Error(JSON.stringify(j))'
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d "{\"action\":\"update_check\",\"channel\":\"STABLE\",\"current_version\":\"$STABLE_VERSION\"}" >/tmp/ota-stable.json
+          node -e 'const j=require("/tmp/ota-stable.json");if(!j.ok||j.available!==false)throw new Error("STABLE_CHANNEL_CHANGED:"+JSON.stringify(j))'
+      - name: Emit OTA evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p m2-ota-evidence
+          cp /tmp/discovery.json m2-ota-evidence/service-discovery.json
+          cp /tmp/ota-beta18.json m2-ota-evidence/beta18-update-check.json
+          cp /tmp/ota-self.json m2-ota-evidence/beta19-self-check.json
+          cp /tmp/ota-stable.json m2-ota-evidence/stable-check.json
+          cp /tmp/badge.txt m2-ota-evidence/package-badging.txt
+          cp /tmp/cert.txt m2-ota-evidence/signer.txt
+          sha256sum /tmp/ota-beta19.apk > m2-ota-evidence/ota-apk-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m2-beta19-ota-evidence-${{ github.run_id }}
+          path: m2-ota-evidence/
+          retention-days: 30

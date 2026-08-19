@@ -1,0 +1,47 @@
+name: Session3 Post S28G Live Proof
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-post-s28g-live-proof-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Read-only live proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          S='https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev'
+          G='https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec'
+          curl -fsSL "$S/health" >/tmp/h.json
+          curl -fsSL -H 'content-type: application/json' "$G" -d '{"action":"service_discovery"}' >/tmp/g.json
+          curl -fsSL "$S/app.js" >/tmp/app.js
+          A=$(curl -sS -o /tmp/audit -w '%{http_code}' -X POST -H 'content-type: application/json' "$S/v1/admin-audit" -d '{"action":"staff_upsert"}')
+          node - <<'NODE' > /tmp/r
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{};
+          console.log('checked_at='+new Date().toISOString());
+          console.log(`service=${a.mode||''}|${a.authority_epoch??''}|${a.authority_seq??''}|${a.scope||''}|${a.service_generation||''}`);
+          console.log(`gas=${g.authority_mode||ga.mode||''}|${g.authority_epoch??ga.authority_epoch??''}|${g.authority_seq??ga.authority_seq??''}|${g.service_generation||ga.service_generation||''}`);
+          console.log(`replication=${h.replication?.state||''}|${h.replication?.pending_count??''}`);
+          NODE
+          grep -q 'S30_WEB_READABLE_HISTORY' /tmp/app.js && echo web_history=PASS >> /tmp/r || echo web_history=FAIL >> /tmp/r
+          echo admin_audit_unauth_http=$A >> /tmp/r
+          node -e 'const h=require("/tmp/h.json"),g=require("/tmp/g.json"),a=h.authority||{},ga=g.authority||{};if(a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)process.exit(1)'
+          grep -q 'web_history=PASS' /tmp/r
+          [[ "$A" == 401 ]]
+          echo verdict=PASS >> /tmp/r
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || printf 'verdict=FAILED\n' >/tmp/r
+          grep -q '^verdict=' /tmp/r || echo verdict=FAILED >>/tmp/r
+          cp /tmp/r ops/session3-post-s28g-live-proof-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-post-s28g-live-proof-result.txt;git diff --cached --quiet || git commit -m 'ops: record post-S28G live proof'
+          git pull --rebase origin agent/service-migration-m2;git push origin HEAD:agent/service-migration-m2

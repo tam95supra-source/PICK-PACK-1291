@@ -1,0 +1,4 @@
+Session2 Beta23 live OTA verification
+requested_at=2026-08-19T20:12:00+07:00
+expected_version=0.4.2-beta.23
+stable_must_remain_empty=true

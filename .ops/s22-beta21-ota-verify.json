@@ -1,0 +1,12 @@
+{
+  "release": "0.4.2-beta.22",
+  "channel": "BETA",
+  "stable_publish": false,
+  "apk_drive_id": "1VC-LpR0qBAFNukC7oV_sN2CuTgccKa1K",
+  "checksum_drive_id": "1f75lr9TUNWPIaZRC3_MKwa_9_xJkvYJK",
+  "sha256": "da2c1c837102e9e557013971ece9dac961caa6312b579db9c63184acc8daed3b",
+  "size": 9790372,
+  "candidate_run_id": 32212499202,
+  "candidate_artifact_id": 9351285859,
+  "verification_nonce": "2026-08-19T10:42:00+07:00"
+}

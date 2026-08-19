@@ -1,0 +1,75 @@
+name: Service M2 Precutover
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-precutover-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate PWA JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check service/public/app.js
+          node --check service/public/sw.js
+          test -s service/public/index.html
+          test -s service/public/manifest.webmanifest
+      - name: Install and type-check Worker
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Prove D1 migrations from empty local database
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('wrangler.jsonc')
+          Path('wrangler.m2.local.jsonc').write_text(p.read_text().replace('__M1_D1_DATABASE_ID__','00000000-0000-0000-0000-000000000001'))
+          PY
+          rm -rf /tmp/pick-pack-m2-local
+          npx wrangler d1 migrations apply pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-local --config wrangler.m2.local.jsonc
+          npx wrangler d1 execute pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-local --config wrangler.m2.local.jsonc --command "SELECT version,checksum FROM schema_migrations ORDER BY version; SELECT mode,scope,authority_epoch,authority_seq FROM authority_state;" --json | tee /tmp/m2-db.json
+          node - <<'NODE'
+          const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/m2-db.json','utf8'));const text=JSON.stringify(x);if(!text.includes('0001_m1_foundation')||!text.includes('0002_m2_authority_recovery'))throw new Error('migration markers missing');
+          NODE
+          rm -f wrangler.m2.local.jsonc
+      - name: Architecture safety guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'SERVICE_PRIMARY' service/src/core.ts
+          grep -q 'GOOGLE_FALLBACK' service/migrations/0002_m2_authority_recovery.sql
+          grep -q 'sheet_replication_outbox' service/src/replication.ts
+          grep -q 'acceptWebSocket' service/src/realtime.ts
+          grep -q 'INVALIDATION_V1' service/src/realtime.ts
+          grep -q 'IndexedDB\|indexedDB' service/public/app.js
+          grep -q 'LOCAL_PENDING' service/public/app.js
+          grep -q 'business_window:7' service/src/index.ts
+          grep -q 'Event-driven foreground Service/D1 revision synchronizer' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          ! grep -q 'main.postDelayed(tick, nextDelay' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q '"DAY_CHANGED"' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q '"MASTER_CHANGED"' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech' service app google-apps-script 2>/dev/null
+          echo 'M2 source-contract precutover PASS.'

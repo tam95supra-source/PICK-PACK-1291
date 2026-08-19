@@ -1,0 +1,4 @@
+Session2 production deploy error probe
+requested_at=2026-08-19T19:05:00+07:00
+no_failback=true
+no_stable=true

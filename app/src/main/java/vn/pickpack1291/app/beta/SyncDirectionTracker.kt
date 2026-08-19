@@ -1,9 +1,10 @@
 package vn.pickpack1291.app.beta
 
 import android.os.SystemClock
+import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Process-wide indicator for real synchronization direction. */
+/** Process-wide indicator for real synchronization direction and application payload throughput. */
 object SyncDirectionTracker {
     data class Snapshot(
         val uploading: Boolean,
@@ -12,10 +13,21 @@ object SyncDirectionTracker {
         val label: String,
         val shortLabel: String,
         val active: Boolean,
+        val uploadBps: Long,
+        val downloadBps: Long,
+        val uploadedBytes: Long,
+        val downloadedBytes: Long,
     )
+
+    private data class ByteSample(val at: Long, val bytes: Long)
 
     private val uploads = AtomicInteger(0)
     private val downloads = AtomicInteger(0)
+    private val rateLock = Any()
+    private val upSamples = ArrayDeque<ByteSample>()
+    private val downSamples = ArrayDeque<ByteSample>()
+    @Volatile private var uploadedTotal = 0L
+    @Volatile private var downloadedTotal = 0L
     @Volatile private var lastUploadAt = 0L
     @Volatile private var lastDownloadAt = 0L
 
@@ -47,14 +59,66 @@ object SyncDirectionTracker {
         lastDownloadAt = SystemClock.elapsedRealtime()
     }
 
-    fun snapshot(): Snapshot {
-        val up = uploads.get() > 0
-        val down = downloads.get() > 0
-        return when {
-            up && down -> Snapshot(true, true, "↕", "Đang đồng bộ hai chiều", "Hai chiều", true)
-            up -> Snapshot(true, false, "↑", "Đang đồng bộ lên", "Đang gửi", true)
-            down -> Snapshot(false, true, "↓", "Đang đồng bộ xuống", "Đang nhận", true)
-            else -> Snapshot(false, false, "✓", "Sẵn sàng", "Sẵn sàng", false)
+    fun recordUploadBytes(bytes: Long) {
+        if (bytes <= 0) return
+        val now = SystemClock.elapsedRealtime()
+        synchronized(rateLock) {
+            uploadedTotal += bytes
+            upSamples.addLast(ByteSample(now, bytes))
+            prune(upSamples, now)
         }
     }
+
+    fun recordDownloadBytes(bytes: Long) {
+        if (bytes <= 0) return
+        val now = SystemClock.elapsedRealtime()
+        synchronized(rateLock) {
+            downloadedTotal += bytes
+            downSamples.addLast(ByteSample(now, bytes))
+            prune(downSamples, now)
+        }
+    }
+
+    private fun prune(samples: ArrayDeque<ByteSample>, now: Long) {
+        while (samples.isNotEmpty() && now - samples.first().at > RATE_WINDOW_MS) samples.removeFirst()
+    }
+
+    private fun rate(samples: ArrayDeque<ByteSample>, now: Long): Long {
+        prune(samples, now)
+        if (samples.isEmpty()) return 0L
+        val bytes = samples.sumOf { it.bytes }
+        val elapsed = (now - samples.first().at).coerceAtLeast(250L)
+        return bytes * 1000L / elapsed
+    }
+
+    fun snapshot(): Snapshot {
+        val upActive = uploads.get() > 0
+        val downActive = downloads.get() > 0
+        val now = SystemClock.elapsedRealtime()
+        val rates = synchronized(rateLock) { rate(upSamples, now) to rate(downSamples, now) }
+        val recentlyUp = rates.first > 0 || now - lastUploadAt < RATE_WINDOW_MS
+        val recentlyDown = rates.second > 0 || now - lastDownloadAt < RATE_WINDOW_MS
+        val up = upActive || recentlyUp
+        val down = downActive || recentlyDown
+        val base = when {
+            up && down -> arrayOf("↕", "Đang đồng bộ hai chiều", "Hai chiều")
+            up -> arrayOf("↑", "Đang đồng bộ lên", "Đang gửi")
+            down -> arrayOf("↓", "Đang đồng bộ xuống", "Đang nhận")
+            else -> arrayOf("✓", "Sẵn sàng", "Sẵn sàng")
+        }
+        return Snapshot(
+            uploading = up,
+            downloading = down,
+            symbol = base[0],
+            label = base[1],
+            shortLabel = base[2],
+            active = up || down,
+            uploadBps = rates.first,
+            downloadBps = rates.second,
+            uploadedBytes = uploadedTotal,
+            downloadedBytes = downloadedTotal,
+        )
+    }
+
+    private const val RATE_WINDOW_MS = 2_500L
 }

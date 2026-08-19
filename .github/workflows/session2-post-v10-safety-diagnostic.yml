@@ -1,0 +1,50 @@
+name: Session2 Post V10 Safety Diagnostic
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-post-v10-safety-diagnostic-trigger.txt' ]
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read-only production check
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-post-v10-safety-diagnostic-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          curl -fsSL https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev/health >/tmp/h
+          echo "service=$(jq -r '.authority.mode+"|"+(.authority.authority_epoch|tostring)+"|"+(.authority.authority_seq|tostring)+"|"+.authority.service_generation' /tmp/h)" >> "$OUT"
+          cd service;npm install --no-audit --no-fund >/dev/null
+          npx wrangler d1 list --json >/tmp/d1-list.json
+          D1_ID=$(node -e "const r=require('/tmp/d1-list.json');const x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))");export D1_ID
+          node - <<'NODE'
+          const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.env.D1_ID;delete c.secrets;fs.writeFileSync('/tmp/prod.jsonc',JSON.stringify(c));
+          NODE
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/prod.jsonc --command "SELECT state,pending_count FROM replication_status WHERE singleton_id=1;SELECT value FROM system_meta WHERE key='m2_reconciling';SELECT name FROM d1_migrations WHERE name='0005_web_session_isolation.sql';SELECT COUNT(*) AS web_sessions FROM auth_web_sessions;SELECT COUNT(*) AS pda_sessions FROM auth_sessions;" --json >/tmp/d
+          cd ..
+          python3 - <<'PY' >> "$OUT"
+          import json
+          x=json.load(open('/tmp/d'));s=[b.get('results',[]) for b in x if isinstance(b,dict) and isinstance(b.get('results'),list)]
+          assert s[0] and s[0][0]['state']=='HEALTHY' and int(s[0][0]['pending_count'] or 0)==0
+          assert not s[1] or str(s[1][0].get('value','0'))!='1'
+          assert s[2] and s[2][0]['name']=='0005_web_session_isolation.sql'
+          print('replication=HEALTHY|0');print('reconciling=0');print('migration_0005=PASS');print('web_sessions='+str(s[3][0]['web_sessions']));print('pda_sessions='+str(s[4][0]['pda_sessions']));print('verdict=PASS')
+          PY
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-post-v10-safety-diagnostic-result.txt||echo result_missing=true>/tmp/session2-post-v10-safety-diagnostic-result.txt
+          cp /tmp/session2-post-v10-safety-diagnostic-result.txt ops/session2-post-v10-safety-diagnostic-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-post-v10-safety-diagnostic-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record post V10 safety diagnostic';git push

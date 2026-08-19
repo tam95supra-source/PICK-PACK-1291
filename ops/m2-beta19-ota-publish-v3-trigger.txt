@@ -1,0 +1,9 @@
+confirmation=OWNER_LOCKED_M2_BETA19_OTA_PUBLISH_V2
+target_version=0.4.2-beta.19
+target_version_code=25
+expected_sha256=6dc47edba684249af0655a30573824911ee4a96482f86acf7f3995d6842c3103
+expected_signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+channel=BETA
+stable_publish=false
+requested_by=owner
+run=2026-08-19T06:12:00+07:00

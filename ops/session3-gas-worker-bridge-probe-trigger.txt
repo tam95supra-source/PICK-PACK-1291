@@ -1,0 +1,4 @@
+mode=NON_MUTATING_INVALID_EPOCH_PROBE
+requested_at=2026-08-19T21:55:00+07:00
+production_write=FORBIDDEN
+stable=FORBIDDEN

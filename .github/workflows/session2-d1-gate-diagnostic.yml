@@ -1,0 +1,98 @@
+name: Session2 D1 Gate Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-d1-gate-diagnostic-trigger.txt' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: session2-d1-gate-diagnostic
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read production D1 safe state
+        shell: bash
+        run: |
+          set +e
+          set -u
+          OUT=/tmp/session2-d1-gate-diagnostic-result.txt
+          : > "$OUT"
+          echo "checked_at=$(date -u +%FT%TZ)" >> "$OUT"
+          echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [[ -z "${!v:-}" ]]; then echo "d1_bindings=MISSING:$v" >> "$OUT"; exit 10; fi
+          done
+          echo "d1_bindings=READY" >> "$OUT"
+          HTTP=$(curl -sS -o /tmp/cf-d1-list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode 'name=pick-pack-1291-service-prod' --data-urlencode 'per_page=100')
+          echo "cf_d1_list_http=$HTTP" >> "$OUT"
+          CF_SUCCESS=$(jq -r '.success // false' /tmp/cf-d1-list.json 2>/dev/null || echo false)
+          CF_COUNT=$(jq -r '(.result // [])|length' /tmp/cf-d1-list.json 2>/dev/null || echo 0)
+          echo "cf_d1_list_success=$CF_SUCCESS" >> "$OUT"
+          echo "cf_prod_name_matches=$CF_COUNT" >> "$OUT"
+          [[ "$HTTP" == 200 && "$CF_SUCCESS" == true && "$CF_COUNT" -ge 1 ]] || exit 11
+          D1_ID=$(jq -r '.result[]|select(.name=="pick-pack-1291-service-prod")|(.uuid // .id // empty)' /tmp/cf-d1-list.json | head -1)
+          [[ -n "$D1_ID" ]] || exit 12
+          echo "cf_prod_d1_resolved=YES" >> "$OUT"
+          cd service || exit 13
+          npm install --no-audit --no-fund >/dev/null 2>/tmp/npm-install.err
+          echo "npm_install_rc=$?" >> "$OUT"
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/wrangler-session2-diag.jsonc',JSON.stringify(c,null,2))" "$D1_ID"
+          echo "prod_config_rc=$?" >> "$OUT"
+
+          runq(){
+            key="$1"; sql="$2"; file="/tmp/${key}.json"; err="/tmp/${key}.err"
+            npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-session2-diag.jsonc --command "$sql" --json >"$file" 2>"$err"
+            rc=$?; echo "${key}_rc=$rc" >> "$OUT"
+            if [[ $rc -ne 0 ]]; then
+              msg=$(sed -E 's/\x1B\[[0-9;]*[mK]//g' "$err" | grep -E 'ERROR|Error|no such|SQLITE|column|table' | tail -1 | tr '\n\r' ' ' | cut -c1-240)
+              [[ -n "$msg" ]] && echo "${key}_error=$msg" >> "$OUT"
+            fi
+          }
+          runq q_authority "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1"
+          runq q_reconciling "SELECT meta_value AS reconciling FROM system_meta WHERE meta_key='m2_reconciling'"
+          runq q_fallback "SELECT authority_epoch,authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq"
+          runq q_recovery "SELECT recovery_type,status,source_authority_epoch,target_authority_epoch FROM recovery_runs ORDER BY started_at DESC LIMIT 5"
+          runq q_replication "SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1"
+          runq q_migrations "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 5"
+          runq schema_fallback "PRAGMA table_info(fallback_event_inbox)"
+          runq schema_recovery "PRAGMA table_info(recovery_runs)"
+          runq schema_replication "PRAGMA table_info(replication_status)"
+
+          node - <<'NODE'
+          const fs=require('fs'),out='/tmp/session2-d1-gate-diagnostic-result.txt';
+          const read=k=>{try{const x=JSON.parse(fs.readFileSync('/tmp/'+k+'.json','utf8'));return x.flatMap?.(b=>b.results||[])||[]}catch{return[]}};
+          const a=read('q_authority')[0]||{};fs.appendFileSync(out,'authority='+[a.mode,a.authority_epoch,a.authority_seq,a.scope,a.service_generation].join('|')+'\n');
+          const r=read('q_reconciling')[0]||{};fs.appendFileSync(out,'reconciling='+(r.reconciling??'MISSING')+'\n');
+          const f=read('q_fallback');fs.appendFileSync(out,'epoch7_inbox_count='+f.length+'\n');
+          const rec=read('q_recovery');fs.appendFileSync(out,'recovery_recent='+rec.map(x=>[x.recovery_type,x.status,x.source_authority_epoch,x.target_authority_epoch].join(':')).join(',')+'\n');
+          const rep=read('q_replication')[0]||{};fs.appendFileSync(out,'replication='+[rep.state,rep.pending_count,rep.retry_count,rep.last_error_class||''].join('|')+'\n');
+          fs.appendFileSync(out,'migrations='+read('q_migrations').map(x=>x.version).join(',')+'\n');
+          for(const k of ['schema_fallback','schema_recovery','schema_replication']) fs.appendFileSync(out,k+'_columns='+read(k).map(x=>x.name).join(',')+'\n');
+          NODE
+          echo "verdict=DIAGNOSTIC_COMPLETE" >> "$OUT"
+          cat "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          if [[ ! -f /tmp/session2-d1-gate-diagnostic-result.txt ]]; then echo "diagnostic_failed_before_output=true" > /tmp/session2-d1-gate-diagnostic-result.txt; fi
+          cp /tmp/session2-d1-gate-diagnostic-result.txt ops/session2-d1-gate-diagnostic-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-d1-gate-diagnostic-result.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'ops: record sanitized Session2 D1 gate diagnostic'
+          git push

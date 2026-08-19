@@ -1,0 +1,198 @@
+name: Session2 Product Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/session2-product-deploy-trigger.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: session2-product-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      PROD_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+      FALLBACK_RANGE: __PP_M2_FALLBACK_EVENTS!A:O
+      SERVICE_GENERATION: m2-prod-20260819-001
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.CLOUDFLARE_D1_PROD_DATABASE_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Source gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check service/public/app.js
+          grep -q 'INVALIDATION_V1' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q 'Event-driven foreground Service/D1 revision synchronizer' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          ! grep -q 'main.postDelayed(tick, nextDelay' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'business_window:7' service/src/index.ts
+          grep -q 'importTemplateXlsx' service/src/entry.ts
+          grep -q 'Import dữ liệu' service/public/index.html
+          cd service
+          npm install --no-audit --no-fund
+          npm run check
+
+      - name: Verify deploy credentials are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID D1_DATABASE_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do
+            [[ -n "${!v:-}" ]] || { echo "Missing required secret: $v"; exit 1; }
+          done
+
+      - name: Fresh-bind Service, GAS, Google fallback and D1 pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" > /tmp/service-before.json
+          jq -e --arg g "$SERVICE_GENERATION" '.ok==true and .environment=="production" and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/service-before.json >/dev/null
+          SERVICE_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-before.json)
+          SERVICE_SEQ=$(jq -r '.authority.authority_seq' /tmp/service-before.json)
+          echo "SERVICE_EPOCH=$SERVICE_EPOCH" >> "$GITHUB_ENV"
+          echo "SERVICE_SEQ=$SERVICE_SEQ" >> "$GITHUB_ENV"
+
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' > /tmp/gas-before.json
+          jq -e --arg g "$SERVICE_GENERATION" '.ok==true and .authority_mode=="GOOGLE_FALLBACK" and .service_generation==$g' /tmp/gas-before.json >/dev/null
+          FALLBACK_EPOCH=$(jq -r '.authority_epoch' /tmp/gas-before.json)
+          [[ "$FALLBACK_EPOCH" -eq $((SERVICE_EPOCH+1)) ]] || { echo 'Unexpected authority topology'; exit 1; }
+          echo "FALLBACK_EPOCH=$FALLBACK_EPOCH" >> "$GITHUB_ENV"
+
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token')
+          [[ -n "$TOKEN" && "$TOKEN" != null ]]
+          ENC_RANGE=$(python3 - <<'PY'
+          import urllib.parse, os
+          print(urllib.parse.quote(os.environ['FALLBACK_RANGE'], safe=''))
+          PY
+          )
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$PROD_SHEET_ID/values/$ENC_RANGE?majorDimension=ROWS" > /tmp/fallback-before-raw.json
+          python3 - <<'PY'
+          import json,os,hashlib
+          raw=json.load(open('/tmp/fallback-before-raw.json')).get('values',[])
+          assert raw, 'fallback ledger empty'
+          h=raw[0]; idx={x:i for i,x in enumerate(h)}
+          req=['authority_epoch','authority_seq','service_generation','event_id','action','status']
+          assert all(k in idx for k in req), ('fallback headers',h)
+          epoch=int(os.environ['FALLBACK_EPOCH']); gen=os.environ['SERVICE_GENERATION']
+          rows=[]
+          for r in raw[1:]:
+            def g(k): return str(r[idx[k]]) if idx[k]<len(r) else ''
+            if g('authority_epoch')==str(epoch) and g('service_generation')==gen:
+              rows.append({'seq':int(g('authority_seq')),'event_id':g('event_id'),'action':g('action'),'status':g('status')})
+          rows.sort(key=lambda x:x['seq'])
+          assert rows, 'no current fallback rows'
+          assert [x['seq'] for x in rows]==list(range(1,rows[-1]['seq']+1)), rows
+          assert all(x['status']=='PENDING' for x in rows), rows
+          safe=json.dumps(rows,separators=(',',':'),sort_keys=True)
+          digest=hashlib.sha256(safe.encode()).hexdigest()
+          open('/tmp/fallback-before-safe.json','w').write(safe)
+          open(os.environ['GITHUB_ENV'],'a').write(f'FALLBACK_BIND_SHA256={digest}\nFALLBACK_BIND_COUNT={len(rows)}\nFALLBACK_BIND_MAX_SEQ={rows[-1]["seq"]}\n')
+          print(f'Fresh fallback bind: epoch={epoch} count={len(rows)} max_seq={rows[-1]["seq"]} sha256={digest[:16]}...')
+          PY
+
+          python3 - <<'PY'
+          import pathlib,os
+          p=pathlib.Path('service/wrangler.jsonc')
+          pathlib.Path('/tmp/wrangler-prod.jsonc').write_text(p.read_text().replace('__M1_D1_DATABASE_ID__',os.environ['D1_DATABASE_ID']))
+          PY
+          cd service
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-prod.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT COUNT(*) AS reconciling FROM reconciliation_lock WHERE state='LOCKED'; SELECT authority_epoch,authority_seq,ingest_status,event_id FROM fallback_event_inbox WHERE authority_epoch=$FALLBACK_EPOCH ORDER BY authority_seq; SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 3;" --json > /tmp/d1-before.json
+          cd ..
+          python3 - <<'PY'
+          import json,os
+          x=json.load(open('/tmp/d1-before.json')); text=json.dumps(x)
+          assert 'SERVICE_PRIMARY' in text, text[:1000]
+          assert os.environ['SERVICE_GENERATION'] in text, text[:1000]
+          assert 'LOCKED' not in text, 'reconciliation lock active'
+          print('Fresh direct-D1 precheck PASS.')
+          PY
+
+      - name: Deploy Service and Web only
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,os
+          p=pathlib.Path('wrangler.jsonc')
+          pathlib.Path('wrangler.session2.deploy.jsonc').write_text(p.read_text().replace('__M1_D1_DATABASE_ID__',os.environ['D1_DATABASE_ID']))
+          PY
+          npx wrangler d1 migrations apply pick-pack-1291-service-prod --remote --config wrangler.session2.deploy.jsonc
+          npx wrangler deploy --config wrangler.session2.deploy.jsonc
+          rm -f wrangler.session2.deploy.jsonc
+
+      - name: Verify deployed product without authority transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            curl -fsSL "$SERVICE_URL/health" > /tmp/service-after.json && \
+            jq -e --arg g "$SERVICE_GENERATION" --argjson e "$SERVICE_EPOCH" '.ok==true and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.authority_epoch==$e' /tmp/service-after.json >/dev/null && break
+            sleep 3
+          done
+          jq -e --argjson s "$SERVICE_SEQ" '.authority.authority_seq >= $s' /tmp/service-after.json >/dev/null
+          curl -fsSL "$SERVICE_URL/v1/capabilities" | jq -e '.ok==true and .business_window==7 and .mutation_batch==true and .fcm_wake==true and .import_engine==true and .realtime_protocol=="INVALIDATION_V1"' >/dev/null
+          curl -fsSL "$SERVICE_URL/" > /tmp/web-index.html
+          curl -fsSL "$SERVICE_URL/app.js" > /tmp/web-app.js
+          grep -q 'Dashboard' /tmp/web-index.html
+          grep -q 'Import dữ liệu' /tmp/web-index.html
+          grep -q 'DAY_CHANGED' /tmp/web-app.js
+          grep -q 'MASTER_CHANGED' /tmp/web-app.js
+          grep -q 'INVALIDATION_V1' /tmp/web-app.js
+          CODE=$(curl -sS -o /tmp/import-auth.json -w '%{http_code}' "$SERVICE_URL/v1/import/template?dataset=employees")
+          [[ "$CODE" == 401 ]]
+          echo 'Web/Service deployed; authority unchanged.'
+
+      - name: Re-read fallback bind after deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' > /tmp/gas-after.json
+          jq -e --argjson e "$FALLBACK_EPOCH" --arg g "$SERVICE_GENERATION" '.ok==true and .authority_mode=="GOOGLE_FALLBACK" and .authority_epoch==$e and .service_generation==$g' /tmp/gas-after.json >/dev/null
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token')
+          ENC_RANGE=$(python3 - <<'PY'
+          import urllib.parse, os
+          print(urllib.parse.quote(os.environ['FALLBACK_RANGE'], safe=''))
+          PY
+          )
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$PROD_SHEET_ID/values/$ENC_RANGE?majorDimension=ROWS" > /tmp/fallback-after-raw.json
+          python3 - <<'PY'
+          import json,os,hashlib
+          raw=json.load(open('/tmp/fallback-after-raw.json')).get('values',[]); h=raw[0]; idx={x:i for i,x in enumerate(h)}
+          epoch=int(os.environ['FALLBACK_EPOCH']); gen=os.environ['SERVICE_GENERATION']; rows=[]
+          for r in raw[1:]:
+            def g(k): return str(r[idx[k]]) if idx[k]<len(r) else ''
+            if g('authority_epoch')==str(epoch) and g('service_generation')==gen:
+              rows.append({'seq':int(g('authority_seq')),'event_id':g('event_id'),'action':g('action'),'status':g('status')})
+          rows.sort(key=lambda x:x['seq']); safe=json.dumps(rows,separators=(',',':'),sort_keys=True); digest=hashlib.sha256(safe.encode()).hexdigest()
+          assert digest==os.environ['FALLBACK_BIND_SHA256'], (digest,os.environ['FALLBACK_BIND_SHA256'])
+          assert len(rows)==int(os.environ['FALLBACK_BIND_COUNT']) and rows[-1]['seq']==int(os.environ['FALLBACK_BIND_MAX_SEQ'])
+          print('Fallback bind unchanged through deploy.')
+          PY
+
+      - name: Deployment verdict
+        run: |
+          echo 'PASS - Session2 Service/Web product deploy completed.'
+          echo 'No authority transition, failback, Stable publish, signer change, Sheet overwrite, or PR merge was performed.'

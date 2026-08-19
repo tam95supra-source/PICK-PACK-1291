@@ -1,0 +1,62 @@
+name: Session3 Beta26 GAS OTA Finalize
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-beta26-gas-ota-finalize-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session3-beta26-gas-ota-finalize
+  cancel-in-progress: false
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  EXPECTED_VERSION: 0.4.2-beta.26
+  EXPECTED_SHA: 947b0cf28fe51a3cc1a4a310b8e35711426336788b3f6885980ac5e3a1d2a19e
+  EXPECTED_SIZE: '12810579'
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Service and GAS authority gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=AUTHORITY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" >/tmp/h.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node -e 'const h=require("/tmp/h.json"),g=require("/tmp/g.json"),a=h.authority||{},ga=g.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)throw Error("AUTHORITY_GATE")'
+          echo authority=PASS >> "$OUT"
+      - name: Activate Beta26 OTA through GAS and verify public bytes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; PHASE=OTA; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.25"}' >/tmp/ota.json
+          jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and .available==true and .version_name==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and (.apk_url|length)>20' /tmp/ota.json >/dev/null
+          URL=$(jq -r '.apk_url' /tmp/ota.json)
+          curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/public.apk
+          [[ "$(stat -c%s /tmp/public.apk)" == "$EXPECTED_SIZE" ]]
+          [[ "$(sha256sum /tmp/public.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          echo ota_discovery=PASS >> "$OUT"; echo public_download=PASS >> "$OUT"; echo "apk_size=$EXPECTED_SIZE" >> "$OUT"; echo "apk_sha256=$EXPECTED_SHA" >> "$OUT"
+      - name: Final authority proof
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; PHASE=FINAL; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json
+          node -e 'const h=require("/tmp/h2.json"),g=require("/tmp/g2.json"),a=h.authority||{},ga=g.authority||{};if(a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)process.exit(1)'
+          echo final_authority=SERVICE_PRIMARY_8 >> "$OUT"; echo replication=HEALTHY_0 >> "$OUT"; echo stable=UNTOUCHED_BY_WORKFLOW >> "$OUT"; echo merge_pr38=UNTOUCHED >> "$OUT"; echo verdict=PASS >> "$OUT"
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          if ! grep -q '^verdict=' /tmp/r; then echo stable=UNTOUCHED_BY_WORKFLOW >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; fi
+          cp /tmp/r /tmp/rcopy; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/rcopy ops/session3-beta26-gas-ota-finalize-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-beta26-gas-ota-finalize-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta26 GAS OTA finalize'; git push origin HEAD:agent/service-migration-m2

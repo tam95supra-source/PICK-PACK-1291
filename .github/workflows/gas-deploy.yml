@@ -3,11 +3,7 @@ name: Deploy Current GAS
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-    paths:
-      - 'ops/gas-deploy-trigger.txt'
-  pull_request:
-    branches: [ main ]
+    branches: [agent/service-migration-m2]
     paths:
       - 'ops/gas-deploy-trigger.txt'
 
@@ -46,40 +42,24 @@ jobs:
           grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
           grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
           ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
+          grep -q "function ppM2Discovery_" google-apps-script/SERVICE_MIGRATION_M2.gs
+          grep -q "function ppM2StateSnapshot_" google-apps-script/SERVICE_MIGRATION_M2.gs
           python3 -m py_compile tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s13_shared_history_gas_patch.py tools/apply_s15_local_first_gas_patch.py tools/apply_s17_sqlite_recovery_gas_patch.py
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
           node --check /tmp/PICK_PACK_API.js
+          node --check /tmp/SERVICE_MIGRATION_M2.js
           echo 'Current GAS source gates: PASS'
 
       - name: Apply S12 report, S13 history, S15 local-first and S17 recovery transforms
         shell: bash
         run: |
           set -euo pipefail
-          if grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S12 report transform already present; skip.'
-          else
-            python3 tools/apply_s12_gas_patch.py
-          fi
-          if grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S12 health marker already present; skip.'
-          else
-            python3 tools/apply_s12_gas_health_patch.py
-          fi
-          if grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S13 shared history transform already present; skip.'
-          else
-            python3 tools/apply_s13_shared_history_gas_patch.py
-          fi
-          if grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S15 local-first transform already present; skip.'
-          else
-            python3 tools/apply_s15_local_first_gas_patch.py
-          fi
-          if grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S17 SQLite recovery transform already present; skip.'
-          else
-            python3 tools/apply_s17_sqlite_recovery_gas_patch.py
-          fi
+          if grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs; then echo 'S12 report transform already present; skip.'; else python3 tools/apply_s12_gas_patch.py; fi
+          if grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs; then echo 'S12 health marker already present; skip.'; else python3 tools/apply_s12_gas_health_patch.py; fi
+          if grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then echo 'S13 shared history transform already present; skip.'; else python3 tools/apply_s13_shared_history_gas_patch.py; fi
+          if grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then echo 'S15 local-first transform already present; skip.'; else python3 tools/apply_s15_local_first_gas_patch.py; fi
+          if grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs; then echo 'S17 SQLite recovery transform already present; skip.'; else python3 tools/apply_s17_sqlite_recovery_gas_patch.py; fi
           grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
           grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
           grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
@@ -110,12 +90,7 @@ jobs:
           RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW"
           if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
-            -H 'Content-Type: application/x-www-form-urlencoded' \
-            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
-            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
-            --data-urlencode 'grant_type=refresh_token')
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
           [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
           echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
@@ -136,8 +111,7 @@ jobs:
           import json
           from pathlib import Path
           b=Path('google-apps-script'); files=[]
-          for p in sorted(b.glob('*.gs')):
-              files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
           files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
           Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
           PY
@@ -177,24 +151,28 @@ jobs:
           PY
           URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Verify live S17 recovery health, account reset route and OTA isolation
+      - name: Verify live recovery, discovery, account reset and OTA isolation
         shell: bash
         env:
           WEB_URL: ${{ steps.webapp.outputs.url }}
         run: |
           set -euo pipefail
-          OK=false
-          for i in $(seq 1 15); do
-            curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"health"}' > /tmp/h.json || true
-            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json && grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/h.json && grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/h.json && grep -q '"sync_engine":"S15_LOCAL_FIRST_45D"' /tmp/h.json && grep -q '"retention_days":45' /tmp/h.json && grep -q '"editable_days":2' /tmp/h.json && grep -q '"recovery_engine":"S17_SQLITE_RECOVERY"' /tmp/h.json; then OK=true; break; fi
-            sleep 4
-          done
-          [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' > /tmp/reset.json
-          grep -q '"ok":true' /tmp/reset.json
-          grep -q '"delivery":"ACCOUNT_EMAIL"' /tmp/reset.json
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta.json
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta.json; grep -q '"channel":"BETA"' /tmp/beta.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable.json; grep -q '"channel":"STABLE"' /tmp/stable.json
-          echo 'Live S17 recovery health + reset route + OTA channel isolation: PASS'
+          post_until(){
+            local payload="$1" outfile="$2" predicate="$3" attempts="${4:-8}"
+            : >"$outfile"
+            for i in $(seq 1 "$attempts"); do
+              : >"$outfile"
+              curl -sSL --max-time 25 -H 'content-type: application/json' "$WEB_URL" -d "$payload" >"$outfile" || true
+              if node -e "$predicate" "$outfile" 2>/dev/null; then return 0; fi
+              sleep 3
+            done
+            echo "POSTVERIFY_FAILED payload_action=$(node -e 'try{process.stdout.write(JSON.parse(process.argv[1]).action||"unknown")}catch{process.stdout.write("unknown")}' "$payload")"
+            cat "$outfile"
+            return 1
+          }
+          post_until '{"action":"health"}' /tmp/h.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.sheet_read===true&&j.auth_session_model==="SINGLE_ACTIVE_DEVICE_V1"&&j.report_engine==="S12_CURRENT_DAY"&&j.history_engine==="S13_SHARED_SESSION"&&j.sync_engine==="S15_LOCAL_FIRST_45D"&&Number(j.retention_days)===45&&Number(j.editable_days)===2&&j.recovery_engine==="S17_SQLITE_RECOVERY"?0:1)' 15
+          post_until '{"action":"service_discovery"}' /tmp/discovery.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&Number(j.discovery_version)>=2&&j.service_generation&&j.authority&&j.authority.mode?0:1)' 8
+          post_until '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' /tmp/reset.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.delivery==="ACCOUNT_EMAIL"?0:1)' 8
+          post_until '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' /tmp/beta.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="BETA"?0:1)' 8
+          post_until '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' /tmp/stable.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="STABLE"&&j.available===false?0:1)' 8
+          echo 'Live recovery + discovery + reset route + OTA channel isolation: PASS'

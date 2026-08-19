@@ -1,0 +1,11 @@
+checked_at=2026-08-19T11:36:48Z
+head_sha=4f5f129ff6a83bccbf1353f454699be2fcb54244
+deploy_bindings=READY
+release_bindings=MISSING:FIREBASE_PROJECT_ID,FIREBASE_GOOGLE_APP_ID,FIREBASE_API_KEY,FIREBASE_GCM_SENDER_ID
+service_health=PASS
+service_authority=SERVICE_PRIMARY epoch=6 seq=4
+gas_authority=GOOGLE_FALLBACK epoch=7 seq=4
+capabilities=PASS
+web_product=FAIL
+beta23_drive=ABSENT
+stable_drive=NONEMPTY
