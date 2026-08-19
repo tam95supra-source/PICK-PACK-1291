@@ -1,0 +1,11 @@
+checked_at=2026-08-19T12:54:59Z
+head_sha=ba5264544ab53dce29e1932463a3ff05932a6846
+config=PASS
+build=PASS
+sign=PASS
+apk_size=12810579
+apk_sha256=9bd1e3ab1835497bce6dfdf6fce27e34d58ab98812253d8d92c4ce5a84ea9ac4
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9366044219
+artifact_name=beta24-release-candidate
+verdict=PASS
