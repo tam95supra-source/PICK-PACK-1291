@@ -22,3 +22,5 @@ print('Applied S31B: preserved canonical admin audit after strict Service-first 
 
 # S31 generated a compressed bridge during migration; S31D owns the final compile-safe bridge.
 runpy.run_path(str(ROOT/'tools/apply_s31d_runtime_bridge_compile_fix.py'),run_name='__main__')
+# S32 must run last because it patches the final generated S29/S31 Android sources.
+runpy.run_path(str(ROOT/'tools/apply_s32_local_history_flush_fix.py'),run_name='__main__')
