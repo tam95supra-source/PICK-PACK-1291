@@ -1,6 +1,6 @@
 patch_exit=0
 install_exit=0
-check_exit=2
+check_exit=0
 --- patch ---
 S28D compatibility resume now uses exact reflected-enter reconciliation
 --- check ---
@@ -64,4 +64,3 @@ https://developers.cloudflare.com/workers/languages/typescript/#generate-types
 > typecheck
 > tsc --noEmit
 
-src/admin_audit.ts(27,151): error TS2345: Argument of type '"AUTHORITY"' is not assignable to parameter of type '"VALIDATION" | "AUTH" | "PERMISSION" | "CONFLICT" | "RESOURCE" | "TRANSIENT" | "INTEGRITY" | "SCHEMA" | "INTERNAL"'.
