@@ -26,21 +26,64 @@ jobs:
       - name: Read production D1 safe state
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           OUT=/tmp/session2-d1-gate-diagnostic-result.txt
           : > "$OUT"
           echo "checked_at=$(date -u +%FT%TZ)" >> "$OUT"
           echo "head_sha=$GITHUB_SHA" >> "$OUT"
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [[ -n "${!v:-}" ]] || { echo "d1_bindings=MISSING:$v" >> "$OUT"; exit 10; }; done
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [[ -z "${!v:-}" ]]; then echo "d1_bindings=MISSING:$v" >> "$OUT"; exit 10; fi
+          done
           echo "d1_bindings=READY" >> "$OUT"
-          cd service
-          npm install --no-audit --no-fund >/dev/null
-          npx wrangler d1 list --json > /tmp/d1-list.json
-          D1_ID=$(node -e "const r=require('/tmp/d1-list.json');const x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
-          [[ -n "$D1_ID" ]]
-          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.env.D1_ID||'$D1_ID';delete c.secrets;fs.writeFileSync('/tmp/wrangler-session2-diag.jsonc',JSON.stringify(c,null,2))"
-          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-session2-diag.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT meta_value AS reconciling FROM system_meta WHERE meta_key='m2_reconciling'; SELECT authority_epoch,authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq; SELECT recovery_type,status,source_authority_epoch,target_authority_epoch FROM recovery_runs ORDER BY started_at DESC LIMIT 5; SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1; SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 5;" --json > /tmp/d1-safe.json
+
+          HTTP=$(curl -sS -o /tmp/cf-d1-list.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" \
+            --data-urlencode 'name=pick-pack-1291-service-prod' \
+            --data-urlencode 'per_page=100')
+          echo "cf_d1_list_http=$HTTP" >> "$OUT"
+          CF_SUCCESS=$(jq -r '.success // false' /tmp/cf-d1-list.json 2>/dev/null || echo false)
+          echo "cf_d1_list_success=$CF_SUCCESS" >> "$OUT"
+          CF_ERR=$(jq -r '[.errors[]?.code]|join(",")' /tmp/cf-d1-list.json 2>/dev/null || true)
+          [[ -n "$CF_ERR" ]] && echo "cf_error_codes=$CF_ERR" >> "$OUT"
+          CF_COUNT=$(jq -r '(.result // [])|length' /tmp/cf-d1-list.json 2>/dev/null || echo 0)
+          echo "cf_prod_name_matches=$CF_COUNT" >> "$OUT"
+          if [[ "$HTTP" != 200 || "$CF_SUCCESS" != true || "$CF_COUNT" -lt 1 ]]; then exit 11; fi
+          D1_ID=$(jq -r '.result[]|select(.name=="pick-pack-1291-service-prod")|(.uuid // .id // empty)' /tmp/cf-d1-list.json | head -1)
+          [[ -n "$D1_ID" ]] || exit 12
+          echo "cf_prod_d1_resolved=YES" >> "$OUT"
+
+          cd service || exit 13
+          npm install --no-audit --no-fund >/dev/null 2>/tmp/npm-install.err
+          NPM_RC=$?
+          echo "npm_install_rc=$NPM_RC" >> "$OUT"
+          [[ $NPM_RC -eq 0 ]] || exit 14
+
+          npx wrangler d1 list --json >/tmp/wrangler-d1-list.json 2>/tmp/wrangler-d1-list.err
+          WR_RC=$?
+          echo "wrangler_d1_list_rc=$WR_RC" >> "$OUT"
+          if [[ $WR_RC -eq 0 ]]; then
+            WR_COUNT=$(jq -r '[.[]|select(.name=="pick-pack-1291-service-prod")]|length' /tmp/wrangler-d1-list.json 2>/dev/null || echo 0)
+            echo "wrangler_prod_name_matches=$WR_COUNT" >> "$OUT"
+          else
+            exit 15
+          fi
+
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/wrangler-session2-diag.jsonc',JSON.stringify(c,null,2))" "$D1_ID"
+          CFG_RC=$?
+          echo "prod_config_rc=$CFG_RC" >> "$OUT"
+          [[ $CFG_RC -eq 0 ]] || exit 16
+
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-session2-diag.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT meta_value AS reconciling FROM system_meta WHERE meta_key='m2_reconciling'; SELECT authority_epoch,authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq; SELECT recovery_type,status,source_authority_epoch,target_authority_epoch FROM recovery_runs ORDER BY started_at DESC LIMIT 5; SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1; SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 5;" --json >/tmp/d1-safe.json 2>/tmp/d1-execute.err
+          EX_RC=$?
+          echo "d1_safe_execute_rc=$EX_RC" >> "$OUT"
+          [[ $EX_RC -eq 0 ]] || exit 17
+
           node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/d1-safe.json','utf8'));const sets=[];for(const b of x){if(Array.isArray(b.results))sets.push(b.results)};const out=[];const a=sets[0]?.[0]||{};out.push('authority='+[a.mode,a.authority_epoch,a.authority_seq,a.scope,a.service_generation].join('|'));out.push('reconciling='+(sets[1]?.[0]?.reconciling??'MISSING'));const inbox=sets[2]||[];out.push('epoch7_inbox_count='+inbox.length);out.push('epoch7_inbox='+inbox.map(r=>r.authority_seq+':'+r.ingest_status).join(','));const rr=sets[3]||[];out.push('recovery_recent='+rr.map(r=>[r.recovery_type,r.status,r.source_authority_epoch,r.target_authority_epoch].join(':')).join(','));const rep=sets[4]?.[0]||{};out.push('replication='+[rep.state,rep.pending_count,rep.retry_count,rep.last_error_class||''].join('|'));out.push('migrations='+(sets[5]||[]).map(r=>r.version).join(','));fs.appendFileSync('/tmp/session2-d1-gate-diagnostic-result.txt',out.join('\n')+'\n')"
+          PARSE_RC=$?
+          echo "safe_parse_rc=$PARSE_RC" >> "$OUT"
+          [[ $PARSE_RC -eq 0 ]] || exit 18
+          echo "verdict=PASS" >> "$OUT"
           cat "$OUT"
       - name: Commit sanitized result
         if: always()
