@@ -1,0 +1,2 @@
+checked_at=2026-08-19T14:24:46Z
+verdict=FAILED_OR_STOPPED
