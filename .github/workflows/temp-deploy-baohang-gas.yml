@@ -1,0 +1,54 @@
+name: Temp deploy Bao Hang GAS
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/temp-deploy-baohang-gas.yml']
+permissions:
+  contents: write
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Discover and deploy exact Bao Hang worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/bhgas"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 https://raw.githubusercontent.com/tam95supra-source/bao-hang-1291/main/google-apps-script/DEPLOY_NEON.gs -o "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs"
+          grep -F "const BH_PROJECT = 'bao-hang-1291';" "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs" >/dev/null
+          grep -F "const BH_STAFF_SHEET_ID = '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78';" "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs" >/dev/null
+          cp "$RUNNER_TEMP/bhgas/DEPLOY_NEON.gs" "$RUNNER_TEMP/bhgas/DEPLOY_NEON.js"; node --check "$RUNNER_TEMP/bhgas/DEPLOY_NEON.js"
+          node <<'NODE'
+          const fs=require('fs'); const dir=process.env.RUNNER_TEMP+'/bhgas'; const out=[]; const put=(k,v)=>out.push(`${k}=${v}`); const save=()=>fs.writeFileSync(dir+'/status.txt',out.join('\n')+'\n');
+          async function q(url,opt={}){const r=await fetch(url,opt),t=await r.text();let j={};try{j=t?JSON.parse(t):{}}catch{j={raw:t}};if(!r.ok){const e=new Error(`HTTP_${r.status}:${String(j?.error?.message||j?.error||j?.raw||'').slice(0,160)}`);e.status=r.status;throw e}return j}
+          (async()=>{
+            if(!process.env.GOOGLE_OAUTH_CLIENT_ID||!process.env.GOOGLE_OAUTH_CLIENT_SECRET||!process.env.GOOGLE_OAUTH_REFRESH_TOKEN){put('oauth','FAIL_MISSING');save();return}
+            const tr=await q('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:process.env.GOOGLE_OAUTH_CLIENT_ID,client_secret:process.env.GOOGLE_OAUTH_CLIENT_SECRET,refresh_token:process.env.GOOGLE_OAUTH_REFRESH_TOKEN,grant_type:'refresh_token'})}); const a=tr.access_token; put('oauth','PASS'); const H={Authorization:`Bearer ${a}`};
+            let dr; try{dr=await q("https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent("mimeType='application/vnd.google-apps.script' and trashed=false")+"&pageSize=100&fields=files(id,name)",{headers:H})}catch(e){put('drive_discovery',`FAIL_${e.status||'ERR'}`);save();return}
+            put('drive_discovery','PASS'); put('drive_candidates',String((dr.files||[]).length)); let target,current;
+            for(const f of dr.files||[]){try{const c=await q(`https://script.googleapis.com/v1/projects/${encodeURIComponent(f.id)}/content`,{headers:H});const src=(c.files||[]).map(x=>String(x.source||'')).join('\n');if(src.includes("const BH_PROJECT = 'bao-hang-1291'")&&src.includes("const BH_NEON_PROJECT = 'tiny-boat-19315489'")){target=f;current=c;break}}catch{}}
+            if(!target){put('script_discovery','FAIL_NOT_FOUND');save();return} put('script_discovery','PASS');
+            const ds=await q(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/deployments`,{headers:H}); let live;
+            for(const d of ds.deployments||[]){for(const ep of d.entryPoints||[]){const u=ep?.webApp?.url;if(!u)continue;try{const p=await q(u,{method:'POST',headers:{'content-type':'text/plain;charset=UTF-8'},body:JSON.stringify({action:'ping'})});if(p.ok===true&&p.project==='bao-hang-1291'&&p.provider==='NEON_FIREBASE_GOOGLE'){live={d,u};break}}catch{}}if(live)break}
+            if(!live){put('deployment_discovery','FAIL_NOT_FOUND');save();return} put('deployment_discovery','PASS');
+            const src=fs.readFileSync(dir+'/DEPLOY_NEON.gs','utf8'), files=current.files||[]; let code=files.find(x=>x.type==='SERVER_JS'&&String(x.source||'').includes("const BH_PROJECT = 'bao-hang-1291'"))||files.find(x=>x.type==='SERVER_JS'&&String(x.source||'').includes('function doPost')); if(!code){put('source_update','FAIL_NO_CODE');save();return} code.source=src;
+            await q(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/content`,{method:'PUT',headers:{...H,'content-type':'application/json'},body:JSON.stringify({files})}); put('source_update','PASS');
+            const v=await q(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/versions`,{method:'POST',headers:{...H,'content-type':'application/json'},body:JSON.stringify({description:'Bao Hang 1291 staff source update'})});
+            await q(`https://script.googleapis.com/v1/projects/${encodeURIComponent(target.id)}/deployments/${encodeURIComponent(live.d.deploymentId)}`,{method:'PUT',headers:{...H,'content-type':'application/json'},body:JSON.stringify({deploymentConfig:{scriptId:target.id,versionNumber:Number(v.versionNumber),manifestFileName:'appsscript',description:'Bao Hang 1291 production'}})}); put('deployment_update','PASS');
+            let ok=false; for(let i=0;i<15;i++){try{const p=await q(live.u,{method:'POST',headers:{'content-type':'text/plain;charset=UTF-8'},body:JSON.stringify({action:'ping'})});if(p.ok===true&&p.project==='bao-hang-1291'&&p.staff_sheet_id==='1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'&&p.staff_sheet_name==='DANH SÁCH NHÂN SỰ'){ok=true;break}}catch{} await new Promise(r=>setTimeout(r,4000))} put('live_staff_source',ok?'PASS':'FAIL'); put('version',String(v.versionNumber||'')); save();
+          })().catch(e=>{put('fatal',String(e.message).replace(/[\r\n]+/g,' ').slice(0,200));save()});
+          NODE
+      - name: Record sanitized result
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops; cp "$RUNNER_TEMP/bhgas/status.txt" ops/temp-baohang-gas-deploy-status.txt; cat ops/temp-baohang-gas-deploy-status.txt
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/temp-baohang-gas-deploy-status.txt; git diff --cached --quiet || git commit -m 'chore(temp): record Bao Hang GAS deployment result'; git pull --rebase origin main; git push origin HEAD:main
