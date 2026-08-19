@@ -1,2 +1,8 @@
 oauth=PASS
-drive_discovery=FAIL_403
+has_script_projects=YES
+has_script_deployments=YES
+has_drive=NO
+scope_count=3
+drive_http=403
+drive_reason=insufficientPermissions
+drive_message_class=Request had insufficient authentication scopes.
