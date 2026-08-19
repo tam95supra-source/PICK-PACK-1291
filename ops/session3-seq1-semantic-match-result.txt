@@ -1,0 +1,12 @@
+checked_at=2026-08-19T15:12:07.744Z
+state=ACTIVE
+version=1
+shift_match=1
+work_match=0
+pda_match=1
+user_pick_match=1
+pack_table_match=1
+user_pack_match=1
+semantic_match=NO
+payload_logged=NO
+verdict=DIAGNOSTIC_COMPLETE
