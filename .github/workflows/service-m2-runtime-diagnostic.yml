@@ -51,6 +51,7 @@ jobs:
           npm install --no-audit --no-fund
           npm run check
           grep -q 'FAILBACK_PACK_USER_AMBIGUOUS' src/recovery_resume_compat.ts
+          grep -q 'FAILBACK_LABOR_SHIFT_MISSING' src/recovery_resume_compat.ts
           grep -q 'resumeFailbackWithLegacyCompat' src/entry_recovery_hotfix.ts
       - name: Derive existing production secrets
         shell: bash
@@ -64,7 +65,7 @@ jobs:
           echo "GAS_BRIDGE_SHARED_SECRET=$BRIDGE" >> "$GITHUB_ENV"
           echo "SERVICE_TOKEN_SECRET=$SERVICE" >> "$GITHUB_ENV"
           echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
-      - name: Require exact fenced recovery state before mutation
+      - name: Require resumable fenced recovery state before mutation
         shell: bash
         run: |
           set -euo pipefail
@@ -73,7 +74,8 @@ jobs:
           S_MODE=$(jq -r '.authority.mode' /tmp/service-before.json); S_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-before.json); S_SEQ=$(jq -r '.authority.authority_seq' /tmp/service-before.json)
           G_MODE=$(jq -r '.authority_mode' /tmp/gas-before.json); G_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/gas-before.json); G_SEQ=$(jq -r '.authority.authority_seq' /tmp/gas-before.json)
           echo "SERVICE=$S_MODE/$S_EPOCH/$S_SEQ GAS=$G_MODE/$G_EPOCH/$G_SEQ"
-          [[ "$S_MODE" == RECONCILING && "$S_EPOCH" == 3 && "$S_SEQ" == 0 ]]
+          [[ "$S_MODE" == RECONCILING && "$S_EPOCH" == 3 ]]
+          [[ "$S_SEQ" =~ ^[0-4]$ ]]
           [[ "$G_MODE" == RECONCILING && "$G_EPOCH" == 3 && "$G_SEQ" == 4 ]]
       - name: Build code-only config for existing production Worker
         working-directory: service
@@ -122,12 +124,12 @@ jobs:
           curl -fsS -H "x-gas-bridge-secret: $GAS_BRIDGE_SHARED_SECRET" "$SERVICE_URL/internal/gas-bridge-probe" >/tmp/bridge.json
           grep -q '"ok":true' /tmp/bridge.json
           grep -q '"mode":"RECONCILING"' /tmp/bridge.json
-      - name: Resume all four epoch3 fallback events
+      - name: Resume remaining epoch3 fallback events from verified prefix
         shell: bash
         run: |
           set -euo pipefail
           cat >/tmp/resume.json <<'JSON'
-          {"fallback_epoch":3,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"S13_DETERMINISTIC_PACK_RECOVERY"}
+          {"fallback_epoch":3,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"S13_DETERMINISTIC_PACK_LABOR_RECOVERY"}
           JSON
           CODE=$(curl -sS -o /tmp/resume.out -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $M2_ADMIN_TOKEN" --data-binary @/tmp/resume.json "$SERVICE_URL/internal/recovery/failback-resume")
           rm -f /tmp/resume.json
@@ -135,6 +137,7 @@ jobs:
           [[ "$CODE" == 200 ]]
           grep -q '"ok":true' /tmp/resume.out
           grep -q '"legacy_pack_compat":true' /tmp/resume.out
+          grep -q '"legacy_labor_shift_compat":true' /tmp/resume.out
           grep -q '"applied":4' /tmp/resume.out
           grep -q '"final_epoch":4' /tmp/resume.out
       - name: Complete GAS failback on exact epoch4
