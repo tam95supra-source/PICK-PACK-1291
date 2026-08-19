@@ -30,6 +30,7 @@ def query(sql):
 checks={
  'AUTHORITY':"SELECT authority_epoch,authority_seq,mode,service_generation,updated_at FROM authority_state WHERE singleton_id=1",
  'LOCK':"SELECT key,value,updated_at FROM system_meta WHERE key='m2_reconciling'",
+ 'BUSINESS_DATES':"SELECT business_date,sequence_no,source FROM business_dates ORDER BY sequence_no DESC LIMIT 5",
  'RECOVERY':"SELECT recovery_id,status,error,source_authority_epoch,source_authority_seq,target_authority_epoch,validation_json,started_at,completed_at FROM recovery_runs WHERE recovery_type='FAILBACK' ORDER BY started_at DESC LIMIT 5",
  'INBOX':"SELECT event_id,authority_epoch,authority_seq,ingest_status,last_error FROM fallback_event_inbox WHERE authority_epoch=3 ORDER BY authority_seq",
  'EVENTS':"SELECT event_id,event_type,authority_epoch,authority_seq,business_date FROM events WHERE authority_epoch=3 ORDER BY authority_seq",
