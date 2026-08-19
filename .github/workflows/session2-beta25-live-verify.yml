@@ -1,0 +1,72 @@
+name: Session2 Beta25 Live Verify
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta25-live-verify-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      EXPECTED_SHA: 5ba70c6ed1c377c41a72f5f1bfe71b8accad6231a147c044614e66a585690aed
+      EXPECTED_SIZE: '12810579'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Beta25 OTA and current production surface
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-beta25-live-verify-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          PHASE=SERVICE; trap 'rc=$?;echo "failed_phase=$PHASE" >> "$OUT";echo "failed_rc=$rc" >> "$OUT";exit $rc' ERR
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" >/tmp/service.json
+          jq -e '.ok==true and .environment=="production" and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/service.json >/dev/null
+          echo "service_authority=$(jq -r '[.authority.mode,.authority.authority_epoch,.authority.authority_seq,.authority.scope,.generation]|join("|")' /tmp/service.json)" >> "$OUT"
+          PHASE=WEB
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/" >/tmp/index.html
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/styles.css" >/tmp/styles.css
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/app.js" >/tmp/app.js
+          grep -q 'Import dữ liệu' /tmp/index.html
+          grep -q '.login-wrap\[hidden\].*display:none!important' /tmp/styles.css
+          grep -q "client_source:'WEB'" /tmp/app.js
+          echo web_live=PASS >> "$OUT"
+          PHASE=GAS
+          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gas.json
+          python3 - <<'PY' >> "$OUT"
+          import json
+          j=json.load(open('/tmp/gas.json')); a=j.get('authority') or {}
+          print('gas_authority=%s|%s|%s|%s'%(j.get('authority_mode') or a.get('mode',''),a.get('authority_epoch',0),a.get('authority_seq',0),j.get('service_generation') or a.get('service_generation','')))
+          assert j.get('ok') is True
+          PY
+          PHASE=BETA_OTA
+          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.24"}' >/tmp/beta.json
+          jq -e --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and .available==true and .version_name=="0.4.2-beta.25" and (.sha256|ascii_downcase)==$s and (.size|tostring)==$z and (.apk_url|length)>20' /tmp/beta.json >/dev/null
+          URL=$(jq -r '.apk_url' /tmp/beta.json)
+          curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/beta25.apk
+          [[ "$(stat -c%s /tmp/beta25.apk)" == "$EXPECTED_SIZE" ]]
+          [[ "$(sha256sum /tmp/beta25.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          echo beta_ota=0.4.2-beta.25 >> "$OUT"; echo beta_download=PASS >> "$OUT"
+          PHASE=STABLE
+          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' >/tmp/stable.json
+          jq -e '.ok==true and .available==false and .reason=="NO_APK"' /tmp/stable.json >/dev/null
+          echo stable_ota=EMPTY >> "$OUT"; echo verdict=PASS >> "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-beta25-live-verify-result.txt || echo result_missing=true >/tmp/session2-beta25-live-verify-result.txt
+          cp /tmp/session2-beta25-live-verify-result.txt /tmp/result.copy
+          git reset --hard HEAD >/dev/null
+          cp /tmp/result.copy ops/session2-beta25-live-verify-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-beta25-live-verify-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record Beta25 live verification'
+          git push
