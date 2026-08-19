@@ -1,0 +1,96 @@
+name: Session5 Beta28 GAS OTA Finalize
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session5-beta28-gas-ota-finalize-trigger.txt]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: session5-beta28-gas-ota-finalize
+  cancel-in-progress: false
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  EXPECTED_VERSION: 0.4.2-beta.28
+  EXPECTED_SHA: a40a977dcb2c6b77ba549797ca511ee990bf74b4507939c23779e95e1f999a21
+  EXPECTED_SIZE: '12826963'
+  EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Live Service and GAS authority gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=AUTHORITY
+          trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" >/tmp/h.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node - <<'NODE'
+          const fs=require('fs'),h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{},o='/tmp/r';
+          const val=(x)=>String(x??'').replace(/[\r\n|]/g,' ').slice(0,120);
+          const se=Number(a.authority_epoch), ge=Number(g.authority_epoch??ga.authority_epoch);
+          fs.appendFileSync(o,`service_probe=${val(a.mode)}|${se}|${val(a.authority_seq)}|${val(a.scope)}|rep=${val(h.replication?.state)}:${val(h.replication?.pending_count)}\n`);
+          fs.appendFileSync(o,`gas_probe=ok:${val(g.ok)}|top:${val(g.authority_mode)}:${ge}|nested:${val(ga.mode)}:${val(ga.authority_epoch)}|err:${val(g.error?.code||g.error)}\n`);
+          if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||!Number.isInteger(se)||se<8||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0)throw Error("SERVICE_AUTHORITY_GATE");
+          if(!g.ok||g.authority_mode!=="SERVICE_PRIMARY"||!Number.isInteger(ge)||ge!==se)throw Error("GAS_AUTHORITY_GATE");
+          fs.appendFileSync(o,`authority_epoch=${se}\nauthority=PASS\nreplication=HEALTHY_0\n`);
+          NODE
+      - name: Activate Beta28 OTA and verify public bytes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; PHASE=OTA; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.27"}' >/tmp/ota.json
+          jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and (.available==true or .update_available==true) and (.version_name // .version)==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and ((.apk_url // .download_url // .url)|length)>20' /tmp/ota.json >/dev/null
+          URL=$(jq -r '.apk_url // .download_url // .url' /tmp/ota.json)
+          curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/public.apk
+          [[ "$(stat -c%s /tmp/public.apk)" == "$EXPECTED_SIZE" ]]
+          [[ "$(sha256sum /tmp/public.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          echo ota_discovery=PASS >> "$OUT"; echo public_download=PASS >> "$OUT"; echo "apk_size=$EXPECTED_SIZE" >> "$OUT"; echo "apk_sha256=$EXPECTED_SHA" >> "$OUT"
+      - name: Self-update and Stable isolation gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; PHASE=ISOLATION; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.28"}' >/tmp/self.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' >/tmp/stable.json
+          node - <<'NODE'
+          const fs=require('fs'),s=require('/tmp/self.json'),t=require('/tmp/stable.json'),o='/tmp/r';
+          const avail=(x)=>x.available??x.update_available;
+          const ver=(x)=>String(x.version_name??x.version??'');
+          if(s.ok!==true||avail(s)!==false||String(s.channel||'')!=="BETA")throw Error('SELF_UPDATE_GATE');
+          if(t.ok!==true||ver(t)==="0.4.2-beta.28")throw Error('STABLE_ISOLATION_GATE');
+          fs.appendFileSync(o,`self_update=PASS\nstable_ota_isolation=PASS\n`);
+          NODE
+      - name: Final authority and PR safety proof
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; PHASE=FINAL; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr.json
+          node - <<'NODE'
+          const fs=require('fs'),h=require('/tmp/h2.json'),g=require('/tmp/g2.json'),p=require('/tmp/pr.json'),a=h.authority||{},ga=g.authority||{},o='/tmp/r';
+          const se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);
+          if(a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||ge!==se)throw Error('FINAL_AUTHORITY');
+          if(p.state!=="open"||p.draft!==true||p.merged===true)throw Error('PR38_SAFETY');
+          fs.appendFileSync(o,`final_authority=SERVICE_PRIMARY_${se}\nreplication_final=HEALTHY_0\nstable=UNTOUCHED_BY_WORKFLOW\nmerge_pr38=UNTOUCHED_DRAFT_OPEN\nverdict=PASS\n`);
+          NODE
+      - name: Record sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          if ! grep -q '^verdict=' /tmp/r; then echo stable=UNTOUCHED_BY_WORKFLOW >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; fi
+          cp /tmp/r /tmp/rcopy; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/rcopy ops/session5-beta28-gas-ota-finalize-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session5-beta28-gas-ota-finalize-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta28 GAS OTA finalize'; git push origin HEAD:agent/service-migration-m2
