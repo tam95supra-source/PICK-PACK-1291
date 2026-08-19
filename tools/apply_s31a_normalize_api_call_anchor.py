@@ -11,17 +11,18 @@ if MARK not in s:
     m=pattern.search(s)
     if not m: raise SystemExit('S31A call method structural anchor missing')
     next_fun=s.find('\n    fun ',m.end())
-    search_end=next_fun if next_fun>=0 else min(len(s),m.end()+2000)
+    search_end=next_fun if next_fun>=0 else min(len(s),m.end()+3000)
     exec_pos=s.find('executor.execute {',m.end(),search_end)
     if exec_pos<0: raise SystemExit('S31A call executor structural anchor missing')
+    # Preserve any older tracking/guard statements that were inserted before the network executor.
+    # They belong to the network path, so move them intact just inside executor.execute. S31 then
+    # inserts the operational local-fast-path before this executor and returns without waiting.
     between=s[m.end():exec_pos]
-    if between.strip():
-        raise SystemExit('S31A unexpected executable content before call executor')
+    moved=between.rstrip(' \t')
     canonical='    fun call(action: String, payload: JSONObject = JSONObject(), callback: (Result) -> Unit) {\n        executor.execute {'
-    s=s[:m.start()]+canonical+s[exec_pos+len('executor.execute {'):]
-    # Marker is kept outside the exact two-line anchor required by S31.
+    s=s[:m.start()]+canonical+moved+s[exec_pos+len('executor.execute {'):]
     class_anchor='class BetaApiClient(context: Context) {\n'
     if class_anchor not in s: raise SystemExit('S31A class anchor missing')
     s=s.replace(class_anchor,class_anchor+'    // '+MARK+'\n',1)
     API.write_text(s,encoding='utf-8')
-print('Applied S31A: normalized transformed BetaApiClient.call anchor without changing behavior')
+print('Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor')
