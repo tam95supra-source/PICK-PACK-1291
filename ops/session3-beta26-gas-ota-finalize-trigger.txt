@@ -1,0 +1,8 @@
+requested_at=2026-08-20T00:27:00+07:00
+version_name=0.4.2-beta.26
+apk_drive_id=1qTD3QjThzXRK2FWsMmIM7bTYOYhDmhnx
+checksum_drive_id=1fFsaPuB75sDCLgw_rGRTyn5fG7DoPmK_
+apk_sha256=947b0cf28fe51a3cc1a4a310b8e35711426336788b3f6885980ac5e3a1d2a19e
+expected_authority=SERVICE_PRIMARY|8
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
