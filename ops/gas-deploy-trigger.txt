@@ -1,7 +1,7 @@
-deploy=2026-08-20-Beta27-restore-pick-pack-gas
-reason=live-service-discovery-auth-regression
+deploy=2026-08-20-Beta28-restore-pick-pack-gas
+reason=live-service-discovery-auth-regression-detected-by-beta28-final-gate
 scope=source-and-existing-deployment-no-authority-transition
-expected_service_authority=SERVICE_PRIMARY|8
-expected_replication=HEALTHY|0
+expected_service_authority=SERVICE_PRIMARY
+expected_replication=HEALTHY_AFTER_STALE_CLAIM_RECOVERY
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
