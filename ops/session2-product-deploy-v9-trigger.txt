@@ -1,5 +1,6 @@
 Session2 final production Web deploy V9
 requested_at=2026-08-19T19:31:00+07:00
+redeploy_fcm_one_secret_at=2026-08-19T19:58:00+07:00
 scope=service-code-and-web-assets
 no_failback=true
 no_stable=true
