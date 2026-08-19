@@ -28,6 +28,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=GATE; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          sanitize(){ sed -E 's/[A-Za-z0-9_=-]{35,}/[REDACTED]/g;s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/[EMAIL]/g' | tr '\n' ' ' | cut -c1-500; }
           curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
           node -e 'const h=require("/tmp/h0.json"),a=h.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION")throw Error("SERVICE_AUTHORITY_GATE")'
           echo service_gate=PASS >> "$OUT"
@@ -36,12 +37,17 @@ jobs:
           echo "::add-mask::$ADMIN"; echo "::add-mask::$BRIDGE"
           PHASE=REPLICATION
           for i in 1 2 3 4 5 6 7 8; do
-            curl -fsSL --max-time 90 -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" >/tmp/rep.json || true
+            curl -sS --max-time 90 -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" >/tmp/rep.json || true
             curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
             P=$(jq -r '.replication.pending_count//999' /tmp/h.json); S=$(jq -r '.replication.state//""' /tmp/h.json)
             [[ "$P" == 0 && "$S" == HEALTHY ]] && break
-            sleep 2
+            sleep 12
           done
+          echo "replication_state=$(jq -r '.replication.state//"BLANK"' /tmp/h.json)" >> "$OUT"
+          echo "replication_pending=$(jq -r '.replication.pending_count//999' /tmp/h.json)" >> "$OUT"
+          echo "replication_error_class=$(jq -r '.replication.last_error_class//"NONE"' /tmp/h.json)" >> "$OUT"
+          RE=$(jq -r '.error//""' /tmp/rep.json 2>/dev/null | sanitize || true); [[ -n "$RE" ]] && echo "replicate_response_error=$RE" >> "$OUT" || true
+          HE=$(jq -r '.replication.last_error//""' /tmp/h.json 2>/dev/null | sanitize || true); [[ -n "$HE" ]] && echo "replication_last_error=$HE" >> "$OUT" || true
           jq -e '.replication.state=="HEALTHY" and (.replication.pending_count|tonumber)==0' /tmp/h.json >/dev/null
           echo replication=HEALTHY_0 >> "$OUT"
           PHASE=GAS
