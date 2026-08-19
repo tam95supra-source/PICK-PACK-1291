@@ -1,11 +1,10 @@
 name: S13 Workers Dev Hostname Finalize
 
 on:
-  pull_request:
-    branches: [ main ]
+  push:
+    branches: [ agent/service-migration-m2 ]
     paths:
       - 'ops/s13-domain-finalize-trigger.txt'
-      - '.github/workflows/s13-domain-finalize.yml'
   workflow_dispatch:
 
 permissions:
@@ -53,11 +52,10 @@ jobs:
           done
           [[ "$OK" == true ]] || { echo 'GAS_CONTROL_ROUTE_NOT_PROPAGATED'; cat /tmp/probe.json; exit 1; }
           curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/before-discovery.json
-          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/before-discovery.json
-          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/before-discovery.json
+          if ! grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/before-discovery.json; then echo 'DISCOVERY_AUTHORITY_MISMATCH'; cat /tmp/before-discovery.json; exit 1; fi
+          if ! grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/before-discovery.json; then echo 'DISCOVERY_GENERATION_MISMATCH'; cat /tmp/before-discovery.json; exit 1; fi
 
       - name: Verify account scope and current workers.dev subdomain
-        id: cf
         shell: bash
         run: |
           set -euo pipefail
@@ -85,7 +83,7 @@ jobs:
           PY
           curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/prepare.json >/tmp/prepare.out
           rm -f /tmp/prepare.json
-          grep -q '"ok":true' /tmp/prepare.out
+          if ! grep -q '"ok":true' /tmp/prepare.out; then echo 'GAS_PREPARE_FAILED'; cat /tmp/prepare.out; exit 1; fi
           grep -q '"prepared":true' /tmp/prepare.out
           grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/prepare.out
           grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/prepare.out
@@ -130,7 +128,7 @@ jobs:
           PY
           curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/finalize.json >/tmp/finalize.out
           rm -f /tmp/finalize.json
-          grep -q '"ok":true' /tmp/finalize.out
+          if ! grep -q '"ok":true' /tmp/finalize.out; then echo 'GAS_FINALIZE_FAILED'; cat /tmp/finalize.out; exit 1; fi
           grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/finalize.out
           grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/finalize.out
           curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/after-discovery.json

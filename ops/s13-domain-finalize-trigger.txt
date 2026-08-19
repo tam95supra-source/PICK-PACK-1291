@@ -3,3 +3,4 @@ require_gas_control_route=TRUE
 target_service_url=https://pick-pack-1291-service.pp1291.workers.dev
 authority_change=FORBIDDEN
 stable=LOCKED
+attempt=2

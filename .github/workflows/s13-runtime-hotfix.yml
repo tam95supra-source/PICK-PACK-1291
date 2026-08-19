@@ -1,137 +1,13 @@
 name: S13 M2 Runtime Hotfix
 
 on:
-  push:
-    branches: [ agent/service-migration-m2 ]
-    paths:
-      - 'ops/s13-runtime-hotfix-trigger.txt'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - '.github/workflows/s13-runtime-hotfix.yml'
-      - 'ops/s13-runtime-hotfix-trigger.txt'
-      - 'service/src/mobile_hotfix.ts'
-      - 'service/src/entry_hotfix.ts'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: s13-m2-runtime-hotfix
-  cancel-in-progress: false
-
-env:
-  D1_NAME: pick-pack-1291-service-prod
-  WORKER_NAME: pick-pack-1291-service
-  SERVICE_GENERATION: m2-prod-20260819-001
-  STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
-
 jobs:
-  deploy-runtime:
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/service-migration-m2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Validate hotfix source
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run check
-          grep -q '/v1/auth/gas-session' src/entry_hotfix.ts
-          grep -q '/v1/mobile/read' src/entry_hotfix.ts
-      - name: Derive existing production runtime secrets
-        shell: bash
-        run: |
-          set -euo pipefail
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN SIGNING_STORE_PASSWORD; do test -n "${!v:-}" || { echo "MISSING:$v"; exit 1; }; done
-          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
-          SERVICE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-service-token-v1" | sha256sum | awk '{print $1}')
-          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
-          echo "::add-mask::$BRIDGE"; echo "::add-mask::$SERVICE"; echo "::add-mask::$ADMIN"
-          echo "GAS_BRIDGE_SHARED_SECRET=$BRIDGE" >> "$GITHUB_ENV"
-          echo "SERVICE_TOKEN_SECRET=$SERVICE" >> "$GITHUB_ENV"
-          echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
-      - name: Resolve existing production D1 and build code-only config
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          test -n "$ID"
-          python3 - "$ID" <<'PY'
-          from pathlib import Path
-          import os,sys
-          s=Path('wrangler.jsonc').read_text()
-          s=s.replace('"main": "src/entry.ts"','"main": "src/entry_hotfix.ts"')
-          s=s.replace('"name": "pick-pack-1291-service-m1-staging"','"name": "'+os.environ['WORKER_NAME']+'"')
-          s=s.replace('"SERVICE_GENERATION": "m2-precutover-20260819-001"','"SERVICE_GENERATION": "'+os.environ['SERVICE_GENERATION']+'"')
-          s=s.replace('"database_name": "pick-pack-1291-m1-staging"','"database_name": "'+os.environ['D1_NAME']+'"')
-          s=s.replace('__M1_D1_DATABASE_ID__',sys.argv[1])
-          Path('wrangler.hotfix.jsonc').write_text(s)
-          PY
-      - name: Deploy code-only hotfix to existing Worker
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - <<'NODE'
-          const fs=require('fs');fs.writeFileSync('/tmp/s13-secrets.json',JSON.stringify({
-            SERVICE_TOKEN_SECRET:process.env.SERVICE_TOKEN_SECRET,
-            M1_ADMIN_TOKEN:process.env.M2_ADMIN_TOKEN,
-            GAS_BRIDGE_SHARED_SECRET:process.env.GAS_BRIDGE_SHARED_SECRET,
-            GOOGLE_OAUTH_CLIENT_ID:process.env.GOOGLE_OAUTH_CLIENT_ID,
-            GOOGLE_OAUTH_CLIENT_SECRET:process.env.GOOGLE_OAUTH_CLIENT_SECRET,
-            GOOGLE_OAUTH_REFRESH_TOKEN:process.env.GOOGLE_OAUTH_REFRESH_TOKEN,
-            GOOGLE_STAGING_SHEET_ID:process.env.STAGING_SHEET_ID
-          }));
-          NODE
-          chmod 600 /tmp/s13-secrets.json
-          npx wrangler deploy --config wrangler.hotfix.jsonc --secrets-file /tmp/s13-secrets.json 2>&1 | tee /tmp/deploy.log
-          URL=$(grep -Eo 'https://[A-Za-z0-9._-]+\.workers\.dev' /tmp/deploy.log | tail -1)
-          test -n "$URL"
-          curl -fsS --retry 5 --retry-delay 2 "$URL/health" >/tmp/health.json
-          curl -fsS --retry 5 --retry-delay 2 "$URL/v1/authority" >/tmp/authority.json
-          grep -q '"ok":true' /tmp/health.json
-          grep -q '"mode":"SERVICE_PRIMARY"' /tmp/authority.json
-          CODE=$(curl -sS -o /tmp/exchange-probe.json -w '%{http_code}' -X POST -H 'content-type: application/json' "$URL/v1/auth/gas-session" -d '{}')
-          [[ "$CODE" == 400 ]]
-          grep -q 'SESSION_EXCHANGE_FIELDS_REQUIRED' /tmp/exchange-probe.json
-          echo "SERVICE_URL=$URL"
-          rm -f /tmp/s13-secrets.json
-
-  cloudflare-domain-diagnostic:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-    steps:
-      - name: Inspect workers.dev account subdomain and Worker names
-        shell: bash
-        run: |
-          set -euo pipefail
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain.json
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" >/tmp/scripts.json
-          node - <<'NODE'
-          const fs=require('fs');const sub=JSON.parse(fs.readFileSync('/tmp/subdomain.json'));const scripts=JSON.parse(fs.readFileSync('/tmp/scripts.json'));
-          if(!sub.success||!scripts.success)throw new Error('Cloudflare diagnostic API failed');
-          console.log('CURRENT_WORKERS_DEV_SUBDOMAIN='+String(sub.result?.subdomain||''));
-          console.log('WORKER_NAMES='+(scripts.result||[]).map(x=>x.id).sort().join(','));
-          NODE
+      - run: echo 'S13 runtime hotfix already deployed and verified; automatic PR redeploy retired.'
