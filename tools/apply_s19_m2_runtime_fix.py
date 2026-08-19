@@ -74,19 +74,10 @@ if marker not in s:
 p=ROOT/'app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt'
 s=p.read_text()
 if 'S19_RUNTIME_UI_APPLIED' not in s:
-    old='''    private fun connectionSummary():String{
-        val network=when(lastConnected){true->"Tốt";false->"Mất kết nối";null->"Chưa kiểm tra"}
-        val sync=when(lastConnected){true->"Sẵn sàng";false->"Đang chờ";null->"Chưa kiểm tra"}
-        return "Mạng: $network | Đồng bộ: $sync | Service: Chưa cấu hình"
-    }
-    private fun refreshHeaderConnection(){
-        networkStatusText?.text=when(lastConnected){true->"Tốt";false->"Mất";null->"—"}
-        syncStatusText?.text=when(lastConnected){true->"Sẵn sàng";false->"Chờ";null->"—"}
-        serviceStatusText?.text="Chưa dùng"
-    }
-'''
-    if s.count(old)!=1: raise SystemExit('S19 status UI anchor mismatch')
-    new='''    // S19_RUNTIME_UI_APPLIED: status is measured from the actual authority/route, never hard-coded.
+    start=s.find('    private fun connectionSummary():String{')
+    end=s.find('    private fun headerStatusChip',start)
+    if start<0 or end<0: raise SystemExit('S19 status UI structural anchors missing')
+    status='''    // S19_RUNTIME_UI_APPLIED: status is measured from the actual authority/route, never hard-coded.
     private fun runtimeLabel(short:Boolean=false):String{
         val st=api.runtimeStatus();val route=st.optString("route")
         return if(short) when(route){"SERVICE_D1_DIRECT"->"CF / D1";"SERVICE_D1_VIA_GAS"->"CF qua GAS";"GOOGLE_FALLBACK"->"Google dự phòng";"GAS_COMPAT"->"Google / GAS";else->"Đang xác định"}
@@ -103,8 +94,7 @@ if 'S19_RUNTIME_UI_APPLIED' not in s:
         serviceStatusText?.text=runtimeLabel(true)
     }
 '''
-    s=s.replace(old,new,1)
-    s=s.replace('val svc=txt("Chưa dùng",9.2f,Color.WHITE,true);serviceStatusText=svc','val svc=txt(runtimeLabel(true),9.2f,Color.WHITE,true);serviceStatusText=svc',1)
+    s=s[:start]+status+s[end:]
     s=s.replace('status("ĐANG KIỂM TRA PHIÊN...", blue, Color.rgb(237,244,255))','status("Đang xác nhận trạng thái phiên...", blue, Color.rgb(237,244,255))')
 
     start=s.find('    private fun historyScreen(){')
