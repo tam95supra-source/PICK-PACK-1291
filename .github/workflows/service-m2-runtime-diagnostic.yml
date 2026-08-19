@@ -5,24 +5,24 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/service-m2-runtime-diagnostic.yml'
-      - 'service/src/recovery_resume_compat.ts'
-      - 'service/src/entry_recovery_hotfix.ts'
+      - 'tools/apply_s13_bridge_probe_gas_patch.py'
+      - 'tools/apply_s13_service_url_gas_patch.py'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: s13-recovery-resume-pack-${{ github.event.pull_request.number || github.ref }}
+  group: s13-bridge-domain-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 env:
-  D1_NAME: pick-pack-1291-service-prod
-  WORKER_NAME: pick-pack-1291-service
-  SERVICE_GENERATION: m2-prod-20260819-001
-  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_URL_OLD: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_URL_NEW: https://pick-pack-1291-service.pp1291.workers.dev
   GAS_WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
-  STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
+  SERVICE_GENERATION: m2-prod-20260819-001
+  WORKER_NAME: pick-pack-1291-service
+  TARGET_SUBDOMAIN: pp1291
 
 jobs:
   diagnose:
@@ -35,7 +35,8 @@ jobs:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,141 +44,145 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Typecheck deterministic legacy recovery
-        working-directory: service
+
+      - name: Require converged Service-primary epoch before domain work
         shell: bash
         run: |
           set -euo pipefail
-          npm install --no-audit --no-fund
-          npm run check
-          grep -q 'FAILBACK_PACK_USER_AMBIGUOUS' src/recovery_resume_compat.ts
-          grep -q 'FAILBACK_LABOR_SHIFT_MISSING' src/recovery_resume_compat.ts
-          grep -q 'resumeFailbackWithLegacyCompat' src/entry_recovery_hotfix.ts
-      - name: Derive existing production secrets
+          curl -fsS "$SERVICE_URL_OLD/v1/authority" >/tmp/service.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas.json
+          S_MODE=$(jq -r '.authority.mode' /tmp/service.json); S_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service.json)
+          G_MODE=$(jq -r '.authority_mode' /tmp/gas.json); G_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/gas.json)
+          echo "SERVICE=$S_MODE/$S_EPOCH GAS=$G_MODE/$G_EPOCH"
+          [[ "$S_MODE" == SERVICE_PRIMARY && "$G_MODE" == SERVICE_PRIMARY && "$S_EPOCH" == "$G_EPOCH" ]]
+          [[ "$(jq -r '.authority.service_generation' /tmp/service.json)" == "$SERVICE_GENERATION" ]]
+          [[ "$(jq -r '.service_generation' /tmp/gas.json)" == "$SERVICE_GENERATION" ]]
+          echo "EPOCH=$S_EPOCH" >> "$GITHUB_ENV"
+
+      - name: Prepare safe GAS bridge/domain source
         shell: bash
         run: |
           set -euo pipefail
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN SIGNING_STORE_PASSWORD; do test -n "${!v:-}" || { echo "MISSING:$v"; exit 1; }; done
-          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
-          SERVICE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-service-token-v1" | sha256sum | awk '{print $1}')
-          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
-          echo "::add-mask::$BRIDGE"; echo "::add-mask::$SERVICE"; echo "::add-mask::$ADMIN"
-          echo "GAS_BRIDGE_SHARED_SECRET=$BRIDGE" >> "$GITHUB_ENV"
-          echo "SERVICE_TOKEN_SECRET=$SERVICE" >> "$GITHUB_ENV"
-          echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
-      - name: Require resumable fenced recovery state before mutation
+          python3 tools/apply_s13_service_url_gas_patch.py
+          python3 tools/apply_s13_bridge_probe_gas_patch.py
+          cp google-apps-script/PICK_PACK_API.gs /tmp/api.js
+          cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/m2.js
+          node --check /tmp/api.js
+          node --check /tmp/m2.js
+
+      - name: Deploy safe GAS source to existing deployment
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS "$SERVICE_URL/v1/authority" >/tmp/service-before.json
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas-before.json
-          S_MODE=$(jq -r '.authority.mode' /tmp/service-before.json); S_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-before.json); S_SEQ=$(jq -r '.authority.authority_seq' /tmp/service-before.json)
-          G_MODE=$(jq -r '.authority_mode' /tmp/gas-before.json); G_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/gas-before.json); G_SEQ=$(jq -r '.authority.authority_seq' /tmp/gas-before.json)
-          echo "SERVICE=$S_MODE/$S_EPOCH/$S_SEQ GAS=$G_MODE/$G_EPOCH/$G_SEQ"
-          [[ "$S_MODE" == RECONCILING && "$S_EPOCH" == 3 ]]
-          [[ "$S_SEQ" =~ ^[0-4]$ ]]
-          [[ "$G_MODE" == RECONCILING && "$G_EPOCH" == 3 && "$G_SEQ" == 4 ]]
-      - name: Build code-only config for existing production Worker
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          LIST=$(npx wrangler d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          test -n "$ID"
-          python3 - "$ID" <<'PY'
-          from pathlib import Path
-          import os,sys
-          s=Path('wrangler.jsonc').read_text()
-          s=s.replace('"main": "src/entry.ts"','"main": "src/entry_recovery_hotfix.ts"')
-          s=s.replace('"name": "pick-pack-1291-service-m1-staging"','"name": "'+os.environ['WORKER_NAME']+'"')
-          s=s.replace('"SERVICE_GENERATION": "m2-precutover-20260819-001"','"SERVICE_GENERATION": "'+os.environ['SERVICE_GENERATION']+'"')
-          s=s.replace('"database_name": "pick-pack-1291-m1-staging"','"database_name": "'+os.environ['D1_NAME']+'"')
-          s=s.replace('__M1_D1_DATABASE_ID__',sys.argv[1])
-          Path('wrangler.recovery.jsonc').write_text(s)
-          PY
-      - name: Deploy code-only recovery fix
-        working-directory: service
-        shell: bash
-        run: |
-          set -euo pipefail
-          node - <<'NODE'
-          const fs=require('fs');fs.writeFileSync('/tmp/s13-secrets.json',JSON.stringify({
-            SERVICE_TOKEN_SECRET:process.env.SERVICE_TOKEN_SECRET,
-            M1_ADMIN_TOKEN:process.env.M2_ADMIN_TOKEN,
-            GAS_BRIDGE_SHARED_SECRET:process.env.GAS_BRIDGE_SHARED_SECRET,
-            GOOGLE_OAUTH_CLIENT_ID:process.env.GOOGLE_OAUTH_CLIENT_ID,
-            GOOGLE_OAUTH_CLIENT_SECRET:process.env.GOOGLE_OAUTH_CLIENT_SECRET,
-            GOOGLE_OAUTH_REFRESH_TOKEN:process.env.GOOGLE_OAUTH_REFRESH_TOKEN,
-            GOOGLE_STAGING_SHEET_ID:process.env.STAGING_SHEET_ID
-          }));
-          NODE
-          chmod 600 /tmp/s13-secrets.json
-          npx wrangler deploy --config wrangler.recovery.jsonc --secrets-file /tmp/s13-secrets.json >/tmp/deploy.log 2>&1 || { cat /tmp/deploy.log; rm -f /tmp/s13-secrets.json; exit 1; }
-          rm -f /tmp/s13-secrets.json
-          curl -fsS --retry 6 --retry-delay 2 "$SERVICE_URL/health" >/tmp/health.json
-          grep -q '"generation":"m2-prod-20260819-001"' /tmp/health.json
-      - name: Verify Worker bridge secret before recovery
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS -H "x-gas-bridge-secret: $GAS_BRIDGE_SHARED_SECRET" "$SERVICE_URL/internal/gas-bridge-probe" >/tmp/bridge.json
-          grep -q '"ok":true' /tmp/bridge.json
-          grep -q '"mode":"RECONCILING"' /tmp/bridge.json
-      - name: Resume remaining epoch3 fallback events from verified prefix
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat >/tmp/resume.json <<'JSON'
-          {"fallback_epoch":3,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"S13_DETERMINISTIC_PACK_LABOR_RECOVERY"}
-          JSON
-          CODE=$(curl -sS -o /tmp/resume.out -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $M2_ADMIN_TOKEN" --data-binary @/tmp/resume.json "$SERVICE_URL/internal/recovery/failback-resume")
-          rm -f /tmp/resume.json
-          cat /tmp/resume.out
-          [[ "$CODE" == 200 ]]
-          grep -q '"ok":true' /tmp/resume.out
-          grep -q '"legacy_pack_compat":true' /tmp/resume.out
-          grep -q '"legacy_labor_shift_compat":true' /tmp/resume.out
-          grep -q '"applied":4' /tmp/resume.out
-          grep -q '"final_epoch":4' /tmp/resume.out
-      - name: Complete GAS failback on exact epoch4
-        shell: bash
-        run: |
-          set -euo pipefail
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID; do test -n "${!v:-}" || { echo "MISSING:$v"; exit 1; }; done
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          OAUTH=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          ACCESS_TOKEN=$(jq -r '.access_token // empty' <<<"$OAUTH"); test -n "$ACCESS_TOKEN"; echo "::add-mask::$ACCESS_TOKEN"
           python3 - <<'PY'
-          import json,os
-          open('/tmp/complete.json','w').write(json.dumps({
-            'action':'m2_recovery_internal','phase':'complete','confirmation':'OWNER_LOCKED_M2_FAILBACK',
-            'bridge_secret':os.environ['GAS_BRIDGE_SHARED_SECRET'],'authority_epoch':4,
-            'service_generation':os.environ['SERVICE_GENERATION'],'service_url':os.environ['SERVICE_URL']
-          }))
+          import json
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
           PY
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/complete.json >/tmp/complete.out
-          rm -f /tmp/complete.json
-          cat /tmp/complete.out
-          grep -q '"ok":true' /tmp/complete.out
-          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/complete.out
-          grep -q '"authority_epoch":4' /tmp/complete.out
-      - name: Verify four events, inbox, authority, rollover and replication
+          curl -fsS -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" >/tmp/content.out
+          curl -fsS -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"S13 bridge proof and workers.dev hostname fence"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions" >/tmp/version.json
+          V=$(jq -r '.versionNumber' /tmp/version.json); test -n "$V"
+          jq -n --arg s "$SCRIPT_ID" --argjson v "$V" '{deploymentConfig:{scriptId:$s,versionNumber:$v,manifestFileName:"appsscript",description:"Pick Pack 1291 live API S13 bridge/domain"}}' >/tmp/deploy.json
+          curl -fsS -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID" >/tmp/deploy.out
+          echo "GAS_VERSION=$V"
+
+      - name: Wait for GAS bridge probe route
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS "$SERVICE_URL/v1/authority" >/tmp/service-final.json
-          curl -fsS "$SERVICE_URL/health" >/tmp/health-final.json
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas-final.json
-          [[ "$(jq -r '.authority.mode' /tmp/service-final.json)" == SERVICE_PRIMARY ]]
-          [[ "$(jq -r '.authority.authority_epoch' /tmp/service-final.json)" == 4 ]]
-          [[ "$(jq -r '.authority_mode' /tmp/gas-final.json)" == SERVICE_PRIMARY ]]
-          [[ "$(jq -r '.authority.authority_epoch' /tmp/gas-final.json)" == 4 ]]
-          [[ "$(jq -r '.replication.state' /tmp/health-final.json)" == HEALTHY ]]
-          LIST=$(npx --yes wrangler@4 d1 list --json)
-          ID=$(node -e 'const a=JSON.parse(process.argv[1]);const x=a.find(v=>v.name===process.env.D1_NAME);process.stdout.write(x?.uuid||x?.id||"")' "$LIST")
-          QUERY(){ curl -fsS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data-binary "$1" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$ID/query"; }
-          QUERY '{"sql":"SELECT COUNT(*) AS n FROM events WHERE authority_epoch=3","params":[]}' >/tmp/events.json
-          QUERY '{"sql":"SELECT COUNT(*) AS n FROM fallback_event_inbox WHERE authority_epoch=3 AND ingest_status=\"APPLIED\"","params":[]}' >/tmp/applied.json
-          QUERY '{"sql":"SELECT business_date,sequence_no,source FROM business_dates ORDER BY sequence_no DESC LIMIT 1","params":[]}' >/tmp/date.json
-          grep -q '"n":4' /tmp/events.json
-          grep -q '"n":4' /tmp/applied.json
-          grep -q '"business_date":"2026-08-19"' /tmp/date.json
-          grep -q '"sequence_no":45' /tmp/date.json
-          echo 'S13_EPOCH3_RECOVERY=PASS'
+          OK=false
+          for i in $(seq 1 120); do
+            curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"m2_bridge_probe_internal","confirmation":"invalid"}' >/tmp/route.json || true
+            if grep -q 'BRIDGE_PROBE_CONFIRMATION_REQUIRED' /tmp/route.json; then OK=true; break; fi
+            sleep 3
+          done
+          [[ "$OK" == true ]] || { cat /tmp/route.json; exit 1; }
+
+      - name: Prove bridge stored in GAS authenticates to Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"
+          echo "GAS_BRIDGE_SHARED_SECRET=$BRIDGE" >> "$GITHUB_ENV"
+          jq -n --arg b "$BRIDGE" '{action:"m2_bridge_probe_internal",confirmation:"OWNER_LOCKED_M2_BRIDGE_PROBE",bridge_secret:$b}' >/tmp/probe-request.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/probe-request.json >/tmp/probe.json
+          rm -f /tmp/probe-request.json
+          cat /tmp/probe.json
+          [[ "$(jq -r '.ok' /tmp/probe.json)" == true ]]
+          [[ "$(jq -r '.service_http_code' /tmp/probe.json)" == 200 ]]
+          [[ "$(jq -r '.service_authority_mode' /tmp/probe.json)" == SERVICE_PRIMARY ]]
+          [[ "$(jq -r '.service_authority_epoch' /tmp/probe.json)" == "$EPOCH" ]]
+          [[ "$(jq -r '.service_generation' /tmp/probe.json)" == "$SERVICE_GENERATION" ]]
+          echo 'GAS_TO_WORKER_BRIDGE=PASS'
+
+      - name: Require Cloudflare account scope is exactly this Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" >/tmp/scripts.json
+          NAMES=$(jq -r '[.result[].id]|sort|join(",")' /tmp/scripts.json)
+          [[ "$NAMES" == "$WORKER_NAME" ]] || { echo "UNSAFE_WORKER_SCOPE=$NAMES"; exit 1; }
+
+      - name: Prepare dual URL fence and change workers.dev account subdomain
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/sub-before.json
+          CURRENT=$(jq -r '.result.subdomain' /tmp/sub-before.json)
+          if [[ "$CURRENT" != "$TARGET_SUBDOMAIN" ]]; then
+            jq -n --arg b "$GAS_BRIDGE_SHARED_SECRET" --arg u "$SERVICE_URL_NEW" '{action:"m2_service_url_prepare_internal",confirmation:"OWNER_LOCKED_M2_SERVICE_URL_ONLY",bridge_secret:$b,service_url:$u}' >/tmp/prepare.json
+            curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/prepare.json >/tmp/prepare.out
+            rm -f /tmp/prepare.json
+            [[ "$(jq -r '.ok' /tmp/prepare.out)" == true ]]
+            [[ "$(jq -r '.authority_mode' /tmp/prepare.out)" == SERVICE_PRIMARY ]]
+            curl -fsS -X PUT -H "$AUTH" -H 'Content-Type: application/json' -d "{\"subdomain\":\"$TARGET_SUBDOMAIN\"}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/sub-set.json
+            [[ "$(jq -r '.success' /tmp/sub-set.json)" == true ]]
+          fi
+
+      - name: Verify new hostname then finalize GAS discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          OK=false
+          for i in $(seq 1 90); do
+            curl -fsS "$SERVICE_URL_NEW/health" >/tmp/new-health.json 2>/dev/null || true
+            curl -fsS "$SERVICE_URL_NEW/v1/authority" >/tmp/new-authority.json 2>/dev/null || true
+            if [[ "$(jq -r '.ok // false' /tmp/new-health.json 2>/dev/null || true)" == true ]] && [[ "$(jq -r '.authority.mode // empty' /tmp/new-authority.json 2>/dev/null || true)" == SERVICE_PRIMARY ]]; then OK=true; break; fi
+            sleep 2
+          done
+          [[ "$OK" == true ]] || { cat /tmp/new-health.json || true; cat /tmp/new-authority.json || true; exit 1; }
+          jq -n --arg b "$GAS_BRIDGE_SHARED_SECRET" --arg u "$SERVICE_URL_NEW" '{action:"m2_service_url_update_internal",confirmation:"OWNER_LOCKED_M2_SERVICE_URL_ONLY",bridge_secret:$b,service_url:$u}' >/tmp/finalize.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/finalize.json >/tmp/finalize.out
+          rm -f /tmp/finalize.json
+          [[ "$(jq -r '.ok' /tmp/finalize.out)" == true ]]
+          [[ "$(jq -r '.authority_mode' /tmp/finalize.out)" == SERVICE_PRIMARY ]]
+          [[ "$(jq -r '.authority_epoch' /tmp/finalize.out)" == "$EPOCH" ]]
+
+      - name: Final URL and authority verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "$SERVICE_URL_NEW/health" >/tmp/health.json
+          curl -fsS "$SERVICE_URL_NEW/v1/authority" >/tmp/service.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas.json
+          [[ "$(jq -r '.generation' /tmp/health.json)" == "$SERVICE_GENERATION" ]]
+          [[ "$(jq -r '.authority.mode' /tmp/service.json)" == SERVICE_PRIMARY ]]
+          [[ "$(jq -r '.authority.authority_epoch' /tmp/service.json)" == "$EPOCH" ]]
+          [[ "$(jq -r '.authority_mode' /tmp/gas.json)" == SERVICE_PRIMARY ]]
+          [[ "$(jq -r '.authority.authority_epoch' /tmp/gas.json)" == "$EPOCH" ]]
+          [[ "$(jq -r '.service_url' /tmp/gas.json)" == "$SERVICE_URL_NEW" ]]
+          [[ "$(jq -r '.replication.state' /tmp/health.json)" == HEALTHY ]]
+          echo "FINAL_SERVICE_URL=$SERVICE_URL_NEW"
+          echo "FINAL_EPOCH=$EPOCH"
