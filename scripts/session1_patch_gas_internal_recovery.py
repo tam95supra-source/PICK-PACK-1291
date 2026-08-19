@@ -22,6 +22,12 @@ add=r'''
  * This does not create a new transition; it only authenticates the same begin/flush/complete
  * operations with the existing GAS bridge secret so CI recovery never needs a human session token.
  */
+function ppM2BridgeSecretOk_(body){
+  const supplied=String((body||{})._bridge_secret||''),expected=ppM2BridgeSecret_();
+  if(!supplied||!expected||supplied.length!==expected.length)return false;
+  let diff=0;for(let i=0;i<supplied.length;i++)diff|=supplied.charCodeAt(i)^expected.charCodeAt(i);
+  return diff===0;
+}
 function ppM2InternalRecoveryAuthorized_(body){return ppM2BridgeSecretOk_(body||{});}
 function ppM2InternalReconcileStatus_(body){
   if(!ppM2InternalRecoveryAuthorized_(body))return {ok:false,error:'BRIDGE_SECRET_INVALID'};
