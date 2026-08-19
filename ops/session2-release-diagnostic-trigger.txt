@@ -1,0 +1,1 @@
+Run sanitized read-only release diagnostic for the current Session2 Web/Beta23 state.
