@@ -1,3 +1,11 @@
-checked_at=2026-08-19T11:27:54Z
-head_sha=78862f3d8c3310a91c94e607a3cd932e6890cf8f
+checked_at=2026-08-19T11:29:32Z
+head_sha=20694abfa42c4f40bea642c00e2dc7d5ae7a2125
 d1_bindings=READY
+cf_d1_list_http=200
+cf_d1_list_success=true
+cf_prod_name_matches=1
+cf_prod_d1_resolved=YES
+npm_install_rc=0
+wrangler_d1_list_rc=0
+wrangler_prod_name_matches=1
+prod_config_rc=0
