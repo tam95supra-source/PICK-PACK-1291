@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/service-m2-runtime-diagnostic.yml'
       - 'tools/s13_authority_recover.py'
+      - 'tools/s13_authority_recover_v2.py'
       - 'tools/apply_s13_service_url_gas_patch.py'
       - 'ops/s13-authority-recover-trigger.txt'
   workflow_dispatch:
@@ -40,4 +41,4 @@ jobs:
           node-version: '22'
       - name: Reconcile authority and shorten workers.dev hostname
         shell: bash
-        run: python3 tools/s13_authority_recover.py
+        run: python3 tools/s13_authority_recover_v2.py
