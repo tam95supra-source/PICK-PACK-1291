@@ -1,4 +1,4 @@
-requested_at=2026-08-19T23:47:00+07:00
+requested_at=2026-08-19T23:50:00+07:00
 version_name=0.4.2-beta.26
 version_code=32
 package=vn.pickpack1291.app.beta.publicbeta
@@ -6,4 +6,4 @@ source_gate=S30D_PASS
 build_patch=S30_IDEMPOTENT
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
-retry=3
+retry=4
