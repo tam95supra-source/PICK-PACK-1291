@@ -1,0 +1,4 @@
+requested_at=2026-08-19T20:40:00+07:00
+version=0.4.2-beta.25
+stable=false
+scope=ota-service-web-authority
