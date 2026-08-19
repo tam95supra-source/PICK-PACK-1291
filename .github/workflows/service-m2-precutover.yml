@@ -63,7 +63,13 @@ jobs:
           grep -q 'GOOGLE_FALLBACK' service/migrations/0002_m2_authority_recovery.sql
           grep -q 'sheet_replication_outbox' service/src/replication.ts
           grep -q 'acceptWebSocket' service/src/realtime.ts
+          grep -q 'INVALIDATION_V1' service/src/realtime.ts
           grep -q 'IndexedDB\|indexedDB' service/public/app.js
-          grep -q 'OFFLINE_PROVISIONAL' service/public/app.js
+          grep -q 'LOCAL_PENDING' service/public/app.js
+          grep -q 'business_window:7' service/src/index.ts
+          grep -q 'Event-driven foreground Service/D1 revision synchronizer' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          ! grep -q 'main.postDelayed(tick, nextDelay' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q '"DAY_CHANGED"' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q '"MASTER_CHANGED"' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
           ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech' service app google-apps-script 2>/dev/null
           echo 'M2 source-contract precutover PASS.'
