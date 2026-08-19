@@ -1,0 +1,11 @@
+checked_at=2026-08-19T12:52:04Z
+head_sha=41b1bc9da7f82ab327ab4b3ac7fe9e2b9dd7e106
+source_gate=PASS
+d1_resolve=PASS
+authority_gate=PASS
+fallback_gate=PASS
+d1_gate=PASS
+migration=PASS
+deploy=PASS
+failed_phase=LIVE_VERIFY
+failed_rc=1
