@@ -1,5 +1,8 @@
-checked_at=2026-08-19T22:54:02Z
-head_sha=6f5190369520fd656ce4fef34b44e364c779041b
+checked_at=2026-08-19T22:55:07Z
+head_sha=fd1f889e98a58acfddec8ed0f5bfb5c0653a8c9c
+service_probe=SERVICE_PRIMARY|8|8|PRODUCTION|rep=HEALTHY:0
+gas_probe=ok:false|top::|nested::|err:UNAUTHORIZED
+gas_keys=error,ok
 failed_phase=AUTHORITY
 failed_rc=1
 stable=UNTOUCHED_BY_WORKFLOW
