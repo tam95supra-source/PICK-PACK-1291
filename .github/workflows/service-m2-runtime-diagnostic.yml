@@ -5,41 +5,28 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/service-m2-runtime-diagnostic.yml'
-      - 'tools/s13_authority_recover.py'
-      - 'tools/s13_authority_recover_v2.py'
-      - 'tools/s13_authority_recover_v3.py'
-      - 'tools/apply_s13_service_url_gas_patch.py'
-      - 'ops/s13-authority-recover-trigger.txt'
+      - 'tools/s13_recovery_diag.py'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: s13-authority-recover-${{ github.event.pull_request.number || github.ref }}
+  group: s13-recovery-diag-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   diagnose:
     if: github.event_name != 'pull_request' || github.head_ref == 'agent/service-migration-m2'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
-      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/service-migration-m2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Resume fenced reconciliation and shorten workers.dev hostname
+      - name: Read current D1 failback diagnostics
         shell: bash
-        run: python3 tools/s13_authority_recover_v3.py
+        run: python3 tools/s13_recovery_diag.py
