@@ -1,0 +1,6 @@
+checked_at=2026-08-19T11:47:01Z
+scope_drive=NO
+scope_spreadsheets=YES
+scope_cloud_platform=NO
+scope_firebase_messaging=NO
+firebase_project_http=403
