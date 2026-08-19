@@ -1,10 +1,12 @@
 {
-  "release": "0.4.2-beta.21",
+  "release": "0.4.2-beta.22",
   "channel": "BETA",
   "stable_publish": false,
-  "apk_drive_id": "1FFi4F_YZDZvPimdHOGM1qraAwPZq1jhD",
-  "sha256": "d0eda83e421cd8f1d4bf07beb99285d7c04d512fdaef1e2a858b8e929f393d0a",
-  "candidate_run_id": 32211908750,
-  "candidate_artifact_id": 9351084376,
-  "verification_nonce": "2026-08-19T10:29:00+07:00"
+  "apk_drive_id": "1VC-LpR0qBAFNukC7oV_sN2CuTgccKa1K",
+  "checksum_drive_id": "1f75lr9TUNWPIaZRC3_MKwa_9_xJkvYJK",
+  "sha256": "da2c1c837102e9e557013971ece9dac961caa6312b579db9c63184acc8daed3b",
+  "size": 9790372,
+  "candidate_run_id": 32212499202,
+  "candidate_artifact_id": 9351285859,
+  "verification_nonce": "2026-08-19T10:38:00+07:00"
 }
