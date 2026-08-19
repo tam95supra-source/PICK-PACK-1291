@@ -1,0 +1,27 @@
+name: Session1 Commit GAS Recovery Source
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session1-gas-source-patch.txt]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          fetch-depth: 1
+      - name: Apply deterministic recovery adapter patch
+        run: |
+          set -euo pipefail
+          python3 scripts/session1_patch_gas_internal_recovery.py
+          grep -Fq 'm2_internal_reconcile_begin' google-apps-script/PICK_PACK_API.gs
+          grep -Fq 'ppM2InternalRecoveryAuthorized_' google-apps-script/SERVICE_MIGRATION_M2.gs
+          git config user.name 'pp1291-session1-bot'
+          git config user.email 'pp1291-session1-bot@users.noreply.github.com'
+          if git diff --quiet; then echo SOURCE_ALREADY_SYNCED; exit 0; fi
+          git add google-apps-script/PICK_PACK_API.gs google-apps-script/SERVICE_MIGRATION_M2.gs
+          git commit -m 'feat: add fenced bridge-auth M2 recovery adapter'
+          git push origin HEAD:agent/service-migration-m2
