@@ -1,0 +1,67 @@
+name: Session3 Stage Epoch7 Seq1 Diagnostic
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-stage-epoch7-seq1-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+
+jobs:
+  stage-one:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Stage exact seq1 and record sanitized response
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'confirmation=OWNER_SERVICE_RETURN_DIAGNOSTIC' ops/session3-stage-epoch7-seq1-trigger.txt
+          grep -qx 'epoch=7' ops/session3-stage-epoch7-seq1-trigger.txt
+          grep -qx 'seq=1' ops/session3-stage-epoch7-seq1-trigger.txt
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"
+          RESP=$(curl -fsS --max-time 25 https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP"); [[ -n "$TOKEN" ]]
+          echo "::add-mask::$TOKEN"
+          RANGE=$(node -p 'encodeURIComponent("__PP_M2_FALLBACK_EVENTS!A:M")')
+          curl -fsS --max-time 25 -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$SOURCE_SHEET_ID/values/$RANGE?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE" >/tmp/f.json
+          node - <<'NODE'
+          const fs=require('fs'),rows=(require('/tmp/f.json').values||[]).slice(1),r=rows.find(x=>Number(x[1])===7&&Number(x[2])===1);
+          if(!r||String(r[12]||'')!=='PENDING') throw new Error('SEQ1_NOT_PENDING');
+          const body={event_id:String(r[0]),authority_epoch:7,authority_seq:1,service_generation:String(r[3]),event:{action:String(r[4]),business_date:String(r[5]),actor:String(r[6]),role:String(r[7]),device_id:String(r[8]),occurred_at:String(r[9]),payload_json:String(r[10])},checksum:String(r[11])};
+          fs.writeFileSync('/tmp/body.json',JSON.stringify(body));
+          NODE
+          HTTP=$(curl -sS --max-time 40 -o /tmp/out.json -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-gas-bridge-secret: $BRIDGE" --data-binary @/tmp/body.json "$SERVICE_URL/internal/fallback/ingest" || true)
+          node - <<'NODE' "$HTTP"
+          const fs=require('fs'),http=String(process.argv[2]);let j={};try{j=JSON.parse(fs.readFileSync('/tmp/out.json','utf8'))}catch{}
+          const raw=j?.error?.code??j?.error??j?.code??'';const code=typeof raw==='string'?raw:'UNKNOWN_ERROR_SHAPE';
+          const ok=Boolean(j.ok)&&/^2/.test(http),duplicate=Boolean(j.duplicate),staged=Boolean(j.staged_for_failback);
+          fs.writeFileSync('/tmp/result.txt',[`checked_at=${new Date().toISOString()}`,`http=${http}`,`ok=${ok}`,`duplicate=${duplicate}`,`staged_for_failback=${staged}`,`error_code=${String(code).slice(0,100)}`,`epoch=7`,`seq=1`,`payload_logged=NO`,`stable=UNTOUCHED`,`merge_pr38=UNTOUCHED`,`verdict=${ok?'STAGED_OR_DUPLICATE':'DIAGNOSTIC_FAILURE'}`,''].join('\n'));
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nverdict=WORKFLOW_STOPPED\npayload_logged=NO\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/result.copy
+          git reset --hard HEAD >/dev/null
+          cp /tmp/result.copy ops/session3-stage-epoch7-seq1-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-stage-epoch7-seq1-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record epoch7 seq1 staging diagnostic' && git push)
