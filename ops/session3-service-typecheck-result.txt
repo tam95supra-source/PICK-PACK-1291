@@ -1,0 +1,67 @@
+patch_exit=0
+install_exit=0
+check_exit=2
+--- patch ---
+S28D compatibility resume now uses exact reflected-enter reconciliation
+--- check ---
+
+> check
+> npm run cf:types && npm run typecheck
+
+
+> cf:types
+> wrangler types
+
+
+ ⛅️ wrangler 4.119.0
+────────────────────
+Generating project types...
+
+interface __BaseEnv_Env {
+	DB: D1Database;
+	ASSETS: Fetcher;
+	SERVICE_GENERATION: "m2-precutover-20260819-001";
+	GOOGLE_SOURCE_SHEET_ID: "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78";
+	SERVICE_TOKEN_SECRET: string;
+	M1_ADMIN_TOKEN: string;
+	GAS_BRIDGE_SHARED_SECRET: string;
+	GOOGLE_OAUTH_CLIENT_ID: string;
+	GOOGLE_OAUTH_CLIENT_SECRET: string;
+	GOOGLE_OAUTH_REFRESH_TOKEN: string;
+	GOOGLE_STAGING_SHEET_ID: string;
+	REALTIME_HUB: DurableObjectNamespace<import("./src/entry_product").RealtimeHub>;
+}
+declare namespace Cloudflare {
+	interface GlobalProps {
+		mainModule: typeof import("./src/entry_product");
+		durableNamespaces: "RealtimeHub";
+	}
+	interface Env extends __BaseEnv_Env {}
+}
+interface Env extends __BaseEnv_Env {}
+type StringifyValues<EnvType extends Record<string, unknown>> = {
+	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
+};
+declare namespace NodeJS {
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SERVICE_GENERATION" | "GOOGLE_SOURCE_SHEET_ID" | "SERVICE_TOKEN_SECRET" | "M1_ADMIN_TOKEN" | "GAS_BRIDGE_SHARED_SECRET" | "GOOGLE_OAUTH_CLIENT_ID" | "GOOGLE_OAUTH_CLIENT_SECRET" | "GOOGLE_OAUTH_REFRESH_TOKEN" | "GOOGLE_STAGING_SHEET_ID">> {}
+}
+
+Generating runtime types...
+
+Runtime types generated.
+
+
+✨ Types written to worker-configuration.d.ts
+
+Action required Install @types/node
+Since you have the `nodejs_compat` flag, you should install Node.js types by running "npm i --save-dev @types/node".
+
+📖 Read about runtime types
+https://developers.cloudflare.com/workers/languages/typescript/#generate-types
+📣 Remember to rerun 'wrangler types' after you change your wrangler.jsonc file.
+
+
+> typecheck
+> tsc --noEmit
+
+src/admin_audit.ts(27,151): error TS2345: Argument of type '"AUTHORITY"' is not assignable to parameter of type '"VALIDATION" | "AUTH" | "PERMISSION" | "CONFLICT" | "RESOURCE" | "TRANSIENT" | "INTEGRITY" | "SCHEMA" | "INTERNAL"'.
