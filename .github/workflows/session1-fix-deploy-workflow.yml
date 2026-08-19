@@ -1,0 +1,49 @@
+name: Session1 Fix Deploy Workflow
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session1-workflow-fix5.txt]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          fetch-depth: 1
+      - name: Replace indented heredoc and trigger attempt 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/session1-service-deploy.yml')
+          s=p.read_text()
+          old='''            node - "$SCRIPT_ID" "$V" <<'NODE'\n            const fs=require('fs');fs.writeFileSync('/tmp/gas-deploy.json',JSON.stringify({deploymentConfig:{scriptId:process.argv[2],versionNumber:Number(process.argv[3]),manifestFileName:'appsscript',description:'Session1 security sanitizer'}}));\n            NODE'''
+          new='''            node -e 'const fs=require("fs");fs.writeFileSync("/tmp/gas-deploy.json",JSON.stringify({deploymentConfig:{scriptId:process.argv[1],versionNumber:Number(process.argv[2]),manifestFileName:"appsscript",description:"Session1 security sanitizer"}}))' "$SCRIPT_ID" "$V"'''
+          if old in s:
+              s=s.replace(old,new,1)
+          elif new not in s:
+              raise SystemExit('DEPLOY_HEREDOC_ANCHOR_MISSING')
+          p.write_text(s)
+          t=Path('ops/session1-service-deploy-trigger.txt')
+          x=t.read_text()
+          lines=[]
+          seen=False
+          for line in x.splitlines():
+              if line.startswith('attempt='):
+                  lines.append('attempt=5');seen=True
+              else: lines.append(line)
+          if not seen: lines.append('attempt=5')
+          t.write_text('\n'.join(lines)+'\n')
+          PY
+          grep -Fq 'node -e' .github/workflows/session1-service-deploy.yml
+          ! grep -Fq 'node - "$SCRIPT_ID" "$V" <<' .github/workflows/session1-service-deploy.yml
+          grep -qx 'attempt=5' ops/session1-service-deploy-trigger.txt
+          git config user.name 'pp1291-session1-bot'
+          git config user.email 'pp1291-session1-bot@users.noreply.github.com'
+          git add .github/workflows/session1-service-deploy.yml ops/session1-service-deploy-trigger.txt
+          git commit -m 'fix: remove GAS deploy heredoc parser hazard'
+          git push origin HEAD:agent/service-migration-m2
