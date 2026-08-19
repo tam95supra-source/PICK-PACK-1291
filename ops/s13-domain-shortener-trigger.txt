@@ -1,0 +1,5 @@
+confirmation=OWNER_REQUEST_SHORTER_WORKERS_DEV_URL
+target_account_subdomain=pp1291
+target_service_url=https://pick-pack-1291-service.pp1291.workers.dev
+authority_change=FORBIDDEN
+stable=LOCKED
