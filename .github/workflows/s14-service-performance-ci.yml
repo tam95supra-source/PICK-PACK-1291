@@ -1,0 +1,46 @@
+name: S14 Service Performance CI
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'service/src/**'
+      - 'service/wrangler.jsonc'
+      - '.github/workflows/s14-service-performance-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s14-service-performance-ci
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install service dependencies
+        working-directory: service
+        run: npm install --no-audit --no-fund
+      - name: Generate bindings and typecheck
+        working-directory: service
+        run: npm run check
+      - name: Validate production config invariants
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '"binding": "DB"' wrangler.jsonc
+          grep -q '"binding": "ASSETS"' wrangler.jsonc
+          grep -q '"name": "REALTIME_HUB"' wrangler.jsonc
+          grep -q '"mode": "smart"' wrangler.jsonc
+          grep -q 'run_worker_first' wrangler.jsonc
+          echo 'S14 service performance config invariants: PASS'
