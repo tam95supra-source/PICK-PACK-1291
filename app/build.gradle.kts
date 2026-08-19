@@ -18,6 +18,8 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalSyncEngine.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/SyncDirectionTracker.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/DeviceNetworkStatus.kt"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch_in_place.py"))
     inputs.file(rootProject.file("tools/apply_s11_compact_report_patch.py"))
@@ -33,6 +35,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s19_m2_runtime_fix.py"))
     inputs.file(rootProject.file("tools/apply_s20_pack_identity_fix.py"))
     inputs.file(rootProject.file("tools/apply_s21_labor_shift_fix.py"))
+    inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability.py"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
@@ -55,8 +58,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 26
-            versionName = "0.4.2-beta.20"
+            versionCode = 27
+            versionName = "0.4.2-beta.21"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -93,4 +96,4 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // M2 target: Android/PWA <-> Service <-> D1, with GAS as controlled fallback/legacy bridge.
 // GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// The M2 source transform composes after S10..S21 transforms in the ephemeral build workspace.
+// The M2 source transform composes after S10..S22 transforms in the ephemeral build workspace.
