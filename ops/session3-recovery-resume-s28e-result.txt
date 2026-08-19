@@ -1,6 +1,4 @@
-source_check=PASS
-source_persist=PASS
-failed_phase=PRECHECK
+failed_phase=PATCH
 stable=UNTOUCHED
 merge_pr38=UNTOUCHED
 verdict=FAILED_OR_STOPPED
