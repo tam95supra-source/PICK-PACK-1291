@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "pick-pack-1291-service-m1-staging",
-  "main": "src/entry.ts",
+  "main": "src/entry_product.ts",
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
