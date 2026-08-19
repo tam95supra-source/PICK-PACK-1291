@@ -252,3 +252,33 @@ function ppBaoHangBridgeRecordError_(where, err) {
   );
   console.error('BAO_HANG_STAFF_BRIDGE ' + where + ' ' + String(err && err.stack || err));
 }
+
+
+// Programmatic writes (Web/App/service) do not fire Google Sheets onEdit/onChange.
+// Emit the same trusted delta bridge explicitly after the source Sheet mutation.
+function ppBaoHangBridgeNotifyServiceStaffMutation_(eventId, row, oldCode, changeType) {
+  try {
+    if (typeof ppBaoHangBridgeSendOrQueue_ !== 'function') return 'UNAVAILABLE';
+    const rowNumber = Math.max(2, Number(row || 0));
+    const clean = String(eventId || Utilities.getUuid()).replace(/[^A-Za-z0-9._:-]/g, '').slice(0, 90) || Utilities.getUuid();
+    const oldCodes = {};
+    if (oldCode) oldCodes[String(rowNumber)] = String(oldCode).trim();
+    const result = ppBaoHangBridgeSendOrQueue_({
+      action: 'staff-source-ping',
+      event_id: 'ppstaff-' + clean,
+      source_id: PP_BH_STAFF_BRIDGE.SOURCE_ID,
+      source_tab: PP_BH_STAFF_BRIDGE.SOURCE_TAB,
+      change_type: 'SERVICE_' + String(changeType || 'MUTATION').slice(0, 24),
+      row_start: rowNumber,
+      row_end: rowNumber,
+      col_start: 1,
+      col_end: 6,
+      old_codes: oldCodes,
+      at: new Date().toISOString()
+    });
+    return result && result.ok ? 'SENT' : (result && result.queued ? 'QUEUED' : 'FAILED');
+  } catch (err) {
+    console.error('BAO_HANG_STAFF_BRIDGE SERVICE ' + String(err && err.stack || err));
+    return 'FAILED';
+  }
+}
