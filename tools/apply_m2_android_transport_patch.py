@@ -9,7 +9,8 @@ path = ROOT / "app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt"
 s = path.read_text()
 marker = "M2_SERVICE_TRANSPORT_APPLIED"
 if marker in s:
-    print("M2 Android transport already applied; skip.")
+    print("M2 Android transport already applied; composing S19 runtime fix.")
+    runpy.run_path(str(ROOT / "tools/apply_s19_m2_runtime_fix.py"), run_name="__main__")
     raise SystemExit(0)
 
 anchor = "    private val executor = Executors.newSingleThreadExecutor()\n"
@@ -59,4 +60,5 @@ new = '''      val m2 = when {
 s = s.replace(old, new, 1)
 
 path.write_text(s)
-print(f"Applied M2 dynamic Service transport patch: {path}")
+runpy.run_path(str(ROOT / "tools/apply_s19_m2_runtime_fix.py"), run_name="__main__")
+print(f"Applied M2 dynamic Service transport + S19 runtime patch: {path}")
