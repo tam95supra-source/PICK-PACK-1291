@@ -59,6 +59,8 @@ jobs:
           grep -Fq 'e.committed_at,e.idempotency_key,e.origin,e.schema_version,e.checksum,e.payload_json' src/replication.ts
           ! grep -Fq 'e.committed_at,e.payload_json,e.idempotency_key' src/replication.ts
           grep -Fq 'const writeWindow=auth.role==="SUPERADMIN"?7:2' src/core.ts
+          grep -Fq 'source_checksum_verified===1' src/recovery_resume_compat.ts
+          grep -Fq 'sanitized_checksum' src/recovery_resume_compat.ts
           cd ..
           BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
           SERVICE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-service-token-v1" | sha256sum | awk '{print $1}')
@@ -141,8 +143,14 @@ jobs:
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/v1/capabilities" >/tmp/caps.json
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/v1/authority" >/tmp/auth.json
           curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/" >/tmp/web.html
+          curl -fsS --retry 5 --retry-delay 2 --max-time 25 "$EXPECTED_SERVICE_URL/app.js" >/tmp/app.js
           node -e 'const h=require("/tmp/health.json"),c=require("/tmp/caps.json"),j=require("/tmp/auth.json"),a=j.authority||j;if(!h.ok||h.environment!=="production"||h.generation!==process.env.SERVICE_GENERATION||!c.ok||Number(c.business_window)!==7||!c.mutation_batch||!c.fcm_wake||!c.import_engine||c.realtime_protocol!=="INVALIDATION_V1"||!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==6||a.scope!=="PRODUCTION")throw new Error("POST_SERVICE_VERIFY_FAILED");console.log("POST_SERVICE="+JSON.stringify({health:{generation:h.generation,replication:h.replication},caps:{business_window:c.business_window,mutation_batch:c.mutation_batch,fcm_wake:c.fcm_wake,import_engine:c.import_engine,realtime_protocol:c.realtime_protocol},authority:a}))'
-          grep -q 'PICK PACK 1291' /tmp/web.html
+          grep -q 'Pick Pack 1291' /tmp/web.html
+          grep -Fq "m.type==='DAY_CHANGED'" /tmp/app.js
+          grep -Fq 'INVALIDATION_V1' /tmp/app.js
+          ! grep -Fq "m.type==='DELTA'" /tmp/app.js
+          HTTP=$(curl -sS --max-time 25 -o /tmp/resume-unauth.json -w '%{http_code}' -X POST -H 'content-type: application/json' "$EXPECTED_SERVICE_URL/internal/recovery/failback-resume" -d '{}')
+          [[ "$HTTP" == 401 ]] || { echo "FAILBACK_RESUME_ROUTE_UNEXPECTED_HTTP=$HTTP"; cat /tmp/resume-unauth.json; exit 1; }
           : >/tmp/health-times.txt; for i in $(seq 1 10); do curl -fsS --max-time 10 -o /dev/null -w '%{time_total}\n' "$EXPECTED_SERVICE_URL/health" >>/tmp/health-times.txt; done
           node -e 'const fs=require("fs"),x=fs.readFileSync("/tmp/health-times.txt","utf8").trim().split(/\s+/).map(Number).sort((a,b)=>a-b),m=x[Math.floor(x.length/2)];console.log("HEALTH_BENCH="+JSON.stringify({samples:x.length,min_ms:+(x[0]*1000).toFixed(1),median_ms:+(m*1000).toFixed(1),max_ms:+(x.at(-1)*1000).toFixed(1),mean_ms:+(x.reduce((a,b)=>a+b,0)/x.length*1000).toFixed(1)}))'
           OK=0; for i in $(seq 1 8); do : >/tmp/gas-post.json; curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gas-post.json || true; if node -e 'try{const j=require("/tmp/gas-post.json"),a=j.authority||{};process.exit(j.ok&&j.authority_mode==="GOOGLE_FALLBACK"&&Number(a.authority_epoch)===7&&j.service_url===process.env.EXPECTED_SERVICE_URL?0:1)}catch{process.exit(1)}'; then OK=1; break; fi; sleep 2; done; [[ "$OK" == 1 ]] || exit 1
