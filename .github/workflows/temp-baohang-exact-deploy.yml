@@ -3,7 +3,7 @@ name: Temp Bao Hang exact GAS deploy
 on:
   pull_request:
     branches: [main]
-    paths: ['ops/temp-baohang-exact-deploy-trigger.txt']
+    paths: ['.github/workflows/temp-deploy-baohang-gas.yml']
 
 permissions:
   contents: read
