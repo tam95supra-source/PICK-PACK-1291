@@ -7,8 +7,8 @@ import org.json.JSONObject
 /**
  * Device-local projection used by hot PDA screens.
  *
- * D1 remains canonical. This projection only renders the latest SQLite/master snapshot immediately;
- * foreground revision sync and Service revalidation keep it converged across devices.
+ * D1 remains canonical. This projection renders the latest confirmed local snapshot immediately;
+ * Service reconciliation and the durable pending overlay converge it across devices.
  */
 object PdaLocalProjection {
     fun employeeContext(context: Context, mnvRaw: String): JSONObject? {
@@ -16,7 +16,8 @@ object PdaLocalProjection {
         if (mnv.isBlank()) return null
         val employee = MasterDataCache.employee(context, mnv) ?: return null
         val store = OperationalDataStore(context.applicationContext)
-        val day = store.loadDay(store.businessDate()) ?: return null
+        val businessDate = store.latestBusinessDate()
+        val day = store.loadDay(businessDate) ?: return null
         val sessions = day.optJSONArray("sessions") ?: JSONArray()
         var session: JSONObject? = null
         for (i in 0 until sessions.length()) {
@@ -31,7 +32,7 @@ object PdaLocalProjection {
         return JSONObject()
             .put("ok", true)
             .put("source", "PDA_SQLITE")
-            .put("business_date", day.optString("business_date", store.businessDate()))
+            .put("business_date", day.optString("business_date", businessDate))
             .put("day_revision", day.optLong("day_revision", 0L))
             .put("employee", employee)
             .put("state", state)
@@ -42,7 +43,7 @@ object PdaLocalProjection {
         val mnv = mnvRaw.trim()
         val raw = MasterDataCache.resourceOptions(context)
         val store = OperationalDataStore(context.applicationContext)
-        val day = store.loadDay(store.businessDate())
+        val day = store.loadDay(store.latestBusinessDate())
         val sessions = day?.optJSONArray("sessions") ?: JSONArray()
 
         val busyPdas = HashSet<String>()
