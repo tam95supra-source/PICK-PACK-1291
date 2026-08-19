@@ -1,0 +1,9 @@
+checked_at=2026-08-19T11:05:53Z
+head_sha=88395a5c0cf5cdd32b3efe7d3e9ed868342de25a
+release_bindings=MISSING:ANDROID_SIGNING_KEY_ALIAS,FIREBASE_PROJECT_ID,FIREBASE_GOOGLE_APP_ID,FIREBASE_API_KEY,FIREBASE_GCM_SENDER_ID
+service_health=PASS
+service_authority=SERVICE_PRIMARY epoch=6 seq=4
+capabilities=PASS
+web_product=FAIL
+beta23_drive=ABSENT
+stable_drive=NONEMPTY
