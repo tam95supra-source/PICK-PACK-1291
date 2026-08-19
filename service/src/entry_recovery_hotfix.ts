@@ -2,7 +2,7 @@ import entry, { RealtimeHub } from "./entry_hotfix";
 import { internalAuthorized } from "./auth";
 import { ensureBusinessDateFromRequest } from "./business_date";
 import { currentAuthority } from "./core";
-import { resumeFailbackFromFallbackInbox } from "./recovery";
+import { resumeFailbackWithLegacyCompat } from "./recovery_resume_compat";
 import { apiError, constantTimeEqual, json, readJsonBody, sha256Hex } from "./util";
 
 export { RealtimeHub };
@@ -15,7 +15,7 @@ async function gasBridgeAuthorized(request:Request,env:Env):Promise<boolean>{
 async function resumeFailback(request:Request,env:Env):Promise<Response>{
   if(!await internalAuthorized(request,env))return apiError("INTERNAL_UNAUTHORIZED","AUTH",401);
   const input=await readJsonBody<{fallback_epoch:number;confirmation:string;initiated_by?:string}>(request);
-  try{return json(await resumeFailbackFromFallbackInbox(env.DB,env,input));}
+  try{return json(await resumeFailbackWithLegacyCompat(env.DB,env,input));}
   catch(e){console.log(JSON.stringify({level:"error",kind:"failback_resume_failed",error:String(e)}));return apiError("FAILBACK_RESUME_FAILED","INTEGRITY",409,false,String(e).slice(0,500));}
 }
 
