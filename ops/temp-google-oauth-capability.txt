@@ -1,0 +1,3 @@
+oauth_caps=SCRIPT_DEPLOYMENTS+SCRIPT_PROJECTS
+drive_http=403
+drive_reason=INSUFFICIENT_SCOPE
