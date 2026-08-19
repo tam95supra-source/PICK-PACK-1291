@@ -30,6 +30,8 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s17_sqlite_recovery_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s18_sync_navigation_patch.py"))
     inputs.file(rootProject.file("tools/apply_m2_android_transport_patch.py"))
+    inputs.file(rootProject.file("tools/apply_s19_m2_runtime_fix.py"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
@@ -51,8 +53,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 25
-            versionName = "0.4.2-beta.19"
+            versionCode = 26
+            versionName = "0.4.2-beta.20"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -89,4 +91,4 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // M2 target: Android/PWA <-> Service <-> D1, with GAS as controlled fallback/legacy bridge.
 // GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// The M2 source transform composes after S10..S18 transforms in the ephemeral build workspace.
+// The M2 source transform composes after S10..S19 transforms in the ephemeral build workspace.
