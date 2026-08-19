@@ -1,4 +1,4 @@
-name: S13 Workers Dev Hostname Finalize
+name: S13 Authority Reconcile and Domain
 
 on:
   pull_request:
@@ -9,157 +9,295 @@ permissions:
   contents: read
 
 concurrency:
-  group: s13-workers-dev-hostname-finalize
+  group: s13-authority-reconcile-and-domain
   cancel-in-progress: false
 
 env:
   GAS_WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  OLD_SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  TARGET_SERVICE_URL: https://pick-pack-1291-service.pp1291.workers.dev
   TARGET_ACCOUNT_SUBDOMAIN: pp1291
   WORKER_NAME: pick-pack-1291-service
-  TARGET_SERVICE_URL: https://pick-pack-1291-service.pp1291.workers.dev
   SERVICE_GENERATION: m2-prod-20260819-001
 
 jobs:
-  finalize-hostname:
+  reconcile-and-domain:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
     steps:
-      - name: Validate credentials and derive bridge secret
-        id: secrets
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+
+      - name: Validate credentials and derive existing secrets
+        id: secret
         shell: bash
         run: |
           set -euo pipefail
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_SECRET; do test -n "${!v:-}" || { echo "MISSING:$v"; exit 1; }; done
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID SIGNING_STORE_PASSWORD; do
+            test -n "${!v:-}" || { echo "MISSING:$v"; exit 1; }
+          done
           BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
-          echo "::add-mask::$BRIDGE"
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"; echo "::add-mask::$ADMIN"
           echo "bridge=$BRIDGE" >> "$GITHUB_OUTPUT"
+          echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
 
-      - name: Detect already-finalized state
+      - name: Read and fence current authority state
         id: state
         shell: bash
         run: |
           set -euo pipefail
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain.json
-          CF=$(node -e 'const x=require("/tmp/subdomain.json");process.stdout.write(String(x.result?.subdomain||""))')
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/discovery.json
-          if [[ "$CF" == "$TARGET_ACCOUNT_SUBDOMAIN" ]] && grep -q '"service_url":"https://pick-pack-1291-service.pp1291.workers.dev"' /tmp/discovery.json && grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/discovery.json && grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/discovery.json; then
-            echo "done=true" >> "$GITHUB_OUTPUT"
-            echo 'Hostname already finalized; verify only.'
+          curl -fsS "$OLD_SERVICE_URL/v1/authority" >/tmp/service-authority.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas-discovery.json
+          S_MODE=$(jq -r '.authority.mode' /tmp/service-authority.json)
+          S_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-authority.json)
+          S_GEN=$(jq -r '.authority.service_generation' /tmp/service-authority.json)
+          G_MODE=$(jq -r '.authority_mode' /tmp/gas-discovery.json)
+          G_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/gas-discovery.json)
+          G_SEQ=$(jq -r '.authority.authority_seq' /tmp/gas-discovery.json)
+          G_GEN=$(jq -r '.service_generation' /tmp/gas-discovery.json)
+          G_URL=$(jq -r '.service_url' /tmp/gas-discovery.json)
+          echo "SERVICE=$S_MODE epoch=$S_EPOCH generation=$S_GEN"
+          echo "GAS=$G_MODE epoch=$G_EPOCH seq=$G_SEQ generation=$G_GEN url=$G_URL"
+          [[ "$S_GEN" == "$SERVICE_GENERATION" && "$G_GEN" == "$SERVICE_GENERATION" ]]
+          if [[ "$S_MODE" == SERVICE_PRIMARY && "$G_MODE" == SERVICE_PRIMARY && "$S_EPOCH" == "$G_EPOCH" ]]; then
+            echo "recover=false" >> "$GITHUB_OUTPUT"
+            echo "service_epoch=$S_EPOCH" >> "$GITHUB_OUTPUT"
+          elif [[ "$S_MODE" == SERVICE_PRIMARY && "$G_MODE" == GOOGLE_FALLBACK && "$G_EPOCH" -eq $((S_EPOCH+1)) && "$G_SEQ" -ge 1 ]]; then
+            echo "recover=true" >> "$GITHUB_OUTPUT"
+            echo "service_epoch=$S_EPOCH" >> "$GITHUB_OUTPUT"
+            echo "fallback_epoch=$G_EPOCH" >> "$GITHUB_OUTPUT"
+            echo "fallback_seq=$G_SEQ" >> "$GITHUB_OUTPUT"
           else
-            echo "done=false" >> "$GITHUB_OUTPUT"
+            echo 'UNSAFE_AUTHORITY_COMBINATION'; cat /tmp/service-authority.json; cat /tmp/gas-discovery.json; exit 1
           fi
 
-      - name: Require propagated GAS control route and unchanged authority
-        if: steps.state.outputs.done != 'true'
+      - name: Build temporary GAS recovery wrapper from current authoritative source
+        if: steps.state.outputs.recover == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_s13_service_url_gas_patch.py
+          python3 - <<'PY'
+          from pathlib import Path
+          api=Path('google-apps-script/PICK_PACK_API.gs')
+          s=api.read_text()
+          a="    if (action === 'service_discovery') return ppJson_(ppM2Discovery_(body));\n"
+          line="    if (action === 'm2_recovery_internal') return ppJson_(ppM2RecoveryInternal_(body));\n"
+          if line not in s:
+              assert s.count(a)==1
+              s=s.replace(a,a+line,1)
+          api.write_text(s)
+          m2=Path('google-apps-script/SERVICE_MIGRATION_M2.gs')
+          s=m2.read_text()
+          if 'function ppM2RecoveryInternal_' not in s:
+              s += r'''
+
+// S13 temporary recovery wrapper. It does not implement authority transitions itself; it only
+// invokes the existing M2 begin/flush/complete functions behind the existing bridge secret.
+function ppM2RecoveryInternal_(body){
+  body=body||{};
+  if(String(body.confirmation||'')!=='OWNER_LOCKED_M2_FAILBACK')return {ok:false,error:'FAILBACK_CONFIRMATION_REQUIRED'};
+  if(!ppM2BridgeSecret_()||String(body.bridge_secret||'')!==ppM2BridgeSecret_())return {ok:false,error:'RECOVERY_BRIDGE_SECRET_INVALID'};
+  const auth={login_id:'S13_RECOVERY',role:'SUPERADMIN',display_name:'S13_RECOVERY'};
+  const phase=String(body.phase||'');
+  if(phase==='begin')return ppM2BeginReconcile_(auth,body);
+  if(phase==='flush')return ppM2FlushFallbackInbox_();
+  if(phase==='complete')return ppM2CompleteFailback_(auth,body);
+  return {ok:false,error:'RECOVERY_PHASE_INVALID'};
+}
+'''
+          m2.write_text(s)
+          PY
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
+          node --check /tmp/PICK_PACK_API.js
+          node --check /tmp/SERVICE_MIGRATION_M2.js
+
+      - name: Deploy temporary recovery wrapper to existing GAS deployment
+        if: steps.state.outputs.recover == 'true'
+        id: gasdeploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          OAUTH=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          ACCESS_TOKEN=$(jq -r '.access_token // empty' <<<"$OAUTH"); test -n "$ACCESS_TOKEN"; echo "::add-mask::$ACCESS_TOKEN"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"S13 fenced authority reconciliation wrapper"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
+          V=$(jq -r '.versionNumber' /tmp/version.json)
+          jq -n --arg s "$SCRIPT_ID" --argjson v "$V" '{deploymentConfig:{scriptId:$s,versionNumber:$v,manifestFileName:"appsscript",description:"Pick Pack 1291 live API S13 authority reconciliation"}}' >/tmp/deploy.json
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
+
+      - name: Wait for recovery wrapper propagation
+        if: steps.state.outputs.recover == 'true'
+        env:
+          BRIDGE: ${{ steps.secret.outputs.bridge }}
         shell: bash
         run: |
           set -euo pipefail
           OK=false
-          for i in $(seq 1 40); do
-            curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"m2_service_url_prepare_internal","confirmation":"invalid"}' >/tmp/probe.json || true
-            if grep -q 'SERVICE_URL_CONFIRMATION_REQUIRED' /tmp/probe.json; then OK=true; break; fi
+          for i in $(seq 1 120); do
+            curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"m2_recovery_internal","confirmation":"invalid"}' >/tmp/probe.json || true
+            if grep -q 'FAILBACK_CONFIRMATION_REQUIRED' /tmp/probe.json; then OK=true; break; fi
             sleep 3
           done
-          [[ "$OK" == true ]] || { echo 'GAS_CONTROL_ROUTE_NOT_PROPAGATED'; cat /tmp/probe.json; exit 1; }
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/before-discovery.json
-          if ! grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/before-discovery.json; then echo 'DISCOVERY_AUTHORITY_MISMATCH'; cat /tmp/before-discovery.json; exit 1; fi
-          if ! grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/before-discovery.json; then echo 'DISCOVERY_GENERATION_MISMATCH'; cat /tmp/before-discovery.json; exit 1; fi
+          [[ "$OK" == true ]] || { echo 'RECOVERY_WRAPPER_NOT_PROPAGATED'; cat /tmp/probe.json; exit 1; }
 
-      - name: Verify account scope and current workers.dev subdomain
-        if: steps.state.outputs.done != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain-before.json
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" >/tmp/scripts.json
-          node - "$WORKER_NAME" <<'NODE'
-          const fs=require('fs'), expected=process.argv[2];
-          const sub=JSON.parse(fs.readFileSync('/tmp/subdomain-before.json')), scripts=JSON.parse(fs.readFileSync('/tmp/scripts.json'));
-          if(!sub.success||!scripts.success)throw new Error('Cloudflare API diagnostic failed');
-          const names=(scripts.result||[]).map(x=>x.id).sort();
-          if(names.length!==1||names[0]!==expected)throw new Error('Refusing account-wide subdomain change; unexpected Workers: '+names.join(','));
-          console.log('CURRENT_ACCOUNT_SUBDOMAIN='+sub.result.subdomain);
-          NODE
-
-      - name: Prepare GAS dual URL fence
-        if: steps.state.outputs.done != 'true'
+      - name: Begin RECONCILING and flush all fallback events to D1 inbox
+        if: steps.state.outputs.recover == 'true'
         env:
-          BRIDGE: ${{ steps.secrets.outputs.bridge }}
+          BRIDGE: ${{ steps.secret.outputs.bridge }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json,os
-          open('/tmp/prepare.json','w').write(json.dumps({'action':'m2_service_url_prepare_internal','confirmation':'OWNER_LOCKED_M2_SERVICE_URL_ONLY','bridge_secret':os.environ['BRIDGE'],'service_url':os.environ['TARGET_SERVICE_URL']}))
-          PY
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/prepare.json >/tmp/prepare.out
-          rm -f /tmp/prepare.json
-          if ! grep -q '"ok":true' /tmp/prepare.out; then echo 'GAS_PREPARE_FAILED'; cat /tmp/prepare.out; exit 1; fi
-          grep -q '"prepared":true' /tmp/prepare.out
-          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/prepare.out
-          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/prepare.out
+          jq -n --arg b "$BRIDGE" '{action:"m2_recovery_internal",phase:"begin",confirmation:"OWNER_LOCKED_M2_FAILBACK",bridge_secret:$b}' >/tmp/begin.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/begin.json >/tmp/begin.out
+          rm -f /tmp/begin.json
+          cat /tmp/begin.out
+          grep -q '"ok":true' /tmp/begin.out; grep -q '"authority_mode":"RECONCILING"' /tmp/begin.out
+          EXPECTED='${{ steps.state.outputs.fallback_seq }}'
+          ACTUAL=$(jq -r '.fallback_seq' /tmp/begin.out); [[ "$ACTUAL" == "$EXPECTED" ]]
+          jq -n --arg b "$BRIDGE" '{action:"m2_recovery_internal",phase:"flush",confirmation:"OWNER_LOCKED_M2_FAILBACK",bridge_secret:$b}' >/tmp/flush.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/flush.json >/tmp/flush.out
+          rm -f /tmp/flush.json
+          cat /tmp/flush.out
+          grep -q '"ok":true' /tmp/flush.out
+          [[ "$(jq -r '.pending' /tmp/flush.out)" == "0" ]]
 
-      - name: Change workers.dev account subdomain only if needed
-        if: steps.state.outputs.done != 'true'
+      - name: Replay verified fallback inbox into Service and advance authority
+        if: steps.state.outputs.recover == 'true'
+        id: failback
+        env:
+          ADMIN: ${{ steps.secret.outputs.admin }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --argjson f '${{ steps.state.outputs.fallback_epoch }}' --argjson s '${{ steps.state.outputs.service_epoch }}' \
+            '{fallback_epoch:$f,expected_service_epoch:$s,confirmation:"OWNER_LOCKED_M2_FAILBACK",initiated_by:"S13_OWNER_REQUEST_RECOVERY"}' >/tmp/failback.json
+          CODE=$(curl -sS -o /tmp/failback.out -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" --data-binary @/tmp/failback.json "$OLD_SERVICE_URL/internal/recovery/failback")
+          rm -f /tmp/failback.json
+          cat /tmp/failback.out
+          [[ "$CODE" == 200 ]] || exit 1
+          grep -q '"ok":true' /tmp/failback.out
+          NEW_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/failback.out)
+          [[ "$NEW_EPOCH" -eq $(( ${{ steps.state.outputs.fallback_epoch }} + 1 )) ]]
+          echo "new_epoch=$NEW_EPOCH" >> "$GITHUB_OUTPUT"
+
+      - name: Complete GAS failback on exact Service epoch
+        if: steps.state.outputs.recover == 'true'
+        env:
+          BRIDGE: ${{ steps.secret.outputs.bridge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg b "$BRIDGE" --argjson e '${{ steps.failback.outputs.new_epoch }}' --arg u "$OLD_SERVICE_URL" \
+            '{action:"m2_recovery_internal",phase:"complete",confirmation:"OWNER_LOCKED_M2_FAILBACK",bridge_secret:$b,authority_epoch:$e,service_generation:"m2-prod-20260819-001",service_url:$u}' >/tmp/complete.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/complete.json >/tmp/complete.out
+          rm -f /tmp/complete.json
+          cat /tmp/complete.out
+          grep -q '"ok":true' /tmp/complete.out; grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/complete.out
+
+      - name: Require Service and GAS authority convergence before hostname work
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS "$OLD_SERVICE_URL/v1/authority" >/tmp/service-converged.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas-converged.json
+          S_MODE=$(jq -r '.authority.mode' /tmp/service-converged.json); G_MODE=$(jq -r '.authority_mode' /tmp/gas-converged.json)
+          S_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-converged.json); G_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/gas-converged.json)
+          [[ "$S_MODE" == SERVICE_PRIMARY && "$G_MODE" == SERVICE_PRIMARY && "$S_EPOCH" == "$G_EPOCH" ]]
+          echo "CONVERGED_EPOCH=$S_EPOCH"
+
+      - name: Verify Cloudflare account scope
         shell: bash
         run: |
           set -euo pipefail
           AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/subdomain-current.json
-          CURRENT=$(node -e 'const x=require("/tmp/subdomain-current.json");process.stdout.write(String(x.result?.subdomain||""))')
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" >/tmp/scripts.json
+          NAMES=$(jq -r '[.result[].id]|sort|join(",")' /tmp/scripts.json)
+          [[ "$NAMES" == "$WORKER_NAME" ]] || { echo "UNEXPECTED_WORKERS=$NAMES"; exit 1; }
+
+      - name: Prepare dual URL and shorten workers.dev account subdomain
+        env:
+          BRIDGE: ${{ steps.secret.outputs.bridge }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/cf-before.json
+          CURRENT=$(jq -r '.result.subdomain' /tmp/cf-before.json)
           if [[ "$CURRENT" != "$TARGET_ACCOUNT_SUBDOMAIN" ]]; then
-            H=$(curl -sS -o /tmp/subdomain-set.json -w '%{http_code}' -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
-              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
-              -d "{\"subdomain\":\"$TARGET_ACCOUNT_SUBDOMAIN\"}")
-            [[ "$H" == 200 ]] || { cat /tmp/subdomain-set.json; exit 1; }
-            grep -q '"success":true' /tmp/subdomain-set.json
+            jq -n --arg b "$BRIDGE" --arg u "$TARGET_SERVICE_URL" '{action:"m2_service_url_prepare_internal",confirmation:"OWNER_LOCKED_M2_SERVICE_URL_ONLY",bridge_secret:$b,service_url:$u}' >/tmp/prepare.json
+            curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/prepare.json >/tmp/prepare.out
+            rm -f /tmp/prepare.json
+            cat /tmp/prepare.out
+            grep -q '"ok":true' /tmp/prepare.out; grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/prepare.out
+            H=$(curl -sS -o /tmp/cf-set.json -w '%{http_code}' -X PUT -H "$AUTH" -H 'Content-Type: application/json' \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" -d "{\"subdomain\":\"$TARGET_ACCOUNT_SUBDOMAIN\"}")
+            [[ "$H" == 200 ]] || { cat /tmp/cf-set.json; exit 1; }
+            grep -q '"success":true' /tmp/cf-set.json
           fi
 
-      - name: Require new Worker URL healthy and Service-primary
+      - name: Verify new Worker URL then finalize GAS discovery
+        env:
+          BRIDGE: ${{ steps.secret.outputs.bridge }}
         shell: bash
         run: |
           set -euo pipefail
           OK=false
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             curl -fsS "$TARGET_SERVICE_URL/health" >/tmp/new-health.json 2>/dev/null || true
             curl -fsS "$TARGET_SERVICE_URL/v1/authority" >/tmp/new-authority.json 2>/dev/null || true
             if grep -q '"ok":true' /tmp/new-health.json 2>/dev/null && grep -q '"mode":"SERVICE_PRIMARY"' /tmp/new-authority.json 2>/dev/null; then OK=true; break; fi
             sleep 2
           done
           [[ "$OK" == true ]] || { cat /tmp/new-health.json || true; cat /tmp/new-authority.json || true; exit 1; }
-
-      - name: Finalize GAS discovery and verify no authority change
-        if: steps.state.outputs.done != 'true'
-        env:
-          BRIDGE: ${{ steps.secrets.outputs.bridge }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os
-          open('/tmp/finalize.json','w').write(json.dumps({'action':'m2_service_url_update_internal','confirmation':'OWNER_LOCKED_M2_SERVICE_URL_ONLY','bridge_secret':os.environ['BRIDGE'],'service_url':os.environ['TARGET_SERVICE_URL']}))
-          PY
+          jq -n --arg b "$BRIDGE" --arg u "$TARGET_SERVICE_URL" '{action:"m2_service_url_update_internal",confirmation:"OWNER_LOCKED_M2_SERVICE_URL_ONLY",bridge_secret:$b,service_url:$u}' >/tmp/finalize.json
           curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" --data-binary @/tmp/finalize.json >/tmp/finalize.out
           rm -f /tmp/finalize.json
-          if ! grep -q '"ok":true' /tmp/finalize.out; then echo 'GAS_FINALIZE_FAILED'; cat /tmp/finalize.out; exit 1; fi
-          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/finalize.out
-          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/finalize.out
+          cat /tmp/finalize.out
+          grep -q '"ok":true' /tmp/finalize.out; grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/finalize.out
 
-      - name: Final verification
+      - name: Final authority, URL and replication verification
         shell: bash
         run: |
           set -euo pipefail
-          AUTH="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          curl -fsS -H "$AUTH" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" >/tmp/cf-final.json
-          grep -q '"subdomain":"pp1291"' /tmp/cf-final.json
-          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/after-discovery.json
-          grep -q '"service_url":"https://pick-pack-1291-service.pp1291.workers.dev"' /tmp/after-discovery.json
-          grep -q '"authority_mode":"SERVICE_PRIMARY"' /tmp/after-discovery.json
-          grep -q '"service_generation":"m2-prod-20260819-001"' /tmp/after-discovery.json
-          echo "SERVICE_URL=$TARGET_SERVICE_URL"
+          curl -fsS "$TARGET_SERVICE_URL/health" >/tmp/health-final.json
+          curl -fsS "$TARGET_SERVICE_URL/v1/authority" >/tmp/service-final.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.20"}' >/tmp/gas-final.json
+          S_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-final.json); G_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/gas-final.json)
+          [[ "$(jq -r '.authority.mode' /tmp/service-final.json)" == SERVICE_PRIMARY ]]
+          [[ "$(jq -r '.authority_mode' /tmp/gas-final.json)" == SERVICE_PRIMARY ]]
+          [[ "$S_EPOCH" == "$G_EPOCH" ]]
+          [[ "$(jq -r '.service_url' /tmp/gas-final.json)" == "$TARGET_SERVICE_URL" ]]
+          [[ "$(jq -r '.generation' /tmp/health-final.json)" == "$SERVICE_GENERATION" ]]
+          [[ "$(jq -r '.replication.state' /tmp/health-final.json)" == HEALTHY ]]
+          [[ "$(jq -r '.replication.pending_count' /tmp/health-final.json)" == 0 ]]
+          echo "FINAL_SERVICE_URL=$TARGET_SERVICE_URL"
+          echo "FINAL_AUTHORITY_EPOCH=$S_EPOCH"
