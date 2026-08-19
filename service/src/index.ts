@@ -2,6 +2,7 @@ import { authenticate, createChallenge, createSession, internalAuthorized, logou
 import { bootstrapFromGoogle } from "./bootstrap";
 import { commitMutation, CoreError, currentAuthority, delta, transitionAuthority } from "./core";
 import { commitLegacyMutation, type LegacyMutationInput } from "./legacy";
+import { commitAdminAudit, type AdminAuditInput } from "./admin_audit"; // S30D_CANONICAL_AUDIT_BATCH
 import { replicatePending } from "./replication";
 import { dayDeltaV2, masterDeltaV2, syncStatusV2 } from "./sync_contract";
 import { historicalCorrection } from "./correction";
@@ -114,11 +115,19 @@ async function legacyMutation(request:Request,env:Env):Promise<Response>{
   const auth=await requireAuth(request,env),input=await readJsonBody<LegacyMutationInput>(request),result=await commitLegacyMutation(env.DB,env,auth,input),e=result.event as {event_id:string;event_type:string;entity_type:string;entity_id:string;business_date:string;authority_epoch:number;authority_seq:number;service_generation:string;new_version:number};
   const delivered=await broadcastEvent(env,e);return json({...result,realtime_delivered:delivered},result.duplicate?200:201);
 }
+async function adminAuditDirect(request:Request,env:Env):Promise<Response>{
+  const auth=await requireAuth(request,env),input=await readJsonBody<AdminAuditInput>(request),result=await commitAdminAudit(env.DB,auth,input),e=result.event;
+  const delivered=await broadcastEvent(env,e);return json({ok:true,duplicate:result.duplicate,event:eventPublic(e as unknown as Record<string,unknown>),realtime_delivered:delivered},result.duplicate?200:201);
+}
 async function legacyMutationBatch(request:Request,env:Env):Promise<Response>{
   const auth=await requireAuth(request,env),body=await readJsonBody<{events:LegacyMutationInput[]}>(request),events=Array.isArray(body.events)?body.events:[];
   if(!events.length||events.length>100)return apiError("LEGACY_MUTATION_BATCH_INVALID","VALIDATION",400);
   const results:Record<string,unknown>[]=[];
   for(const input of events){const localEventId=String(input?.event_id||"");try{
+    if(String((input as unknown as {action?:string}).action||"")==="admin_audit"){
+      const ai=input as unknown as AdminAuditInput,ar=await commitAdminAudit(env.DB,auth,ai),ae=ar.event,delivered=await broadcastEvent(env,ae);
+      results.push({local_event_id:localEventId,status:ar.duplicate?"DUPLICATE":"CONFIRMED",canonical_event_id:ae.event_id,authority_epoch:ae.authority_epoch,authority_seq:ae.authority_seq,new_version:0,error_code:null,conflict:null,realtime_delivered:delivered});continue;
+    }
     const result=await commitLegacyMutation(env.DB,env,auth,input),e=result.event as {event_id:string;event_type:string;entity_type:string;entity_id:string;business_date:string;authority_epoch:number;authority_seq:number;service_generation:string;new_version:number},delivered=await broadcastEvent(env,e);
     results.push({local_event_id:localEventId,status:result.duplicate?"DUPLICATE":"CONFIRMED",canonical_event_id:e.event_id,authority_epoch:e.authority_epoch,authority_seq:e.authority_seq,new_version:e.new_version,error_code:null,conflict:null,realtime_delivered:delivered});
   }catch(err){if(err instanceof CoreError){const review=err.errorClass==="CONFLICT"||err.errorClass==="RESOURCE";results.push({local_event_id:localEventId,status:review?"REVIEW_REQUIRED":"REJECTED",canonical_event_id:null,authority_epoch:null,authority_seq:null,new_version:null,error_code:err.code,conflict:err.conflict??null,retryable:err.retryable});continue;}throw err;}}
@@ -173,6 +182,7 @@ async function route(request:Request,env:Env):Promise<Response>{
   if(p==="/v1/corrections"&&method==="POST")return historicalCorrection(request,env);
   if(p==="/v1/legacy-mutations"&&method==="POST")return legacyMutation(request,env);
   if(p==="/v1/legacy-mutations/batch"&&method==="POST")return legacyMutationBatch(request,env);
+  if(p==="/v1/admin/audit"&&method==="POST")return adminAuditDirect(request,env);
   if(p==="/v1/delta"&&method==="GET"){await requireAuth(request,env);const epoch=Number(u.searchParams.get("authority_epoch")||"0"),after=Number(u.searchParams.get("after_seq")||"0"),limit=Number(u.searchParams.get("limit")||"500");return json({ok:true,...await delta(env.DB,epoch,after,limit)});}
   if(p==="/v1/sync/status"&&method==="GET")return syncStatusV2(request,env);
   if(p==="/v1/delta/day"&&method==="GET")return dayDeltaV2(request,env);

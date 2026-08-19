@@ -19,7 +19,6 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s25_cache_sync_web_pda_fixes.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s27_projection_ack_gap_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s29_owner_localfirst_history.py"), run_name="__main__")
-    runpy.run_path(str(ROOT / "tools/apply_s30_admin_audit_android.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s30_canonical_admin_audit.py"), run_name="__main__")
     raise SystemExit(0)
 

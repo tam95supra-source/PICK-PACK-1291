@@ -47,7 +47,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s25_cache_sync_web_pda_fixes.py"))
     inputs.file(rootProject.file("tools/apply_s27_projection_ack_gap_fix.py"))
     inputs.file(rootProject.file("tools/apply_s29_owner_localfirst_history.py"))
-    inputs.file(rootProject.file("tools/apply_s30_admin_audit_android.py"))
+    inputs.file(rootProject.file("tools/apply_s30_canonical_admin_audit.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
