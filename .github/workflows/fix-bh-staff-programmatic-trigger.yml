@@ -1,0 +1,32 @@
+name: Fix BH staff programmatic trigger
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/fix-bh-staff-programmatic.trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: python3 ops/fix_bh_staff_programmatic.py
+      - name: Syntax and source gates
+        run: |
+          cp google-apps-script/PICK_PACK_API.gs /tmp/a.js
+          cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/b.js
+          node --check /tmp/a.js
+          node --check /tmp/b.js
+          grep -q 'bao_hang_bridge:bridge' google-apps-script/PICK_PACK_API.gs
+          grep -q 'ppBaoHangBridgeNotifyServiceStaffMutation_' google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google-apps-script/PICK_PACK_API.gs google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          git diff --cached --quiet || git commit -m 'fix(staff): ping Bao Hang for programmatic source changes'
+          git pull --rebase origin main
+          git push origin HEAD:main
