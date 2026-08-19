@@ -1,64 +1,16 @@
-name: Service M2 Beta20 Drive Direct Publish
+name: Historical - Service M2 Beta20 Drive Direct Publish
 
 on:
-  push:
-    branches: [ agent/service-migration-m2 ]
-    paths:
-      - 'ops/m2-beta20-drive-direct-trigger.txt'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
-
-concurrency:
-  group: service-m2-beta20-drive-direct-publish
-  cancel-in-progress: false
-
-env:
-  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
-  SERVICE_GENERATION: m2-prod-20260819-001
-  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
-  BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
-  BETA_VERSION: 0.4.2-beta.20
-  BETA_VERSION_CODE: '26'
-  BETA_PACKAGE: vn.pickpack1291.app.beta.publicbeta
-  STABLE_VERSION: 0.4.2-stable.0
-  EXPECTED_BETA_SHA256: ed5b98afeaf962b1081faaab4c710afa00f2fc80981b76666a86d8bee856502e
-  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
-  CANDIDATE_RUN_ID: '32205829548'
-  CANDIDATE_ARTIFACT_NAME: pick-pack-1291-0.4.2-beta.20-signed-validation
 
 jobs:
-  publish-drive-direct:
+  historical-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/service-migration-m2
-      - name: Verify owner-locked direct publish trigger
-        shell: bash
-        run: |
-          set -euo pipefail
-          grep -q '^confirmation=OWNER_LOCKED_M2_BETA20_DRIVE_DIRECT_PUBLISH$' ops/m2-beta20-drive-direct-trigger.txt
-          grep -q '^target_version=0.4.2-beta.20$' ops/m2-beta20-drive-direct-trigger.txt
-          grep -q '^target_version_code=26$' ops/m2-beta20-drive-direct-trigger.txt
-          grep -q '^stable_publish=false$' ops/m2-beta20-drive-direct-trigger.txt
-          grep -q 'versionName = "0.4.2-beta.20"' app/build.gradle.kts
-          grep -q 'S20_PACK_IDENTITY_APPLIED' tools/apply_s20_pack_identity_fix.py
-          grep -q 'S21_LABOR_SHIFT_APPLIED' tools/apply_s21_labor_shift_fix.py
-      - name: Publish exact signed Beta20 directly to Beta Drive folder and verify
-        run: python3 tools/m2_beta20_drive_direct_publish.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: m2-beta20-drive-direct-evidence-${{ github.run_id }}
-          path: m2-beta20-drive-direct-evidence/
-          if-no-files-found: warn
-          retention-days: 30
+      - run: |
+          echo 'HISTORICAL_ONLY: Beta20 direct Drive publisher is retired.'
+          echo 'Current release metadata must come from app/build.gradle.kts and the deliberate current-version publish path.'
+          echo 'This workflow performs no release, signing, Drive write, GAS deploy, or Stable action.'
