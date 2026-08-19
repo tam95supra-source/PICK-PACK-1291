@@ -3,6 +3,7 @@ import { currentAuthority } from "./core";
 import { ensureCurrentBangkokBusinessDate } from "./business_date";
 import { commitLegacyMutation, type LegacyMutationInput } from "./legacy";
 import { nowIso, sha256Hex } from "./util";
+import { recordAlreadyReflectedEnter } from "./recovery"; // S28D_COMPAT_REFLECTED_ENTER
 
 interface InboxRow { event_id:string;authority_epoch:number;authority_seq:number;service_generation:string;event_json:string;checksum:string;ingest_status:string;source_checksum_verified?:number;sanitized_checksum?:string|null; }
 interface FallbackEnvelope { action:LegacyMutationInput["action"];business_date:string;actor:string;role:"SUPERADMIN"|"ADMIN"|"USER";device_id:string;occurred_at:string;payload_json:string; }
@@ -108,7 +109,7 @@ export async function resumeFailbackWithLegacyCompat(db:D1Database,env:Env,input
   try{
     await db.prepare("UPDATE authority_state SET mode='SERVICE_PRIMARY',service_generation=?1,updated_at=?2 WHERE singleton_id=1 AND authority_epoch=?3 AND authority_seq=?4 AND mode='RECONCILING'").bind(generation,nowIso(),input.fallback_epoch,before.authority_seq).run();
     let applied=before.authority_seq;
-    for(let i=before.authority_seq;i<rows.length;i++){await replayRow(db,env,rows[i]!);applied++;}
+    for(let i=before.authority_seq;i<rows.length;i++){const row=rows[i]!;if(await recordAlreadyReflectedEnter(db,row)){applied++;continue;}await replayRow(db,env,row);applied++;}
     const checkpoint=await currentAuthority(db);
     if(checkpoint.authority_epoch!==input.fallback_epoch||checkpoint.authority_seq!==rows.length)throw new Error(`FAILBACK_RESUME_CHECKPOINT_DIVERGENCE:${checkpoint.authority_epoch}/${checkpoint.authority_seq}`);
     const eventCount=await db.prepare("SELECT COUNT(*) n FROM events WHERE authority_epoch=?1").bind(input.fallback_epoch).first<{n:number}>();

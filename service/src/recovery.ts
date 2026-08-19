@@ -46,7 +46,7 @@ async function replayRow(db:D1Database,env:Env,row:InboxRow):Promise<void>{
 // S28B_SQL_SEMANTIC_REFLECTED_ENTER
 // Use the same SQL semantic comparison proven by the production diagnostic. This avoids
 // divergent legacy alias/normalization logic between recovery code and the D1 gate.
-async function recordAlreadyReflectedEnter(db:D1Database,row:InboxRow):Promise<boolean>{
+export async function recordAlreadyReflectedEnter(db:D1Database,row:InboxRow):Promise<boolean>{
   const e=parseEnvelope(row.event_json);if(e.action!=="enter")return false;
   const cur=await db.prepare(`WITH f AS (
     SELECT json_extract(event_json,'$.business_date') d,
