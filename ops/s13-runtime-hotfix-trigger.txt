@@ -1,0 +1,4 @@
+confirmation=OWNER_REPORTED_BETA19_RUNTIME_DEFECTS
+beta_target=0.4.2-beta.20
+scope=service-code-only+android-runtime+cloudflare-domain-diagnostic
+stable=LOCKED
