@@ -1,4 +1,5 @@
-requested_at=2026-08-19T23:07:00+07:00
+requested_at=2026-08-19T23:10:00+07:00
 scope=READ_ONLY_TYPECHECK
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
+retry=1
