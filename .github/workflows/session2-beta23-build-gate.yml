@@ -1,0 +1,82 @@
+name: Session2 Beta23 Build Gate
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/session2-beta23-build-gate-trigger.txt'
+      - 'app/**'
+      - 'service/**'
+      - 'tools/**'
+      - '.github/workflows/session2-beta23-build-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: session2-beta23-build-gate
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Service and Web source gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check service/public/app.js
+          node --check service/public/history-admin.js
+          node --check service/public/admin-extension.js
+          cd service
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Owner contract source guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 29' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.23"' app/build.gradle.kts
+          grep -q 'overlayMutations' app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt
+          grep -q 'after_revision=0' app/src/main/java/vn/pickpack1291/app/beta/M2BackgroundSync.kt
+          grep -q 'M2BackgroundSync.catchUp' app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt
+          grep -q 'INVALIDATION_V1' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q 'DAY_CHANGED' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q 'MASTER_CHANGED' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q 'Event-driven foreground Service/D1 revision synchronizer' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          ! grep -q 'main.postDelayed(tick, nextDelay' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'PdaImportActivity' app/src/main/AndroidManifest.xml
+          grep -q 'firebase-messaging' app/build.gradle.kts
+          grep -q 'historicalBusinessDates' service/src/entry_product.ts
+          grep -q 'IMPORT_TEMPLATE_VERSION_STALE' service/src/import_xlsx.ts
+          grep -q 'Import dữ liệu' service/public/index.html
+          grep -q 'Lịch sử toàn phần' service/public/history-admin.html
+      - name: Compile transformed Beta23 Android client
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon clean :app:assembleBetaDebug
+      - name: Verify generated APK metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find app/build/outputs/apk/beta/debug -type f -name '*.apk' | head -1)
+          [[ -n "$APK" && -s "$APK" ]]
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          BADGING=$("$BUILD_TOOLS/aapt" dump badging "$APK" | head -1)
+          echo "$BADGING"
+          [[ "$BADGING" == *"name='vn.pickpack1291.app.beta.publicbeta'"* ]]
+          [[ "$BADGING" == *"versionCode='29'"* ]]
+          [[ "$BADGING" == *"versionName='0.4.2-beta.23'"* ]]
+          echo 'PASS - Beta23 source/transform/compile gate.'
