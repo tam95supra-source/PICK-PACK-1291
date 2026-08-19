@@ -1,0 +1,192 @@
+name: Align Bao Hang staff sender v4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/align-bao-hang-staff-sender-v4.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      BH_SCRIPT_ID: 12zMDmEl7EXcHOV7skWy8XY95Uk3k3zwSlv2A_aokbRWkyUoc-ArOxu55
+      BH_KNOWN_DEPLOYMENT_ID: AKfycbwb8Hcdg7tp0jqHLZU6kW5hkEclDC9d29DGvPuwcxvZbR9t9xnrWzaIYe8UZET-D_yI
+      PP_SCRIPT_ID_RAW: ${{ secrets.GAS_SCRIPT_ID }}
+      PP_DEPLOYMENT_ID_RAW: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: OAuth
+        id: auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo OAUTH > /tmp/stage
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve verified Bao Hang receiver URL
+        id: bh
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          echo RESOLVE_RECEIVER > /tmp/stage
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/deployments?pageSize=50" > /tmp/bhdeps.json
+          python3 - <<'PY' > /tmp/bh.env
+          import json,os
+          deps=json.load(open('/tmp/bhdeps.json')).get('deployments',[]); known=os.environ['BH_KNOWN_DEPLOYMENT_ID']; chosen=None
+          for d in deps:
+            if str(d.get('deploymentId',''))==known and any(e.get('entryPointType')=='WEB_APP' for e in (d.get('entryPoints') or [])): chosen=d; break
+          if chosen is None:
+            for d in deps:
+              if any(e.get('entryPointType')=='WEB_APP' for e in (d.get('entryPoints') or [])): chosen=d; break
+          if chosen is None: raise SystemExit('BH_WEB_DEPLOYMENT_NOT_FOUND')
+          web=[e.get('webApp',{}) for e in (chosen.get('entryPoints') or []) if e.get('entryPointType')=='WEB_APP']
+          if not web or not web[0].get('url'): raise SystemExit('BH_WEB_URL_NOT_FOUND')
+          print('url='+web[0]['url'])
+          PY
+          cat /tmp/bh.env >> "$GITHUB_OUTPUT"
+          URL=$(grep '^url=' /tmp/bh.env | cut -d= -f2-)
+          OK=false
+          for i in $(seq 1 15); do
+            curl -fsSL -H 'content-type: application/json' "$URL" -d '{"action":"staff-source-ping","event_id":"sender-align-probe-20260820","source_id":"1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78","source_tab":"DANH SÁCH NHÂN SỰ","row_start":2,"row_end":2}' > /tmp/probe.json || true
+            if jq -e '.ok==false and .error=="STAFF_BRIDGE_OAUTH_REQUIRED"' /tmp/probe.json >/dev/null 2>&1; then OK=true; break; fi
+            sleep 2
+          done
+          [[ "$OK" == true ]] || exit 21
+
+      - name: Normalize and verify PICK PACK Apps Script IDs
+        id: pp
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          set -euo pipefail
+          echo VERIFY_PICK_PACK > /tmp/stage
+          SCRIPT_ID=$(printf '%s' "$PP_SCRIPT_ID_RAW" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$PP_DEPLOYMENT_ID_RAW" | tr -d '\r\n\t ')
+          DEPLOY_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOY_ID="${BASH_REMATCH[1]}"; fi
+          test -n "$SCRIPT_ID"; test -n "$DEPLOY_ID"
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOY_ID"
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content" > /tmp/pp-live.json
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOY_ID" > /tmp/pp-dep.json
+          python3 - "$SCRIPT_ID" <<'PY'
+          import json,sys
+          live=json.load(open('/tmp/pp-live.json')); dep=json.load(open('/tmp/pp-dep.json'))
+          if dep.get('deploymentConfig',{}).get('scriptId')!=sys.argv[1]: raise SystemExit('PP_DEPLOYMENT_SCRIPT_MISMATCH')
+          src='\n'.join(f.get('source','') for f in live.get('files',[]) if f.get('type')=='SERVER_JS')
+          if "SHEET_ID: '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'" not in src: raise SystemExit('PP_SOURCE_SCOPE_MISMATCH')
+          if 'function setupBaoHangStaffBridge()' not in src: raise SystemExit('PP_STAFF_BRIDGE_MISSING')
+          PY
+          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"; echo "deployment_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Patch only live PICK PACK sender TARGET_URL
+        id: patch
+        shell: bash
+        env:
+          WEB_URL: ${{ steps.bh.outputs.url }}
+        run: |
+          set -euo pipefail
+          echo PATCH_PICK_PACK_SENDER > /tmp/stage
+          python3 - <<'PY'
+          import json,os,re,pathlib
+          live=json.load(open('/tmp/pp-live.json')); url=os.environ['WEB_URL']; found=0; changed=0
+          for f in live.get('files',[]):
+            src=f.get('source','')
+            if f.get('type')=='SERVER_JS' and 'function setupBaoHangStaffBridge()' in src and 'TARGET_URL:' in src:
+              found+=1
+              ns,n=re.subn(r"TARGET_URL:\s*'https://script\.google\.com/macros/s/[^']+/exec'","TARGET_URL: '"+url+"'",src,count=1)
+              if n!=1: raise SystemExit('LIVE_TARGET_URL_PATCH_FAILED')
+              if ns!=src: changed=1
+              f['source']=ns
+          if found!=1: raise SystemExit('LIVE_SENDER_FILE_COUNT:'+str(found))
+          pathlib.Path('/tmp/pp-patched.json').write_text(json.dumps({'files':live.get('files',[])},ensure_ascii=False))
+          p=pathlib.Path('google-apps-script/BAO_HANG_STAFF_BRIDGE.gs'); s=p.read_text(); ns,n=re.subn(r"TARGET_URL:\s*'https://script\.google\.com/macros/s/[^']+/exec'","TARGET_URL: '"+url+"'",s,count=1)
+          if n!=1: raise SystemExit('REPO_TARGET_URL_PATCH_FAILED')
+          p.write_text(ns)
+          pathlib.Path('/tmp/changed').write_text(str(changed))
+          PY
+          echo "changed=$(cat /tmp/changed)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy PICK PACK sender only when changed
+        if: steps.patch.outputs.changed == '1'
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.pp.outputs.script_id }}
+          DEPLOY_ID: ${{ steps.pp.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          echo DEPLOY_PICK_PACK_SENDER > /tmp/stage
+          H=$(curl -sS -o /tmp/u.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/pp-patched.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content"); [[ "$H" == 200 ]] || { cat /tmp/u.out; exit 31; }
+          H=$(curl -sS -o /tmp/v.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack staff bridge target alignment"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions"); [[ "$H" == 200 ]] || exit 32
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/v.json"))["versionNumber"])')
+          python3 - "$V" "$SCRIPT_ID" <<'PY'
+          import json,sys
+          open('/tmp/du.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[2],'versionNumber':int(sys.argv[1]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API'}}))
+          PY
+          H=$(curl -sS -o /tmp/d.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/du.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOY_ID"); [[ "$H" == 200 ]] || { cat /tmp/d.out; exit 33; }
+
+      - name: Verify PICK PACK live health
+        shell: bash
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
+          SCRIPT_ID: ${{ steps.pp.outputs.script_id }}
+          DEPLOY_ID: ${{ steps.pp.outputs.deployment_id }}
+        run: |
+          set -euo pipefail
+          echo VERIFY_PICK_PACK_LIVE > /tmp/stage
+          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOY_ID" > /tmp/dep.json
+          python3 - <<'PY' > /tmp/ppurl
+          import json
+          d=json.load(open('/tmp/dep.json')); w=[e.get('webApp',{}) for e in (d.get('entryPoints') or []) if e.get('entryPointType')=='WEB_APP']
+          if not w or not w[0].get('url'): raise SystemExit('PP_WEB_URL_MISSING')
+          print(w[0]['url'])
+          PY
+          URL=$(cat /tmp/ppurl); OK=false
+          for i in $(seq 1 15); do curl -fsSL -H 'content-type: application/json' "$URL" -d '{"action":"health"}' > /tmp/h.json || true; if jq -e '.ok==true' /tmp/h.json >/dev/null 2>&1; then OK=true; break; fi; sleep 2; done
+          [[ "$OK" == true ]] || exit 41
+
+      - name: Record PASS
+        if: success()
+        shell: bash
+        env:
+          WEB_URL: ${{ steps.bh.outputs.url }}
+        run: |
+          python3 - <<'PY'
+          import datetime,hashlib,json,os
+          p={'status':'PASS','mode':'SOURCE_DRIVEN_DELTA_V1','receiver':'PASS','sender':'PASS','receiver_url_sha256':hashlib.sha256(os.environ['WEB_URL'].encode()).hexdigest(),'verified_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          open('ops/bao-hang-receiver-deploy-proof.json','w').write(json.dumps(p,indent=2)+'\n')
+          PY
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/bao-hang-receiver-deploy-proof.json google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          git diff --cached --quiet || git commit -m 'chore(gas): record aligned Bao Hang staff bridge'
+          git pull --rebase origin main; git push origin HEAD:main
+
+      - name: Record FAIL stage
+        if: failure()
+        shell: bash
+        run: |
+          STAGE=$(cat /tmp/stage 2>/dev/null || echo UNKNOWN)
+          python3 - "$STAGE" <<'PY'
+          import datetime,json,sys
+          open('ops/bao-hang-receiver-deploy-proof.json','w').write(json.dumps({'status':'FAIL','stage':sys.argv[1],'verified_at':datetime.datetime.now(datetime.timezone.utc).isoformat()},indent=2)+'\n')
+          PY
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/bao-hang-receiver-deploy-proof.json
+          git diff --cached --quiet || git commit -m 'chore(gas): record sender alignment failure stage'
+          git pull --rebase origin main || true; git push origin HEAD:main || true
