@@ -1,0 +1,7 @@
+checked_at=2026-08-19T14:34:58Z
+scope=RECOVERY_ADAPTER_ONLY
+secret_gate=PASS
+oauth=PASS
+pre_authority=GOOGLE_FALLBACK|7|7
+failed_phase=PATCH_SOURCE
+verdict=FAILED_OR_STOPPED
