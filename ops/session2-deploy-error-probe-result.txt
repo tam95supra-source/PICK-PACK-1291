@@ -1,0 +1,6 @@
+checked_at=2026-08-19T11:43:08Z
+safety_health=PASS
+d1_safety=PASS
+deploy_rc=1
+deploy=FAIL
+deploy_error=[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mThe entry-point file at "src/entry_product.ts" was not found.[0m
