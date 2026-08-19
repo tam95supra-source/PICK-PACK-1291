@@ -1,0 +1,70 @@
+name: Session4 Beta27 Replication GAS Repair
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session4-beta27-replication-gas-repair-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session4-beta27-replication-gas-repair
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  GENERATION: m2-prod-20260819-001
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Gate and repair replication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=GATE; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
+          node -e 'const h=require("/tmp/h0.json"),a=h.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION")throw Error("SERVICE_AUTHORITY_GATE")'
+          echo service_gate=PASS >> "$OUT"
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}')
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1"|sha256sum|awk '{print $1}')
+          echo "::add-mask::$ADMIN"; echo "::add-mask::$BRIDGE"
+          PHASE=REPLICATION
+          for i in 1 2 3 4 5 6 7 8; do
+            curl -fsSL --max-time 90 -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" >/tmp/rep.json || true
+            curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+            P=$(jq -r '.replication.pending_count//999' /tmp/h.json); S=$(jq -r '.replication.state//""' /tmp/h.json)
+            [[ "$P" == 0 && "$S" == HEALTHY ]] && break
+            sleep 2
+          done
+          jq -e '.replication.state=="HEALTHY" and (.replication.pending_count|tonumber)==0' /tmp/h.json >/dev/null
+          echo replication=HEALTHY_0 >> "$OUT"
+          PHASE=GAS
+          GH=$(curl -sS --max-time 35 -o /tmp/g0.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' || true)
+          GM=$(jq -r '.authority_mode//.authority.mode//""' /tmp/g0.json 2>/dev/null || true); GE=$(jq -r '.authority_epoch//.authority.authority_epoch//0' /tmp/g0.json 2>/dev/null || echo 0)
+          echo "gas_probe_http=$GH" >> "$OUT"; echo "gas_probe_mode=${GM:-BLANK}" >> "$OUT"; echo "gas_probe_epoch=${GE:-0}" >> "$OUT"
+          if [[ "$GH" != 2* || "$GM" != SERVICE_PRIMARY || "$GE" != 8 ]]; then
+            BODY=$(node -e 'process.stdout.write(JSON.stringify({action:"m2_internal_reconcile_complete",_bridge_secret:process.argv[1],confirmation:"OWNER_LOCKED_M2_FAILBACK",authority_epoch:8,service_generation:process.env.GENERATION,service_url:process.env.SERVICE_URL}))' "$BRIDGE")
+            curl -fsSL --max-time 35 -H 'content-type: application/json' "$GAS_URL" -d "$BODY" >/tmp/gr.json
+            node -e 'const j=require("/tmp/gr.json"),a=j.authority||{};if(!j.ok||j.authority_mode!=="SERVICE_PRIMARY"||Number(j.authority_epoch??a.authority_epoch)!==8)throw Error("GAS_REPAIR_FAILED")'
+            echo gas_repair=APPLIED >> "$OUT"
+          else echo gas_repair=NOT_NEEDED >> "$OUT"; fi
+          PHASE=FINAL
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json
+          curl -fsSL --max-time 35 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json
+          node -e 'const h=require("/tmp/h2.json"),g=require("/tmp/g2.json"),a=h.authority||{},ga=g.authority||{};if(a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(g.authority_epoch??ga.authority_epoch)!==8)throw Error("FINAL_GATE")'
+          echo final_service=SERVICE_PRIMARY_8 >> "$OUT"; echo final_gas=SERVICE_PRIMARY_8 >> "$OUT"; echo final_replication=HEALTHY_0 >> "$OUT"; echo stable=UNTOUCHED >> "$OUT"; echo merge_pr38=UNTOUCHED >> "$OUT"; echo verdict=PASS >> "$OUT"
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          grep -q '^verdict=' /tmp/r || { echo stable=UNTOUCHED >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/rcopy; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/rcopy ops/session4-beta27-replication-gas-repair-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session4-beta27-replication-gas-repair-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta27 replication GAS repair'; git push origin HEAD:agent/service-migration-m2
