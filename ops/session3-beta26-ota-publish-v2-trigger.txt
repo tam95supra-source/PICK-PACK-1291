@@ -1,0 +1,9 @@
+requested_at=2026-08-20T00:12:00+07:00
+version_name=0.4.2-beta.26
+version_code=32
+artifact_id=9374897197
+apk_sha256=947b0cf28fe51a3cc1a4a310b8e35711426336788b3f6885980ac5e3a1d2a19e
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+expected_authority=SERVICE_PRIMARY|8
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
