@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
+        android:name=".M2Application"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:icon="@drawable/owner_launcher"
@@ -13,6 +14,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PickPack1291"
         android:usesCleartextTraffic="false">
+        <service
+            android:name=".M2FirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <activity
             android:name=".OperationsActivity"
             android:exported="false"
