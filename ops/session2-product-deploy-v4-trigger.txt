@@ -1,0 +1,5 @@
+Session2 production Web deploy V4
+requested_at=2026-08-19T18:45:00+07:00
+scope=service-code-and-web-assets-only
+no_failback=true
+no_stable=true
