@@ -1,258 +1,232 @@
 # HANDOVER CURRENT — PICK PACK 1291
 
 Status: **ACTIVE / cumulative / authoritative**  
-Current baseline: **2026-08-19 — Beta23 + production Web + FCM sender binding**  
-Current published Beta: **0.4.2-beta.23 / versionCode 29**  
+Current baseline: **2026-08-19 — Beta25 cache-first + production Web session isolation**  
+Current published Beta: **0.4.2-beta.25 / versionCode 31**  
 Package: `vn.pickpack1291.app.beta.publicbeta`
 
-Newest immutable release checkpoint: `docs/HANDOVER_BETA23_WEB_FCM_2026-08-19.md`.
+Newest immutable checkpoint: `docs/HANDOVER_BETA25_CACHE_FIRST_WEB_SESSION_2026-08-19.md`.
 
-> **CURRENT-BASELINE RULE:** Beta22 and earlier release references remain historical evidence only. They are not the current release authority. Read current source, this file and live OTA evidence before citing the latest Beta.
+> **CURRENT-BASELINE RULE:** Beta24/Beta23 and earlier release references are historical evidence only. Read current source, this file and current live OTA evidence before citing the latest Beta.
 
-> **RISKY-OPERATION STOP RULE:** Before any failback, DR, authority transition, production-data mutation, Stable action, signer action or PR merge, re-fetch PR #38/branch HEAD and revalidate live Service authority, GAS discovery authority, D1 recovery state, Google fallback ledger, replication health and OTA metadata. If live state differs, do not force it to match this handover.
+> **RISKY-OPERATION STOP RULE:** Before failback, DR, authority transition, production-data mutation, Stable action, signer action or PR merge, re-fetch PR #38/branch HEAD and revalidate live Service authority, GAS discovery authority, D1 recovery state, Google fallback ledger, replication health and OTA metadata. Never force live state to match a stale handover.
 
-## 1. Owner-approved production architecture — OWNER LOCK
-
-Current architecture remains:
+## 1. Owner-approved architecture — OWNER LOCK
 
 `Android / Web-PWA ↔ Cloudflare Worker Service ↔ D1`
 
 with:
 
-- Cloudflare Worker production runtime;
 - D1 normal-mode operational primary;
-- Durable Objects + WebSocket/Hibernation realtime invalidation;
+- Durable Objects/WebSocket invalidation in foreground;
 - Google Sheets operational replica / compatibility / fallback / DR;
-- GAS discovery / compatibility / fallback bridge and Android OTA `update_check`;
-- Android SQLite/cache local projection/offline state;
-- GitHub source/CI/release tooling;
-- Firebase used only for Android FCM wake/invalidation.
+- GAS discovery / compatibility / fallback / OTA bridge;
+- Android SQLite/cache local projection;
+- FCM only for Android background/closed wake/invalidation;
+- GitHub source/CI/release tooling.
 
-Firebase is **not** an auth/database/storage/business-data authority. No new backend/datastore/queue/auth/sync authority may be introduced without explicit OWNER instruction.
+Firebase is not DB/Auth/Storage/business authority.
 
-## 2. Current Android / OTA baseline — OWNER LOCK
+## 2. Current Beta25 release — OWNER LOCK
 
-Current published Beta:
-
-- versionName: `0.4.2-beta.23`
-- versionCode: `29`
+- versionName: `0.4.2-beta.25`
+- versionCode: `31`
 - package: `vn.pickpack1291.app.beta.publicbeta`
-- APK: `pick-pack-1291-public-beta-0.4.2-beta.23.apk`
-- verified SHA-256: `ea561b034a78147cc3df35f6bc2ddef3f8850b812c3c872b58bf65153b4ca5c4`
-- verified size: `12810579` bytes
+- APK: `pick-pack-1291-public-beta-0.4.2-beta.25.apk`
+- size: `12810579` bytes
+- SHA-256: `5ba70c6ed1c377c41a72f5f1bfe71b8accad6231a147c044614e66a585690aed`
 - locked signer SHA-256: `d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e`
-- Beta Drive file id: `1C3Odx5NbnBiyvIplFpDZq6r5O-ealtzV`
-- checksum file: `SHA256SUMS-beta23.txt`
-- checksum Drive file id: `1QW08lHELDz4AoCdBVnIXR7IDxStcXJWB`
-- OTA path: `Android → GAS update_check → Google Drive Beta folder`.
+- candidate artifact id: `9367409356`
+- Beta Drive APK id: `1YvFDNEZpNlCC3EcCm3uMR1WkY7YEzn0q`
+- checksum: `SHA256SUMS-beta25.txt`
+- checksum Drive id: `18uwHX3A3BwjBWd-j3_v4iNeX4iJeMptL`
 
-Release evidence:
+Evidence:
 
-- `ops/session2-beta23-build-candidate-result.txt`: config/build/sign all PASS; package/version/signer verified; artifact id `9364146648`.
-- uploaded APK was downloaded back from Google Drive and re-hashed byte-for-byte; SHA and size matched the signed candidate.
-- `ops/session2-beta23-ota-live-verify-result.txt`: Beta23 discovery PASS, public download HTTP `206`, Stable discovery `EMPTY`.
-- GAS `update_check` sets selected APK to `ANYONE_WITH_LINK / VIEW` when needed; Beta23 Drive metadata now has `anyone / reader` permission.
+- `ops/session2-beta25-build-candidate-result.txt` — config/build/sign PASS.
+- `ops/session2-beta25-release-record.txt` — exact signed artifact publication record.
+- `ops/session2-beta25-live-verify-result.txt` — GAS Beta25 discovery PASS, full public download/hash PASS, Web live PASS, Stable OTA EMPTY.
 
-Stable remains **UNPUBLISHED / EMPTY / UNTOUCHED** unless OWNER explicitly commands promotion. Android signing identity remains fixed and must never be replaced.
+The generic GitHub Google OAuth refresh token does not have Drive scope. The first Beta25 publish workflow therefore stopped at SAFETY before upload; it did not create partial release files. The exact signed candidate was then uploaded through the connected Google Drive account, rechecked by live OTA download and recorded explicitly.
 
-## 3. Current production authority checkpoint — MUST REVALIDATE BEFORE FAILBACK
+Stable remains **EMPTY / UNPUBLISHED / UNTOUCHED**. Signer remains fixed.
 
-Fresh sanitized checkpoint recorded in `ops/session2-final-state-diagnostic-result.txt`:
+## 3. Fresh production authority checkpoint — MUST REVALIDATE BEFORE FAILBACK
+
+Current live evidence `ops/session2-beta25-live-verify-result.txt`:
 
 ### Service
 
-- mode: `SERVICE_PRIMARY`
-- authority epoch: `6`
-- authority seq: `4`
-- scope: `PRODUCTION`
-- generation: `m2-prod-20260819-001`
+- `SERVICE_PRIMARY`
+- epoch `6`
+- seq `4`
+- scope `PRODUCTION`
+- generation `m2-prod-20260819-001`
 
 ### GAS / Google fallback
 
-- mode: `GOOGLE_FALLBACK`
-- authority epoch: `7`
-- authority seq: `4`
-- generation: `m2-prod-20260819-001`
+- `GOOGLE_FALLBACK`
+- epoch `7`
+- seq `5`
+- generation `m2-prod-20260819-001`
 
-### OTA / FCM
+### Read-only D1 safety
 
-- Beta OTA: `0.4.2-beta.23`
-- Beta OTA size/SHA matched the values in section 2.
-- Stable OTA: `EMPTY`.
-- Cloudflare `FCM_SERVICE_ACCOUNT_JSON` binding: `READY`.
+Fresh `ops/session2-d1-gate-diagnostic-result.txt` at 2026-08-19T13:40:21Z:
 
-The guarded V9 production deploy also revalidated D1/fallback safety and confirmed the fallback set remained unchanged after deployment.
+- production D1 resolved;
+- Service authority still `SERVICE_PRIMARY|6|4|PRODUCTION|m2-prod-20260819-001`;
+- epoch-7 D1 fallback inbox count `0`;
+- replication `HEALTHY|0|0|`;
+- no active reconciliation metadata row;
+- diagnostic complete.
 
-Last explicit fallback data inspection before this checkpoint showed:
+GAS seq advanced to 5 while D1 epoch-7 inbox remains 0. Do not infer that the new fallback event has already been flushed or reconciled. No 7→8 failback was executed by the Beta25 work.
 
-- Google hidden fallback ledger epoch 7 seq `1..4`, contiguous, all `PENDING`;
-- D1 epoch-7 fallback inbox `0` rows;
-- replication `HEALTHY`, pending `0`;
-- no active reconcile lock.
+## 4. Beta25 cache-first fixes
 
-No `7→8` failback has been executed or authorized by this document.
+### Fallback cache hydration
 
-## 4. Firebase / FCM state
+Legacy GAS intentionally leaves `retention_floor` blank for older SQLite-recovery clients. Beta25 uses `server_retention_floor` as the compatibility fallback so the current client actually hydrates canonical day snapshots while `GOOGLE_FALLBACK` is active.
 
-Approved Beta23 Firebase client project:
+### Hot operational UI
 
-- project id: `pick-pack-1291-fcm-20260819`
-- package: `vn.pickpack1291.app.beta.publicbeta`
-- client configuration is stored in `app/google-services.json`.
+Employee/session, labor and resource screens read local SQLite/master projection first. Network/revision sync is non-blocking revalidation and cache-miss recovery, not a prerequisite for normal hot rendering.
 
-Production Worker sender credential:
+### ACK gap closure
 
-- Cloudflare secret name: `FCM_SERVICE_ACCOUNT_JSON`;
-- value is not in GitHub/chat/docs and must remain secret;
-- sanitized Cloudflare API diagnostic confirmed exactly one `secret_text` binding with that name;
-- evidence: `ops/session2-fcm-secret-diagnostic-result.txt`.
+S27 adds a projection-only view of newly confirmed events so UI does not regress between Service/GAS acknowledgement and arrival of the next canonical snapshot. Confirmed rows are not turned back into send candidates and are not resent.
 
-Service implementation:
+### Shared History
 
-- `service/src/push.ts` reads the one-secret service-account JSON in memory;
-- FCM is invalidation-only;
-- canonical business events are deterministically staged into `push_outbox` as `DAY_CHANGED` from the durable event log;
-- master imports enqueue `MASTER_CHANGED`;
-- Android always pulls authoritative Service/D1 state after wake.
+History renders from the local canonical day snapshot and requests a background revision reconcile. Atomic snapshot updates re-render History/employee screens.
 
-**Acceptance boundary:** secret presence, source support and production deployment are proven. A real Beta23 physical PDA obtaining an FCM token and receiving an actual FCM wake is **not yet proven** by CI/release evidence and must not be fabricated.
+### Cache contract
 
-## 5. Production Web / Service state
+PDA operational cache remains the exact canonical seven business sessions N..N-6. N/N-1 remain the hot mutation window under existing role rules; older retained dates obey read-only/role semantics.
 
-Production Web/Admin is deployed on the Worker and has fresh guarded evidence.
+## 5. Sync screen state
 
-`ops/session2-product-deploy-v9-result.txt` records:
+Beta25 Sync now shows the useful project/runtime detail needed for field diagnosis:
 
-- source/credentials PASS;
-- D1 resolution PASS;
-- Service authority gate PASS;
-- Google fallback gate PASS;
-- D1 safety gate PASS;
-- Cloudflare deploy PASS;
-- live Web/API verification PASS;
-- fallback ledger recheck PASS;
-- final verdict PASS.
+- network/validated Internet and measured latency;
+- actual authority/route/provider;
+- upload/download direction/rate state;
+- pending and review/rejected local rows;
+- local date count, hot N/N-1 and full N..N-6 window/revisions;
+- master revision/staff count;
+- generation/epoch/seq and Service URL presence;
+- realtime mode;
+- FCM registration state;
+- last runtime error.
 
-Current Web target is the full admin/dashboard presentation with sidebar/topbar/KPIs/tables, role gates, import UI/backend integration and SUPERADMIN historical route. Realtime uses `INVALIDATION_V1`, `DAY_CHANGED` and `MASTER_CHANGED`.
+No normal constant foreground polling was introduced.
 
-Protected History/API behavior is authentication-fenced. A `307` to the protected history page when unauthenticated is not evidence that the page is missing; protected APIs correctly return `401` without auth.
+## 6. Web fixes / session model
 
-## 6. Important corrected release/deploy defects
+Production Web v10 is live.
 
-The following were tooling/gate defects corrected without weakening production safety:
+Fixed login overlay:
 
-1. `system_meta` uses `key/value`; old diagnostics queried nonexistent `meta_key/meta_value`.
-2. D1 migrations `0001`–`0004` were already applied; an old gate queried later schema incorrectly.
-3. Google fallback sheet uses `ingest_status`; an old gate expected `status`.
-4. Wrangler runtime config under `/tmp` broke relative `src/entry_product.ts` resolution; runtime config is now generated inside `service/`.
-5. GitHub Google OAuth refresh token has no Drive scope; OTA publication therefore uses the connected Google Drive path instead of pretending that token can upload.
-6. Release candidate build uses Gradle `9.4.1` with Android SDK 36/build-tools 36.0.0; no Gradle wrapper is assumed.
+- production CSS forces `.login-wrap[hidden]`, `.admin-app[hidden]` and `.notice[hidden]` to `display:none!important`;
+- live diagnostic verifies the current CSS and application source.
 
-These fixes do not authorize production-data rewrite, failback, Stable publication or signer changes.
+Session isolation:
 
-## 7. Runtime / sync contract — OWNER LOCK
+- migration `0005_web_session_isolation.sql` is applied;
+- PDA session slot remains `auth_sessions`;
+- Web session slot is `auth_web_sessions`;
+- Web sends `client_source='WEB'`;
+- one PDA and one Web may remain active concurrently for the same login;
+- a second Web replaces only the previous Web session;
+- PDA/Web logout affects only its own session class.
 
-- ADMIN/USER business write window: N/N-1.
-- SUPERADMIN current PDA/Service business window: exact seven Service business dates N..N-6; never calendar approximation.
-- Web SUPERADMIN may query older history.
-- realtime protocol: `INVALIDATION_V1` with `DAY_CHANGED` / `MASTER_CHANGED`; no legacy `DELTA`.
-- WebSocket/FCM carry invalidation only; clients pull authoritative state.
-- foreground has no interval polling; background periodic work is only a safety net.
-- local-first Android writes must be durable local pending before network send and reconcile idempotently.
-- fallback only when discovery says `GOOGLE_FALLBACK`; ordinary Service timeout is not automatic permission to fallback.
-- PDA import remains SUPERADMIN-only with template/version/checksum validation, chunk <=500, preview + explicit commit, audit/revision/invalidation and correction-style rollback semantics.
+This supersedes old wording that one session/login covered all client types.
 
-## 8. Business invariants — OWNER LOCK
+Evidence:
 
-- MNV business key; session `MNV + business_date`.
-- Attendance `NOT_ENTERED → ACTIVE → ENDED`.
-- Immutable/idempotent event IDs and immutable canonical event history.
-- Stale-version conflicts rejected; no last-write-wins.
-- Exclusive resource ownership race-safe.
-- PICK requires PDA; User Pick optional where allowed.
-- PACK mapping controlled and supports legitimate one-to-many mapping.
-- OPEN Công nhật blocks EXIT.
-- Roles `SUPERADMIN / ADMIN / USER`; backend enforced.
-- Normal account creation cannot create another SUPERADMIN without explicit OWNER approval.
-- PBKDF2-HMAC-SHA256 challenge/proof compatibility preserved.
-- `SINGLE_ACTIVE_DEVICE_V1` preserved.
+- `ops/session2-product-deploy-v10-web-session-result.txt`
+- `ops/session2-web-v10-live-diagnostic-result.txt`
+- `ops/session2-post-v10-safety-diagnostic-result.txt`
+- `ops/session2-beta25-live-verify-result.txt`
+
+## 7. Realtime / fallback boundary — OWNER LOCK
+
+Normal `SERVICE_PRIMARY`:
+
+- foreground: `INVALIDATION_V1` WebSocket (`DAY_CHANGED`, `MASTER_CHANGED`) then authoritative delta/revision pull;
+- background/closed Android: FCM invalidation then WorkManager catch-up;
+- other PDAs converge through Service/D1.
+
+Current GAS discovery is still `GOOGLE_FALLBACK`. Beta25 keeps the UI fast and cache-hydrated under fallback, but it does not bypass authority fencing or pretend fallback has Service-primary WebSocket realtime. Under fallback, cross-PDA freshness occurs on revision-sync triggers such as start/login/reconnect/manual/background work.
+
+Do not enable Service-primary realtime by cheating the fence. A safe controlled return to Service authority requires real-client acceptance plus a fresh failback precondition checkpoint.
+
+## 8. Role / business invariants — OWNER LOCK
+
+- roles: `SUPERADMIN / ADMIN / USER`;
+- MNV is business key; attendance session is `MNV + business_date`;
+- attendance lifecycle `NOT_ENTERED → ACTIVE → ENDED`;
+- ADMIN/USER current business write window N/N-1;
+- USER/ADMIN N-2..N-6 read-only;
+- SUPERADMIN PDA may mutate N..N-6 under existing rules;
+- Web SUPERADMIN may perform older historical corrections with audit semantics;
+- immutable/idempotent events; no last-write-wins;
+- stale-version conflicts rejected;
+- exclusive resources race-safe;
+- PICK requires PDA where defined; User Pick optional where allowed;
+- PACK mapping follows project catalog/mapping rules;
+- OPEN Công nhật blocks EXIT;
+- normal account creation cannot create another SUPERADMIN without explicit owner approval;
+- PBKDF2-HMAC-SHA256 challenge/proof compatibility preserved;
+- one-active-PDA-slot and one-active-Web-slot are independent.
 
 Production Google data must not be renamed/reset/regenerated/overwritten/deleted as a shortcut. Catalog/select values come only from project catalogs.
 
-## 9. UI / client locks — OWNER LOCK
+## 9. Firebase / FCM boundary
 
-Android keeps five persistent tabs exactly:
+Approved Firebase client project remains `pick-pack-1291-fcm-20260819` for the Beta package. Production Worker has the `FCM_SERVICE_ACCOUNT_JSON` secret binding and FCM remains invalidation-only.
 
-`Nghiệp vụ – Nhân sự – Lịch sử – Đồng bộ – Cài đặt`
+Physical Beta25 FCM wake delivery is **not proven by CI** and must not be fabricated.
 
-Additional locks:
+## 10. Current physical acceptance still required
 
-- preserve owner-approved visual system;
-- scanner flows trigger on hardware Enter/OK;
-- no redundant scan-check button;
-- no protocol jargon in end-user UI;
-- sync indicators remain semantically correct;
-- Beta stays full-function for real acceptance;
-- Beta/Stable OTA channel isolation remains mandatory.
+Still requires genuine PDA/Web field evidence on Beta25:
 
-## 10. Security / owner workstation locks
+- employee + session context appears immediately from hydrated cache;
+- enter/exit remains visually coherent through pending → confirmed → canonical snapshot;
+- labor start/finish is immediate from local projection;
+- shared History appears on both PDAs after sync;
+- resource flow remains correct;
+- same account can keep PDA + Web logged in concurrently;
+- second Web login invalidates only the first Web;
+- physical FCM background/closed wake delivery;
+- after any later authorized failback, Service-primary cross-PDA WebSocket realtime.
 
-- Never ask OWNER to run CMD, PowerShell, Terminal, adb, git, gh, Gradle, clasp or another local CLI.
-- Use CI/assistant-controlled tooling and browser/UI owner interactions.
-- Never expose/commit passwords, verifier values, OAuth credentials, private tokens, Firebase service-account JSON, signing material, bridge secrets or sensitive historical auth payloads.
-- Preserve the mandatory rollback backup from the Service migration.
+Do not mark these PASS from CI alone.
 
-## 11. Current acceptance status / remaining Definition of Done
-
-Proven complete:
-
-- Beta23 source version/package configuration;
-- Beta23 build/sign/signer verification;
-- Beta23 Drive roundtrip integrity;
-- Beta23 GAS OTA discovery/public download;
-- Stable-empty guard;
-- production Web guarded deploy/live verification;
-- FCM client configuration;
-- production FCM secret binding presence;
-- production Service support for one-secret Firebase sender credential;
-- durable `DAY_CHANGED` staging and existing `MASTER_CHANGED` invalidation path.
-
-Still **not proven** and must not be inferred:
-
-- real physical Beta23 PDA FCM wake delivery;
-- full real-PDA Beta23 business acceptance across genuinely required enter/exit/labor/resource rows;
-- exact Web + Beta23 concurrent/realtime acceptance on real clients;
-- controlled failback/reconciliation;
-- DR both directions and final production integrity closure.
-
-Therefore failback remains blocked until the missing real-client acceptance evidence exists and a new fresh precondition checkpoint matches.
-
-## 12. GitHub / PR state
+## 11. GitHub / safety locks
 
 Repository: `tam95supra-source/pick-pack-1291`  
 Branch: `agent/service-migration-m2`  
 PR: `#38`
 
-PR #38 must remain **draft / open / unmerged** until full Definition of Done and explicit OWNER approval. Always re-fetch current head before any material/risky operation.
+- PR remains draft/open/unmerged.
+- No merge without explicit OWNER approval.
+- No Stable publish without explicit OWNER command.
+- No Android signer change.
+- No destructive production Sheet overwrite/delete/reset.
+- Preserve rollback backup and fallback/checksum integrity.
+- No secrets in repo/chat/docs.
+- Never ask OWNER to run local CLI.
+- No 7→8 failback until physical acceptance and fresh failback gates both pass.
 
-## 13. Current continuation order
+## 12. Continuation order
 
-1. Treat Beta23 as the current release baseline; Beta22 and earlier are historical.
-2. Obtain real physical Beta23 PDA acceptance, including actual FCM wake evidence and only genuinely missing business cases.
-3. Run exact Web + Beta23 concurrent/realtime acceptance.
-4. Re-fetch a fresh numbered Service/GAS/D1/Google fallback checkpoint.
-5. Only if every failback precondition matches, execute controlled failback under existing OWNER rules.
+1. Treat Beta25 as the current Beta baseline.
+2. Owner performs real-PDA/Web acceptance against the defects that motivated Beta25.
+3. Collect fresh logs only for remaining defects; fix forward in another Beta if necessary.
+4. If physical acceptance passes, re-read Service/GAS/D1/Google fallback ledger/replication.
+5. Only then consider controlled reconciliation/failback under existing OWNER rules.
 6. Complete DR/final integrity closure.
 7. Merge PR only after explicit OWNER approval.
-
-## 14. Current safety state
-
-- Beta23 current.
-- production Web complete under guarded live verification.
-- FCM sender binding present and deployed; physical wake acceptance still pending.
-- Service-first architecture authoritative.
-- Stable empty/unpublished/untouched.
-- signer unchanged.
-- production Sheet overwrite/delete forbidden.
-- PR #38 draft/open/unmerged.
-- no failback authorized merely by this handover.
