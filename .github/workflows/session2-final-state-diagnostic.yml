@@ -1,0 +1,72 @@
+name: Session2 Final State Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-final-state-diagnostic-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read sanitized final production state
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-final-state-diagnostic-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          echo "head_sha=$GITHUB_SHA" >> "$OUT"
+
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" >/tmp/service.json
+          jq -e '.ok==true and .environment=="production" and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/service.json >/dev/null
+          echo "service_authority=$(jq -r '[.authority.mode,.authority.authority_epoch,.authority.authority_seq,.authority.scope,.generation]|join("|")' /tmp/service.json)" >> "$OUT"
+
+          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gas.json
+          python3 - <<'PY' >> "$OUT"
+          import json
+          j=json.load(open('/tmp/gas.json'));a=j.get('authority') or {}
+          mode=j.get('authority_mode') or a.get('mode') or ''
+          epoch=j.get('authority_epoch') or a.get('authority_epoch') or 0
+          seq=j.get('authority_seq') or a.get('authority_seq') or 0
+          gen=j.get('service_generation') or a.get('service_generation') or ''
+          assert j.get('ok') is True and mode=='GOOGLE_FALLBACK'
+          print(f'gas_authority={mode}|{epoch}|{seq}|{gen}')
+          PY
+
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.22"}' >/tmp/beta.json
+          jq -e '.ok==true and .available==true and .version_name=="0.4.2-beta.23" and (.size|tostring)=="12810579" and .sha256=="ea561b034a78147cc3df35f6bc2ddef3f8850b812c3c872b58bf65153b4ca5c4"' /tmp/beta.json >/dev/null
+          echo beta_ota=0.4.2-beta.23\|12810579\|ea561b034a78147cc3df35f6bc2ddef3f8850b812c3c872b58bf65153b4ca5c4 >> "$OUT"
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' >/tmp/stable.json
+          jq -e '.ok==true and .available==false and .reason=="NO_APK"' /tmp/stable.json >/dev/null
+          echo stable_ota=EMPTY >> "$OUT"
+
+          HTTP=$(curl -sS -o /tmp/secrets.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/pick-pack-1291-service/secrets")
+          [[ "$HTTP" == 200 ]]
+          COUNT=$(jq '[.result[]? | select(.name=="FCM_SERVICE_ACCOUNT_JSON" and .type=="secret_text")]|length' /tmp/secrets.json)
+          [[ "$COUNT" == 1 ]]
+          echo fcm_secret=READY >> "$OUT"
+          echo verdict=PASS >> "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-final-state-diagnostic-result.txt || echo result_missing=true >/tmp/session2-final-state-diagnostic-result.txt
+          cp /tmp/session2-final-state-diagnostic-result.txt ops/session2-final-state-diagnostic-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions-bot@users.noreply.github.com
+          git add ops/session2-final-state-diagnostic-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record final Beta23 production state'
+          git push
