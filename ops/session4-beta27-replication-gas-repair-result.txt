@@ -1,0 +1,8 @@
+checked_at=2026-08-19T22:47:25Z
+head_sha=668ff5b94c8be7c33313b398a5d9623296c16fb9
+service_gate=PASS
+failed_phase=REPLICATION
+failed_rc=1
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
