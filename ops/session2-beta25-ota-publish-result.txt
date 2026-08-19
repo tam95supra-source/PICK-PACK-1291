@@ -1,0 +1,5 @@
+checked_at=2026-08-19T13:35:58Z
+head_sha=cedde15081b366100efa5c4c378f6360617325a6
+candidate_lock=PASS
+failed_phase=SAFETY
+failed_rc=22
