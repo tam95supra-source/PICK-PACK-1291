@@ -1,0 +1,62 @@
+name: Session1 Service E2E
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  e2e:
+    if: github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test runtime
+        run: |
+          npm install --no-audit --no-fund
+          npm install --no-save --no-audit --no-fund ws@8
+      - name: Typecheck current Service
+        run: npm run typecheck
+      - name: Create isolated local D1
+        run: |
+          set -euo pipefail
+          rm -rf .wrangler/session1-e2e
+          npx wrangler d1 migrations apply pick-pack-1291-session1-test --local --persist-to .wrangler/session1-e2e --config wrangler.session1-test.jsonc
+          npx wrangler d1 execute pick-pack-1291-session1-test --local --persist-to .wrangler/session1-e2e --config wrangler.session1-test.jsonc --file tests/session1_seed.sql
+      - name: Start isolated Worker
+        run: |
+          cat > .dev.vars <<'EOF'
+          SERVICE_TOKEN_SECRET=session1-service-secret
+          M1_ADMIN_TOKEN=session1-admin-secret
+          GAS_BRIDGE_SHARED_SECRET=session1-bridge-secret
+          GOOGLE_OAUTH_CLIENT_ID=session1-unused
+          GOOGLE_OAUTH_CLIENT_SECRET=session1-unused
+          GOOGLE_OAUTH_REFRESH_TOKEN=session1-unused
+          GOOGLE_STAGING_SHEET_ID=session1-unused
+          EOF
+          npx wrangler dev --local --port 8791 --persist-to .wrangler/session1-e2e --config wrangler.session1-test.jsonc > /tmp/session1-worker.log 2>&1 &
+          echo $! > /tmp/session1-worker.pid
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8791/health >/tmp/session1-health.json; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/session1-worker.log
+          exit 1
+      - name: Behavioral acceptance
+        env:
+          SESSION1_BASE_URL: http://127.0.0.1:8791
+        run: node tests/session1_e2e.mjs
+      - name: Evidence
+        if: always()
+        run: |
+          echo '--- worker tail ---'
+          tail -150 /tmp/session1-worker.log 2>/dev/null || true
+          kill $(cat /tmp/session1-worker.pid) 2>/dev/null || true
