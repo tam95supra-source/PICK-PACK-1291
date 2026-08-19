@@ -17,12 +17,25 @@ jobs:
         with:
           node-version: '22'
       - name: Apply deterministic source patch
-        run: python3 scripts/session1_apply.py
+        run: |
+          set -euo pipefail
+          python3 scripts/session1_apply.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('service/src/replication.ts')
+          s=p.read_text()
+          old='const [header,ids]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);'
+          new='const [header=[],ids=[]]=await batchGetValues(id,token,[["__M1_SERVICE_REPLICA","A1:T1"],["__M1_SERVICE_REPLICA","A2:A"]]);'
+          if old in s:s=s.replace(old,new)
+          elif new not in s:raise SystemExit('replication strictness anchor missing')
+          p.write_text(s)
+          PY
       - name: Verify source contract guards
         run: |
           set -euo pipefail
           grep -F 'e.committed_at,e.idempotency_key,e.origin,e.schema_version,e.checksum,e.payload_json' service/src/replication.ts
           ! grep -F 'e.committed_at,e.payload_json,e.idempotency_key' service/src/replication.ts
+          grep -F 'const [header=[],ids[]]' service/src/replication.ts
           grep -F 'LIMIT 7' service/src/entry.ts
           ! grep -F 'ORDER BY sequence_no DESC LIMIT 45' service/src/index.ts
           grep -F 'client_source?: "PDA" | "WEB" | "FILE_IMPORT"' service/src/domain.ts
