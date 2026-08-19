@@ -1,0 +1,34 @@
+name: Session2 Web V10 Live Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-web-v10-live-diagnostic-trigger.txt' ]
+permissions:
+  contents: write
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe live product
+        shell: bash
+        run: |
+          set -u
+          OUT=/tmp/session2-web-v10-live-diagnostic-result.txt
+          URL=https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          H=$(curl -sS -o /tmp/h -w '%{http_code}' "$URL/health" || true);echo "health_http=$H" >> "$OUT"
+          A=$(curl -sS -o /tmp/a -w '%{http_code}' "$URL/app.js" || true);echo "app_http=$A" >> "$OUT";grep -Fq "client_source:'WEB'" /tmp/a && echo app_web_source=PASS >> "$OUT" || echo app_web_source=FAIL >> "$OUT"
+          C=$(curl -sS -o /tmp/c -w '%{http_code}' "$URL/styles.css" || true);echo "css_http=$C" >> "$OUT";grep -Fq '.login-wrap[hidden]' /tmp/c && echo css_hidden=PASS >> "$OUT" || echo css_hidden=FAIL >> "$OUT"
+          S=$(curl -sS -o /tmp/s -w '%{http_code}' "$URL/v1/sync/status" || true);echo "sync_unauth_http=$S" >> "$OUT"
+          CAP=$(curl -sS -o /tmp/cap -w '%{http_code}' "$URL/v1/capabilities" || true);echo "capabilities_http=$CAP" >> "$OUT"
+          if [[ "$H" == 200 && "$A" == 200 && "$C" == 200 && "$S" == 401 && "$CAP" == 200 ]] && grep -Fq "client_source:'WEB'" /tmp/a && grep -Fq '.login-wrap[hidden]' /tmp/c;then echo verdict=PASS >> "$OUT";else echo verdict=FAIL >> "$OUT";fi
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          cp /tmp/session2-web-v10-live-diagnostic-result.txt ops/session2-web-v10-live-diagnostic-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-web-v10-live-diagnostic-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record Web V10 live diagnostic';git push
