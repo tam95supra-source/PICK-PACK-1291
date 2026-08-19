@@ -1,0 +1,35 @@
+name: Session3 Apply S30D Audit Bridge
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-apply-s30d-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Apply and check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_s30d_canonical_audit_bridge.py
+          grep -q 'S30D_CANONICAL_AUDIT_BATCH' service/src/index.ts
+          ! grep -q 'apply_s30_admin_audit_android.py' tools/apply_m2_android_transport_patch.py
+          grep -q 'apply_s30_canonical_admin_audit.py' app/build.gradle.kts
+          cd service;npm install --no-audit --no-fund >/dev/null;npm run check >/dev/null;cd ..
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/src/index.ts tools/apply_m2_android_transport_patch.py app/build.gradle.kts
+          git diff --cached --quiet || git commit -m 'fix: apply S30D canonical audit bridge'
+          git pull --rebase origin agent/service-migration-m2;git push origin HEAD:agent/service-migration-m2
+          printf 'service_batch=PASS\nandroid_s30_chain=CANONICAL_ONLY\ntypecheck=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' > /tmp/r
+          cp /tmp/r ops/session3-apply-s30d-result.txt;git add ops/session3-apply-s30d-result.txt;git diff --cached --quiet || git commit -m 'ops: record S30D gate';git pull --rebase origin agent/service-migration-m2;git push origin HEAD:agent/service-migration-m2
