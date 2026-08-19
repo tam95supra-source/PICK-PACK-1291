@@ -1,4 +1,4 @@
-requested_at=2026-08-20T05:43:00+07:00
+requested_at=2026-08-20T05:58:00+07:00
 version_name=0.4.2-beta.27
 version_code=33
 apk_drive_id=1oqBlRknVMBKnK2cMZDx3aX5yp1avRs3y
@@ -6,5 +6,7 @@ checksum_drive_id=1QBDcDRaOqrAhRW_yNvmBS5byxYsguxnz
 apk_sha256=08552cea22cc1f3ab0a0f7fdb8ca5d327d2bfcc3e43c4250b4a583edcf20b3a3
 apk_size=12810579
 expected_authority=SERVICE_PRIMARY|8
+expected_replication=HEALTHY|0
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
+retry=2
