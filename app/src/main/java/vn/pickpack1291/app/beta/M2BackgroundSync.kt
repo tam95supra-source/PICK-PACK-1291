@@ -27,6 +27,7 @@ object M2BackgroundSync {
         val dates = ArrayList<String>()
         val it = dayRevisions.keys()
         while (it.hasNext()) dates += it.next()
+        // These are actual Service business dates; no calendar-day subtraction is used.
         val ordered = dates.sortedDescending().take(7)
         store.applyBusinessWindow(ordered, status.optLong("retention_epoch", store.authorityEpoch()))
         status.optJSONObject("authority")?.let(store::saveAuthority)
@@ -53,41 +54,58 @@ object M2BackgroundSync {
         val status = getJson("$base/v1/sync/status", token) ?: return
         val revisions = status.optJSONObject("master_revisions") ?: return
         val localRev = context.getSharedPreferences("pp_m2_master_revision", Context.MODE_PRIVATE)
-        val changed = masterNamespaces.any { revisions.optLong(it, 0L) != localRev.getLong(it, -1L) }
-        if (!changed) return
+        val changed = masterNamespaces.filter { revisions.optLong(it, 0L) != localRev.getLong(it, -1L) }
+        if (changed.isEmpty()) return
 
-        val snapshot = JSONObject()
-        val resources = JSONArray()
-        var employees = JSONArray()
-        var catalogs = JSONArray()
-        var packTables = JSONArray()
-        for (namespace in masterNamespaces) {
-            val after = localRev.getLong(namespace, -1L).coerceAtLeast(0L)
-            val url = "$base/v1/delta/master?namespace=${URLEncoder.encode(namespace, "UTF-8")}&after_revision=$after"
+        // Preserve unchanged namespaces from the last confirmed cache. The Service master delta endpoint
+        // is NAMESPACE_SNAPSHOT_ON_REVISION_CHANGE, so changed namespaces are fetched as full snapshots.
+        val snapshot = MasterDataCache.snapshot(context)?.let { JSONObject(it.toString()) } ?: JSONObject()
+        snapshot.put("ok", true)
+        var maxRevision = snapshot.optLong("master_revision", 0L)
+
+        for (namespace in changed) {
+            val url = "$base/v1/delta/master?namespace=${URLEncoder.encode(namespace, "UTF-8")}&after_revision=0"
             val delta = getJson(url, token) ?: return
             val rows = delta.optJSONArray("rows") ?: JSONArray()
             when (namespace) {
-                "employees" -> employees = JSONArray(rows.toString())
-                "catalogs" -> catalogs = JSONArray(rows.toString())
-                "pack_table" -> packTables = JSONArray(rows.toString())
-                "pda", "user_pick", "user_pack" -> {
-                    val type = when (namespace) { "pda" -> "PDA"; "user_pick" -> "USER_PICK"; else -> "USER_PACK" }
-                    for (i in 0 until rows.length()) {
-                        val row = rows.optJSONObject(i) ?: continue
-                        resources.put(JSONObject(row.toString()).put("resource_type", type))
-                    }
+                "employees" -> snapshot.put("staff", JSONArray(rows.toString()))
+                "catalogs" -> snapshot.put("catalogs", JSONArray(rows.toString()))
+                "pda" -> snapshot.put("pdas", resourceRows(rows, "PDA"))
+                "user_pick" -> snapshot.put("user_picks", resourceRows(rows, "USER_PICK"))
+                "user_pack" -> snapshot.put("user_packs", resourceRows(rows, "USER_PACK"))
+                "pack_table" -> snapshot.put("pack_bundles", JSONArray(rows.toString()))
+            }
+            maxRevision = maxOf(maxRevision, revisions.optLong(namespace, 0L))
+        }
+        snapshot.put("master_revision", maxRevision)
+        MasterDataCache.save(context, snapshot)
+
+        val edit = localRev.edit()
+        changed.forEach { edit.putLong(it, revisions.optLong(it, 0L)) }
+        edit.apply()
+    }
+
+    /** Keep Service fields and add the stable legacy aliases used by the current PDA UI. */
+    private fun resourceRows(rows: JSONArray, type: String): JSONArray = JSONArray().apply {
+        for (i in 0 until rows.length()) {
+            val source = rows.optJSONObject(i) ?: continue
+            val row = JSONObject(source.toString())
+            val id = source.optString("resource_id")
+            val metadata = runCatching { JSONObject(source.optString("metadata_json", "{}")) }.getOrNull()
+            if (metadata != null) {
+                val keys = metadata.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    if (!row.has(key)) row.put(key, metadata.opt(key))
                 }
             }
+            when (type) {
+                "PDA" -> { if (!row.has("serial")) row.put("serial", id); if (!row.has("pda")) row.put("pda", id) }
+                "USER_PICK" -> if (!row.has("user_pick")) row.put("user_pick", id)
+                "USER_PACK" -> if (!row.has("user_pack")) row.put("user_pack", id)
+            }
+            put(row)
         }
-        snapshot.put("employees", employees)
-            .put("catalogs", catalogs)
-            .put("resources", resources)
-            .put("pack_tables", packTables)
-            .put("master_revision", revisions.keys().asSequence().maxOfOrNull { revisions.optLong(it, 0L) } ?: 0L)
-        MasterDataCache.saveSnapshot(context, snapshot)
-        val edit = localRev.edit()
-        masterNamespaces.forEach { edit.putLong(it, revisions.optLong(it, 0L)) }
-        edit.apply()
     }
 
     private fun getJson(endpoint: String, bearer: String): JSONObject? {
