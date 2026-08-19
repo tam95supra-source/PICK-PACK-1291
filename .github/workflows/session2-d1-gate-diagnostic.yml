@@ -1,0 +1,56 @@
+name: Session2 D1 Gate Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-d1-gate-diagnostic-trigger.txt' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: session2-d1-gate-diagnostic
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read production D1 safe state
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=/tmp/session2-d1-gate-diagnostic-result.txt
+          : > "$OUT"
+          echo "checked_at=$(date -u +%FT%TZ)" >> "$OUT"
+          echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [[ -n "${!v:-}" ]] || { echo "d1_bindings=MISSING:$v" >> "$OUT"; exit 10; }; done
+          echo "d1_bindings=READY" >> "$OUT"
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npx wrangler d1 list --json > /tmp/d1-list.json
+          D1_ID=$(node -e "const r=require('/tmp/d1-list.json');const x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          [[ -n "$D1_ID" ]]
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.env.D1_ID||'$D1_ID';delete c.secrets;fs.writeFileSync('/tmp/wrangler-session2-diag.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-session2-diag.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT meta_value AS reconciling FROM system_meta WHERE meta_key='m2_reconciling'; SELECT authority_epoch,authority_seq,ingest_status FROM fallback_event_inbox WHERE authority_epoch=7 ORDER BY authority_seq; SELECT recovery_type,status,source_authority_epoch,target_authority_epoch FROM recovery_runs ORDER BY started_at DESC LIMIT 5; SELECT state,pending_count,retry_count,last_error_class FROM replication_status WHERE singleton_id=1; SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 5;" --json > /tmp/d1-safe.json
+          node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/d1-safe.json','utf8'));const sets=[];for(const b of x){if(Array.isArray(b.results))sets.push(b.results)};const out=[];const a=sets[0]?.[0]||{};out.push('authority='+[a.mode,a.authority_epoch,a.authority_seq,a.scope,a.service_generation].join('|'));out.push('reconciling='+(sets[1]?.[0]?.reconciling??'MISSING'));const inbox=sets[2]||[];out.push('epoch7_inbox_count='+inbox.length);out.push('epoch7_inbox='+inbox.map(r=>r.authority_seq+':'+r.ingest_status).join(','));const rr=sets[3]||[];out.push('recovery_recent='+rr.map(r=>[r.recovery_type,r.status,r.source_authority_epoch,r.target_authority_epoch].join(':')).join(','));const rep=sets[4]?.[0]||{};out.push('replication='+[rep.state,rep.pending_count,rep.retry_count,rep.last_error_class||''].join('|'));out.push('migrations='+(sets[5]||[]).map(r=>r.version).join(','));fs.appendFileSync('/tmp/session2-d1-gate-diagnostic-result.txt',out.join('\n')+'\n')"
+          cat "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          if [[ ! -f /tmp/session2-d1-gate-diagnostic-result.txt ]]; then echo "diagnostic_failed_before_output=true" > /tmp/session2-d1-gate-diagnostic-result.txt; fi
+          cp /tmp/session2-d1-gate-diagnostic-result.txt ops/session2-d1-gate-diagnostic-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-d1-gate-diagnostic-result.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'ops: record sanitized Session2 D1 gate diagnostic'
+          git push
