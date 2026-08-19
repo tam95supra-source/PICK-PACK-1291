@@ -1,4 +1,4 @@
-requested_at=2026-08-20T05:58:00+07:00
+requested_at=2026-08-20T06:01:00+07:00
 version_name=0.4.2-beta.27
 version_code=33
 apk_drive_id=1oqBlRknVMBKnK2cMZDx3aX5yp1avRs3y
@@ -9,4 +9,4 @@ expected_authority=SERVICE_PRIMARY|8
 expected_replication=HEALTHY|0
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
-retry=2
+retry=3
