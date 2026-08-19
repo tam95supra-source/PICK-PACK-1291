@@ -1,57 +1,16 @@
-name: Service M2 Beta19 OTA Publish V3
+name: Historical - Service M2 Beta19 OTA Publish V3
 
 on:
-  push:
-    branches: [ agent/service-migration-m2 ]
-    paths:
-      - 'ops/m2-beta19-ota-publish-v3-trigger.txt'
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: read
-
-concurrency:
-  group: service-m2-beta19-ota-publish-v3
-  cancel-in-progress: false
-
-env:
-  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
-  SERVICE_GENERATION: m2-prod-20260819-001
-  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
-  BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
-  BETA_VERSION: 0.4.2-beta.19
-  BETA_VERSION_CODE: '25'
-  BETA_PACKAGE: vn.pickpack1291.app.beta.publicbeta
-  PREVIOUS_BETA_VERSION: 0.4.2-beta.18
-  STABLE_VERSION: 0.4.2-stable.0
-  EXPECTED_BETA_SHA256: 6dc47edba684249af0655a30573824911ee4a96482f86acf7f3995d6842c3103
-  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
-  CANDIDATE_ARTIFACT_ID: '9342883750'
 
 jobs:
-  publish-beta19:
+  historical-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
-    env:
-      GH_TOKEN: ${{ github.token }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
-      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
-      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/service-migration-m2
-      - name: Publish and verify Beta19 OTA
-        run: python3 tools/m2_beta19_ota_publish_v3.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: m2-beta19-ota-publish-v3-evidence-${{ github.run_id }}
-          path: m2-beta19-ota-publish-evidence/
-          if-no-files-found: warn
-          retention-days: 30
+      - run: |
+          echo 'HISTORICAL_ONLY: Beta19 publisher V3 is retired.'
+          echo 'Current release metadata must come from app/build.gradle.kts and the deliberate current-version publish path.'
+          echo 'This workflow performs no release, signing, Drive write, GAS deploy, or Stable action.'
