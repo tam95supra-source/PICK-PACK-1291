@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           grep -F 'e.committed_at,e.idempotency_key,e.origin,e.schema_version,e.checksum,e.payload_json' service/src/replication.ts
           ! grep -F 'e.committed_at,e.payload_json,e.idempotency_key' service/src/replication.ts
-          grep -F 'const [header=[],ids[]]' service/src/replication.ts
+          grep -F 'const [header=[],ids=[]]' service/src/replication.ts
           grep -F 'LIMIT 7' service/src/entry.ts
           ! grep -F 'ORDER BY sequence_no DESC LIMIT 45' service/src/index.ts
           grep -F 'client_source?: "PDA" | "WEB" | "FILE_IMPORT"' service/src/domain.ts
