@@ -1,4 +1,4 @@
-name: Temp exact Bao Hang Apps Script deploy
+name: Temp discover current Bao Hang Apps Script project
 on:
   push:
     branches: [main]
@@ -6,63 +6,46 @@ on:
 permissions:
   contents: write
 jobs:
-  deploy:
+  discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-      BH_SCRIPT_ID: 19sORZBxocd2cHccG7nEAuqbpEiu4nl8Ka6vXvPz5_SoTB9WtJRRHmTxN
-      BH_DEPLOYMENT_ID: AKfycbxJzYNRJuvkYRlS8djWwZSPmXEUXmcvoW9dA8DZwxmVk410Smg77d--tuDKghQjoZa55Q
+      BH_DEPLOYMENT_ID: AKfycbwb8Hcdg7tp0jqHLZU6kW5hkEclDC9d29DGvPuwcxvZbR9t9xnrWzaIYe8UZET-D_yI
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - name: Prepare canonical worker
+      - name: Query user Apps Script processes for live deployment
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/bh"
-          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 https://raw.githubusercontent.com/tam95supra-source/bao-hang-1291/main/google-apps-script/DEPLOY_NEON.gs -o "$RUNNER_TEMP/bh/worker.gs"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          p=Path(os.environ['RUNNER_TEMP'])/'bh'/'worker.gs'; s=p.read_text(encoding='utf-8')
-          s=s.replace("const variants = [\"select A,B,D,E where G = 1291 and H = 'HY1'\",\"select A,B,D,E where G = '1291' and H = 'HY1'\"];", "const variants = [\"select A,B,D,E,F where G = 1291 and H = 'HY1'\",\"select A,B,D,E,F where G = '1291' and H = 'HY1'\"];",1)
-          s=s.replace("const position=String(row[2]||'').trim(),contractor=String(row[3]||'').trim();\n        byCode[code.toLowerCase()]={employee_code:code,full_name:name,contractor:contractor,source_position:position,role:staffRole_(position,code)};", "const position=String(row[2]||'').trim(),contractor=String(row[3]||'').trim(),department=String(row[4]||'').trim();\n        byCode[code.toLowerCase()]={employee_code:code,full_name:name,contractor:contractor,source_position:position,role:staffRole_(position,department,code)};",1)
-          old="function staffRole_(position,code) {\n  if(String(code)===BH_PROTECTED_ADMIN_CODE)return 'ADMIN';\n  const p=String(position||'').toUpperCase();\n  if(p.indexOf('INVENT')>=0)return 'INVENT';\n  return 'PICKER';\n}"
-          new="function staffRole_(position,department,code) {\n  if(String(code)===BH_PROTECTED_ADMIN_CODE)return 'ADMIN';\n  const p=String(position||'').toUpperCase();\n  const d=String(department||'').toUpperCase();\n  if(p.indexOf('ĐIỀU PHỐI')>=0 || p.indexOf('DIEU PHOI')>=0)return 'ADMIN_INVENT';\n  if(d.indexOf('INVENT')>=0 || p.indexOf('INVENT')>=0)return 'INVENT';\n  return 'PICKER';\n}"
-          if old in s:s=s.replace(old,new,1)
-          s=s.replace("if(caller.profile.role==='ADMIN_INVENT' && role!=='PICKER')throw new Error('FORBIDDEN');","if(caller.profile.role==='ADMIN_INVENT' && ['INVENT','PICKER'].indexOf(role)<0)throw new Error('FORBIDDEN');",1)
-          s=s.replace("if(caller.profile.role==='ADMIN_INVENT'&&target.role!=='PICKER')throw new Error('FORBIDDEN');","if(caller.profile.role==='ADMIN_INVENT'&&['INVENT','PICKER'].indexOf(String(target.role||''))<0)throw new Error('FORBIDDEN');",1)
-          for g in ["const BH_PROJECT = 'bao-hang-1291';","const BH_STAFF_SHEET_ID = '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78';","select A,B,D,E,F where G = 1291 and H = 'HY1'","staffRole_(position,department,code)","['INVENT','PICKER'].indexOf(role)<0"]:
-            assert g in s,g
-          p.write_text(s,encoding='utf-8')
+          mkdir -p ops "$RUNNER_TEMP/g"
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP");test -n "$TOKEN";echo "::add-mask::$TOKEN"
+          code=$(curl -sS -G -o "$RUNNER_TEMP/g/processes.json" -w '%{http_code}' -H "Authorization: Bearer $TOKEN" --data-urlencode "userProcessFilter.deploymentId=$BH_DEPLOYMENT_ID" --data-urlencode 'pageSize=100' https://script.googleapis.com/v1/processes || true)
+          python3 - "$code" <<'PY' > ops/temp-google-oauth-capability.txt
+          import json,sys
+          d={}
+          try:d=json.load(open(__import__('os').environ['RUNNER_TEMP']+'/g/processes.json'))
+          except:pass
+          print('process_http='+sys.argv[1])
+          if sys.argv[1]=='200':
+            rows=d.get('processes') or []
+            names=sorted({str(x.get('projectName') or '').strip() for x in rows if str(x.get('projectName') or '').strip()})
+            funcs=sorted({str(x.get('functionName') or '').strip() for x in rows if str(x.get('functionName') or '').strip()})
+            print('process_count='+str(len(rows)))
+            print('project_names='+'|'.join(names)[:500])
+            print('functions='+'|'.join(funcs)[:500])
+          else:
+            e=d.get('error',{}) if isinstance(d,dict) else {}
+            print('error_class='+str(e.get('status') or 'UNKNOWN'))
+            print('error_message='+str(e.get('message') or '')[:180].replace('\n',' '))
           PY
-          cp "$RUNNER_TEMP/bh/worker.gs" "$RUNNER_TEMP/bh/worker.js"; node --check "$RUNNER_TEMP/bh/worker.js"
-      - name: Deploy exact project and verify live
-        id: deploy
-        continue-on-error: true
+          cat ops/temp-google-oauth-capability.txt
+      - name: Commit sanitized discovery
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs=require('fs'),R={};const f=process.env.RUNNER_TEMP+'/bh/result.json',save=()=>fs.writeFileSync(f,JSON.stringify(R));
-          async function q(u,o={}){const r=await fetch(u,o),t=await r.text();let j={};try{j=t?JSON.parse(t):{}}catch{j={raw:t}};if(!r.ok)throw new Error(`HTTP_${r.status}:${String(j?.error?.message||j?.error||j?.raw||'').slice(0,150)}`);return j}
-          (async()=>{
-            const tok=await q('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:process.env.GOOGLE_OAUTH_CLIENT_ID,client_secret:process.env.GOOGLE_OAUTH_CLIENT_SECRET,refresh_token:process.env.GOOGLE_OAUTH_REFRESH_TOKEN,grant_type:'refresh_token'})});if(!tok.access_token)throw new Error('OAUTH_NO_TOKEN');R.oauth='PASS';
-            const h={Authorization:'Bearer '+tok.access_token},sid=process.env.BH_SCRIPT_ID,did=process.env.BH_DEPLOYMENT_ID;
-            const cur=await q(`https://script.googleapis.com/v1/projects/${sid}/content`,{headers:h}),all=(cur.files||[]).map(x=>String(x.source||'')).join('\n');if(!all.includes("const BH_PROJECT = 'bao-hang-1291'")||!all.includes("const BH_NEON_PROJECT = 'tiny-boat-19315489'"))throw new Error('SCRIPT_SCOPE_MISMATCH');R.script_scope='PASS';
-            const dep=await q(`https://script.googleapis.com/v1/projects/${sid}/deployments/${did}`,{headers:h}),web=(dep.entryPoints||[]).map(e=>e.webApp).find(Boolean);if(!web?.url)throw new Error('WEBAPP_MISSING');const before=await q(web.url,{method:'POST',headers:{'content-type':'text/plain;charset=UTF-8'},body:JSON.stringify({action:'ping'})});if(!(before.ok&&before.project==='bao-hang-1291'&&before.provider==='NEON_FIREBASE_GOOGLE'))throw new Error('LIVE_SCOPE_MISMATCH');R.live_scope='PASS';
-            let code=(cur.files||[]).find(x=>x.type==='SERVER_JS'&&String(x.source||'').includes("const BH_PROJECT = 'bao-hang-1291'"));if(!code)throw new Error('SERVER_JS_MISSING');code.source=fs.readFileSync(process.env.RUNNER_TEMP+'/bh/worker.gs','utf8');await q(`https://script.googleapis.com/v1/projects/${sid}/content`,{method:'PUT',headers:{...h,'content-type':'application/json'},body:JSON.stringify({files:cur.files})});R.source_update='PASS';
-            const ver=await q(`https://script.googleapis.com/v1/projects/${sid}/versions`,{method:'POST',headers:{...h,'content-type':'application/json'},body:JSON.stringify({description:'Bao Hang 1291 staff source and account permission fix'})});await q(`https://script.googleapis.com/v1/projects/${sid}/deployments/${did}`,{method:'PUT',headers:{...h,'content-type':'application/json'},body:JSON.stringify({deploymentConfig:{scriptId:sid,versionNumber:Number(ver.versionNumber),manifestFileName:'appsscript',description:'Bao Hang 1291 production worker'}})});R.deployment_update='PASS';R.version=String(ver.versionNumber||'');
-            let ok=false;for(let i=0;i<20;i++){try{const p=await q(web.url,{method:'POST',headers:{'content-type':'text/plain;charset=UTF-8'},body:JSON.stringify({action:'ping'})});if(p.ok&&p.staff_sheet_id==='1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'&&p.staff_sheet_name==='DANH SÁCH NHÂN SỰ'){ok=true;break}}catch{}await new Promise(r=>setTimeout(r,3000))}if(!ok)throw new Error('LIVE_STAFF_SOURCE_NOT_UPDATED');R.live_staff_source='PASS';save();
-          })().catch(e=>{R.error=String(e.message).replace(/[\r\n]+/g,' ').slice(0,200);save();process.exit(1)});
-          NODE
-      - name: Commit sanitized result
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ops "$RUNNER_TEMP/bh";test -s "$RUNNER_TEMP/bh/result.json" || printf '{"error":"workflow_failed_before_result"}' > "$RUNNER_TEMP/bh/result.json";cp "$RUNNER_TEMP/bh/result.json" ops/temp-google-oauth-capability.txt;cat ops/temp-google-oauth-capability.txt
-          git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com';git add ops/temp-google-oauth-capability.txt;git diff --cached --quiet || git commit -m 'chore(temp): record exact Bao Hang Apps Script deployment';git pull --rebase origin main;git push origin HEAD:main
+          git config user.name 'github-actions[bot]';git config user.email '41898282+github-actions[bot]@users.noreply.github.com';git add ops/temp-google-oauth-capability.txt;git diff --cached --quiet || git commit -m 'chore(temp): record Bao Hang Apps Script project discovery';git pull --rebase origin main;git push origin HEAD:main
