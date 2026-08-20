@@ -1,0 +1,4 @@
+trigger=2026-08-20T13:50:00Z
+purpose=read-only Beta35 pending sync diagnosis for dple
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
