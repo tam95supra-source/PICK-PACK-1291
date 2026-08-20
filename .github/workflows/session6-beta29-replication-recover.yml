@@ -1,0 +1,89 @@
+name: Session6 Beta29 Replication Recover
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session6-beta29-replication-recover-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: pick-pack-1291-production-replication
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Authority and D1 setup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=SETUP
+          trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node - <<'NODE'
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{};
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||Number(a.authority_epoch)<8)throw Error('SERVICE_AUTHORITY');
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_AUTHORITY');
+          NODE
+          cd service; npm install --no-audit --no-fund >/dev/null; npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); [[ -n "$ID" ]]
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s6rep.jsonc',JSON.stringify(c,null,2))" "$ID"
+          cd ..
+          echo setup=PASS >>"$OUT"
+      - name: Inspect and retry canonical replication
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=REPLICATION; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          d1(){ (cd service && npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s6rep.jsonc --command "$1" --json); }
+          d1 "SELECT outbox_id,event_id,status,attempt_count,last_error_class,last_error,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/before.json
+          node - <<'NODE' >>"$OUT"
+          const x=require('/tmp/before.json').flatMap(v=>v.results||[]);console.log('active_before='+x.length);for(const r of x)console.log(`row_before=${r.outbox_id}|${r.status}|attempt=${r.attempt_count}|class=${String(r.last_error_class||'').slice(0,80)}|error=${String(r.last_error||'').replace(/[\r\n|]/g,' ').slice(0,240)}`);
+          NODE
+          # Recover only objectively stale in-flight claims and make retry rows due now; no event deletion or fake ACK.
+          d1 "UPDATE sheet_replication_outbox SET status='RETRY',claim_token=NULL,claimed_at=NULL,next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error_class=COALESCE(last_error_class,'RECOVERY'),last_error=COALESCE(last_error,'BETA29_RECOVERY') WHERE status='INFLIGHT' AND claimed_at IS NOT NULL AND julianday(claimed_at)<=julianday('now','-2 minutes')" >/tmp/reset-inflight.json
+          d1 "UPDATE sheet_replication_outbox SET next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE status='RETRY'" >/tmp/due.json
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}'); echo "::add-mask::$ADMIN"
+          : >/tmp/rep-log.txt
+          for round in 1 2 3 4 5 6; do
+            HTTP=$(curl -sS -o /tmp/rep.json -w '%{http_code}' -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" || true)
+            node - "$round" "$HTTP" <<'NODE' >>/tmp/rep-log.txt
+          const fs=require('fs'),round=process.argv[2],http=process.argv[3];let j={};try{j=JSON.parse(fs.readFileSync('/tmp/rep.json','utf8'))}catch{};console.log(`replicate_round=${round}|http=${http}|ok=${j.ok}|error=${String(j.error?.code||j.error||'').replace(/[\r\n|]/g,' ').slice(0,200)}|claimed=${j.claimed??''}|acked=${j.acked??''}|retried=${j.retried??''}`);
+          NODE
+            d1 "SELECT outbox_id,status,attempt_count,last_error_class,last_error,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/after-round.json
+            ACTIVE=$(node -e 'const x=require("/tmp/after-round.json").flatMap(v=>v.results||[]);process.stdout.write(String(x.length))')
+            [[ "$ACTIVE" == 0 ]] && break
+            d1 "UPDATE sheet_replication_outbox SET next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE status='RETRY'" >/tmp/due-round.json
+            sleep 2
+          done
+          cat /tmp/rep-log.txt >>"$OUT"
+          d1 "SELECT outbox_id,event_id,status,attempt_count,last_error_class,last_error,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/after.json
+          node - <<'NODE' >>"$OUT"
+          const x=require('/tmp/after.json').flatMap(v=>v.results||[]);console.log('active_after='+x.length);for(const r of x)console.log(`row_after=${r.outbox_id}|${r.status}|attempt=${r.attempt_count}|class=${String(r.last_error_class||'').slice(0,80)}|error=${String(r.last_error||'').replace(/[\r\n|]/g,' ').slice(0,240)}`);if(x.length)process.exit(2);
+          NODE
+          curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/hf.json');if(!h.ok||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('HEALTH_NOT_ZERO');console.log('replication=HEALTHY_0');console.log('verdict=PASS');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result || echo result_missing=true >/tmp/result
+          if ! grep -q '^verdict=' /tmp/result; then echo verdict=FAILED_OR_STOPPED >>/tmp/result; fi
+          cp /tmp/result /tmp/r; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/r ops/session6-beta29-replication-recover-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-beta29-replication-recover-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta29 replication recovery'; git push origin HEAD:agent/service-migration-m2
