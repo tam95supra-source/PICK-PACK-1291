@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:11:00Z
+purpose=persist GAS login session lock isolation before live deploy
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
