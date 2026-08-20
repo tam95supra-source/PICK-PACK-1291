@@ -1,0 +1,132 @@
+name: Session6 S33 Beta29 Service Deploy
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session6-s33-beta29-service-deploy-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: pick-pack-1291-production-service
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Apply S33 and source gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=SOURCE
+          trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          python3 tools/apply_s33_service_resource_history.py
+          python3 tools/apply_s33b_service_permission_guard.py
+          grep -q '/v1/admin/resources' service/src/index.ts
+          grep -q 'S33B_CORRECTION_ROLE_GUARD' service/src/correction.ts
+          grep -q 'MASTER_RESOURCE_UPSERT' service/src/master_replication.ts
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npm run check >/dev/null
+          cd ..
+          echo source=PASS >> "$OUT"
+          PHASE=AUTHORITY
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g0.json
+          node - <<'NODE'
+          const h=require('/tmp/h0.json'),g=require('/tmp/g0.json'),a=h.authority||{},ga=g.authority||{};
+          if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||Number(a.authority_epoch)<8)throw Error('SERVICE_AUTHORITY_GATE');
+          if(g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)<8)throw Error('GAS_DISCOVERY_GATE');
+          NODE
+          echo authority_pre=PASS >> "$OUT"
+      - name: Deploy same production Worker and D1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=DEPLOY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          cd service
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          [[ -n "$ID" ]]; export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('/tmp/w-s33.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler deploy --config /tmp/w-s33.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          cd ..
+          echo deploy=PASS >> "$OUT"
+      - name: Live verify and recover replication ledger
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=VERIFY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          for i in 1 2 3 4 5 6; do
+            curl -fsSL "$SERVICE_URL/health" >/tmp/h1.json && node -e 'const h=require("/tmp/h1.json"),a=h.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||Number(a.authority_epoch)<8)process.exit(1)' && break
+            sleep 2
+          done
+          [[ "$(curl -sS -o /tmp/res-unauth -w '%{http_code}' "$SERVICE_URL/v1/admin/resources")" == 401 ]]
+          [[ "$(curl -sS -o /tmp/cor-unauth -w '%{http_code}' -X POST -H 'content-type: application/json' "$SERVICE_URL/v1/corrections" -d '{}')" == 401 ]]
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}'); echo "::add-mask::$ADMIN"
+
+          PHASE=D1
+          HTTP=$(curl -sS -o /tmp/d1list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=20'); [[ "$HTTP" == 200 ]]
+          D1_ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid//.id)' /tmp/d1list.json|head -1); [[ -n "$D1_ID" ]]
+          cd service
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s6recover.jsonc',JSON.stringify(c,null,2))" "$D1_ID"
+          cd ..
+          d1(){ (cd service && npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s6recover.jsonc --command "$1" --json); }
+
+          # Inspect the detailed ledger even when aggregate health already says pending=0.
+          d1 "SELECT outbox_id,status,attempt_count,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/active0.json
+          STALE=$(node -e 'const x=require("/tmp/active0.json").flatMap(v=>v.results||[]),now=Date.now();process.stdout.write(x.filter(r=>r.status==="INFLIGHT"&&r.claimed_at&&now-Date.parse(r.claimed_at)>=120000).map(r=>r.outbox_id).join(","))')
+          if [[ -n "$STALE" ]]; then
+            d1 "UPDATE sheet_replication_outbox SET status='RETRY',claim_token=NULL,claimed_at=NULL,next_attempt_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),last_error_class='RECOVERY',last_error='STALE_INFLIGHT_RECOVERY_BETA29' WHERE outbox_id IN ($STALE) AND status='INFLIGHT' AND julianday(claimed_at)<=julianday('now','-2 minutes')" >/tmp/reset.json
+            echo "recovered_stale_ids=$STALE" >> "$OUT"
+          else
+            echo recovered_stale_ids=NONE >> "$OUT"
+          fi
+
+          PHASE=REPLICATION
+          for round in 1 2 3 4 5 6; do
+            d1 "SELECT outbox_id,status,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/active.json
+            ACTIVE=$(node -e 'const x=require("/tmp/active.json").flatMap(v=>v.results||[]);process.stdout.write(String(x.length))')
+            [[ "$ACTIVE" == 0 ]] && break
+            curl -fsSL -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" >/tmp/rep.json
+            jq -e '.ok==true' /tmp/rep.json >/dev/null
+            sleep 2
+          done
+          d1 "SELECT outbox_id,status FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/activef.json
+          node -e 'const x=require("/tmp/activef.json").flatMap(v=>v.results||[]);if(x.length)throw Error(`ACTIVE_REPLICATION_ROWS_${x.length}`)'
+          curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gf.json
+          node - <<'NODE'
+          const fs=require('fs'),h=require('/tmp/hf.json'),g=require('/tmp/gf.json'),a=h.authority||{},ga=g.authority||{},o='/tmp/result';
+          if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0)throw Error('FINAL_SERVICE_GATE');
+          if(g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('FINAL_GAS_GATE');
+          fs.appendFileSync(o,`authority=SERVICE_PRIMARY_${a.authority_epoch}\nauthority_seq=${a.authority_seq}\nreplication=HEALTHY_0\nresource_endpoint=PASS\ncorrection_endpoint=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n`);
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result || echo result_missing=true >/tmp/result
+          if ! grep -q '^verdict=' /tmp/result; then echo stable=UNTOUCHED >>/tmp/result; echo merge_pr38=UNTOUCHED >>/tmp/result; echo verdict=FAILED_OR_STOPPED >>/tmp/result; fi
+          cp /tmp/result /tmp/r
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/r ops/session6-s33-beta29-service-deploy-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-s33-beta29-service-deploy-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S33 Beta29 production service deploy'
+          git push origin HEAD:agent/service-migration-m2
