@@ -56,6 +56,8 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s35_owner_ui_history_consistency.py"))
     inputs.file(rootProject.file("tools/apply_s35_owner_ui_history_consistency_wrapper.py"))
     inputs.file(rootProject.file("tools/apply_s36_perf_history_report_service.py"))
+    inputs.file(rootProject.file("tools/apply_s36b_compile_hotfix.py"))
+    inputs.file(rootProject.file("tools/apply_s37_move_service_telemetry_to_sync.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
@@ -81,8 +83,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 38
-            versionName = "0.4.2-beta.32"
+            versionCode = 39
+            versionName = "0.4.2-beta.33"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -123,4 +125,4 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// The M2 source transform composes S10..S25 + S27 + S29 + S30 + S31 + S32 + S33 + S34 + S35 + S36 in the ephemeral build workspace.
+// The M2 source transform composes S10..S25 + S27 + S29 + S30 + S31 + S32 + S33 + S34 + S35 + S36 + S37 in the ephemeral build workspace.
