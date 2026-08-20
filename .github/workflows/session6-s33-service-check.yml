@@ -23,6 +23,7 @@ jobs:
             set -x
             python3 tools/apply_s33_service_resource_history.py
             code=$?
+            if [[ $code -eq 0 ]]; then python3 tools/apply_s33b_service_permission_guard.py; code=$?; fi
             if [[ $code -eq 0 ]]; then
               cd service
               npm install --no-audit --no-fund
