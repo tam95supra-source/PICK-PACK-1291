@@ -1,0 +1,15 @@
+recorded_at=2026-08-20T19:56:00+07:00
+version=0.4.2-beta.34
+version_code=40
+artifact_id=9407193141
+apk_name=pick-pack-1291-public-beta-0.4.2-beta.34.apk
+apk_size=12896763
+apk_sha256=2fc98ea64943f6910da626621afcc833d122dc7439a3270211beeb2a7a65821b
+drive_apk_id=11Pngzs7Sio4Xl2WW6kPjUbjsMXd2mEyc
+drive_checksum_id=1eARrI-8Fu9dJ5VKZKVApD2VMS0geoq7_
+beta_folder_id=1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+stable_folder_precheck=EMPTY
+method=CONNECTED_GOOGLE_DRIVE_DIRECT
+public_download=NOT_YET_PROVEN
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
