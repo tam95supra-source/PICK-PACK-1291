@@ -1,0 +1,13 @@
+checked_at=2026-08-20T02:19:08Z
+head_sha=c6660af5c0ff1e94b5e127171806e26658a1e92b
+owner_replication_waiver=YES
+authority_gate=PASS
+s33_endpoints=PASS
+candidate_artifact_id=9390169710
+candidate_sha256=c8a601f58f974dc4cffa038b892c5489a69e1160166684d4eb0d7c1e318f6ec4
+candidate_size=12843347
+failed_phase=DRIVE_PREFLIGHT
+failed_rc=22
+stable=UNTOUCHED_OR_GATE_STOPPED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
