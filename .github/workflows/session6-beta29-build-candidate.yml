@@ -1,17 +1,17 @@
-name: Session6 Beta29 Build Candidate
+name: Session7 Beta30 Build Candidate
 on:
   push:
     branches: [agent/service-migration-m2]
-    paths: [ops/session6-beta29-build-candidate-trigger.txt]
+    paths: [ops/session7-beta30-build-candidate-trigger.txt]
 permissions:
   contents: write
   actions: read
 concurrency:
-  group: session6-beta29-build-candidate
+  group: session7-beta30-build-candidate
   cancel-in-progress: false
 env:
-  EXPECTED_VERSION_NAME: 0.4.2-beta.29
-  EXPECTED_VERSION_CODE: '35'
+  EXPECTED_VERSION_NAME: 0.4.2-beta.30
+  EXPECTED_VERSION_CODE: '36'
   EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
   EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
   EXPECTED_FIREBASE_PROJECT_ID: pick-pack-1291-fcm-20260819
@@ -42,20 +42,20 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build, contract-check and sign Beta29
+      - name: Build, S34 contract-check and sign Beta30
         shell: bash
         run: |
           set -Eeuo pipefail
-          OUT=/tmp/session6-beta29-build-candidate-result.txt
+          OUT=/tmp/session7-beta30-build-candidate-result.txt
           echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"
           PHASE=CONFIG
-          trap 'rc=$?; echo "failed_phase=$PHASE" >> "$OUT"; echo "failed_rc=$rc" >> "$OUT"; echo "--- diagnostic tail ---" >> "$OUT"; tail -n 100 /tmp/gradle.log >> "$OUT" 2>/dev/null || true; exit $rc' ERR
+          trap 'rc=$?; echo "failed_phase=$PHASE" >> "$OUT"; echo "failed_rc=$rc" >> "$OUT"; echo "--- diagnostic tail ---" >> "$OUT"; tail -n 120 /tmp/gradle.log >> "$OUT" 2>/dev/null || true; exit $rc' ERR
           for v in ANDROID_SIGNING_KEY_B64 ANDROID_SIGNING_STORE_PASSWORD ANDROID_SIGNING_KEY_PASSWORD; do [[ -n "${!v:-}" ]]; done
           test -s app/google-services.json
           jq -e --arg p "$EXPECTED_PACKAGE" --arg project "$EXPECTED_FIREBASE_PROJECT_ID" '.project_info.project_id==$project and ([.client[]|select(.client_info.android_client_info.package_name==$p)]|length)==1' app/google-services.json >/dev/null
           FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json); FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json); FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json); FIREBASE_API_KEY=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
-          grep -q 'versionCode = 35' app/build.gradle.kts; grep -q 'versionName = "0.4.2-beta.29"' app/build.gradle.kts
-          grep -q 'apply_s32_local_history_flush_fix.py' app/build.gradle.kts; grep -q 'apply_s33_owner_ui_sync_resources.py' app/build.gradle.kts
+          grep -q 'versionCode = 36' app/build.gradle.kts; grep -q 'versionName = "0.4.2-beta.30"' app/build.gradle.kts
+          grep -q 'apply_s32_local_history_flush_fix.py' app/build.gradle.kts; grep -q 'apply_s33_owner_ui_sync_resources.py' app/build.gradle.kts; grep -q 'apply_s34_owner_six_requests.py' app/build.gradle.kts
           echo config=PASS >> "$OUT"
           PHASE=BUILD
           gradle --no-daemon --build-cache :app:assembleBetaRelease -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" -PFIREBASE_API_KEY="$FIREBASE_API_KEY" -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID" >/tmp/gradle.log 2>&1
@@ -66,14 +66,16 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           store=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt').read_text()
-          assert 'private const val DB_VERSION = 3' in store and 'fun localHistory(' in store
+          assert 'private const val DB_VERSION = 3' in store and 'fun localHistory(' in store and 'fun localHistoryAll()' in store
           worker=Path('app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt').read_text()
           assert 'class M2OutboxFlushWorker' in worker and 'class M2CatchUpWorker' in worker
-          assert 'ExistingWorkPolicy.REPLACE' in worker and 'ExistingWorkPolicy.KEEP' in worker
-          assert 'PpForegroundGate.isForeground()' in worker
+          assert 'ExistingWorkPolicy.REPLACE' in worker and 'ExistingWorkPolicy.KEEP' in worker and 'PpForegroundGate.isForeground()' in worker
           ops=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text()
-          for x in ['Đổi / trả PDA','Mã nhân viên','HHmm','resource_master_upsert','history_correction','Asia/Ho_Chi_Minh','LÀM MỚI TRẠNG THÁI','operationalStore.localHistory(1000)']: assert x in ops, x
-          assert 'MNV' not in ops
+          for x in ['S34_OWNER_SIX_REQUESTS','S34C_SITE1291_LOCAL_REPORT','Đổi / trả PDA','Quản lý CCDC','Nhận hàng Rớt','Mã nhân viên','Lỗi đồng bộ','Chưa đồng bộ','Cần xử lí','Authority canonical','Nhân bản Google','ATTENDANCE_ENTER','Tính theo ngày vào ca','Asia/Ho_Chi_Minh','LÀM MỚI TRẠNG THÁI','FullBetaActivity::class.java']: assert x in ops, x
+          assert 'Triple(R.drawable.ic_pp_resource,"Đổi / trả PDA","PDA_EXCHANGE")' not in ops
+          assert 'scanScreen()' not in ops
+          login=Path('app/src/main/java/vn/pickpack1291/app/beta/FullBetaActivity.kt').read_text()
+          assert 'clean solid rounded login card' in login and 'elevation = 0f' in login
           api=Path('app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt').read_text()
           assert 'serviceOwnerCall' in api and '/v1/admin/resources' in api and '/v1/corrections' in api
           m2=Path('app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt').read_text()
@@ -82,24 +84,24 @@ jobs:
           assert 'fun audit(action:String,payload:JSONObject)' in m2
           PY
           APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk'|head -1); [[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]]
-          echo build=PASS >> "$OUT"; echo s31_contract=PASS >> "$OUT"; echo s32_history_flush_contract=PASS >> "$OUT"; echo s33_owner_contract=PASS >> "$OUT"; echo admin_audit_preserved=PASS >> "$OUT"
+          echo build=PASS >> "$OUT"; echo s31_contract=PASS >> "$OUT"; echo s32_history_flush_contract=PASS >> "$OUT"; echo s34_owner_contract=PASS >> "$OUT"; echo site1291_report_contract=PASS >> "$OUT"; echo admin_audit_preserved=PASS >> "$OUT"
           PHASE=SIGN
           printf '%s' "$ANDROID_SIGNING_KEY_B64"|base64 -d >/tmp/release.jks
           mapfile -t ALIASES < <(keytool -list -v -keystore /tmp/release.jks -storepass "$ANDROID_SIGNING_STORE_PASSWORD" 2>/dev/null|sed -n 's/^Alias name: //p'); [[ ${#ALIASES[@]} -eq 1 ]]
           BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"; [[ -x "$BUILD_TOOLS/zipalign" && -x "$BUILD_TOOLS/apksigner" && -x "$BUILD_TOOLS/aapt" ]]
-          "$BUILD_TOOLS/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/beta29-aligned.apk
-          mkdir -p /tmp/beta29-release; APK=/tmp/beta29-release/pick-pack-1291-public-beta-0.4.2-beta.29.apk
-          "$BUILD_TOOLS/apksigner" sign --ks /tmp/release.jks --ks-key-alias "${ALIASES[0]}" --ks-pass "pass:$ANDROID_SIGNING_STORE_PASSWORD" --key-pass "pass:$ANDROID_SIGNING_KEY_PASSWORD" --out "$APK" /tmp/beta29-aligned.apk
+          "$BUILD_TOOLS/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/beta30-aligned.apk
+          mkdir -p /tmp/beta30-release; APK=/tmp/beta30-release/pick-pack-1291-public-beta-0.4.2-beta.30.apk
+          "$BUILD_TOOLS/apksigner" sign --ks /tmp/release.jks --ks-key-alias "${ALIASES[0]}" --ks-pass "pass:$ANDROID_SIGNING_STORE_PASSWORD" --key-pass "pass:$ANDROID_SIGNING_KEY_PASSWORD" --out "$APK" /tmp/beta30-aligned.apk
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" >/tmp/apksigner.txt
           SIGNER=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/apksigner.txt|head -1|tr '[:upper:]' '[:lower:]'); [[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]]
           BADGING=$("$BUILD_TOOLS/aapt" dump badging "$APK"|head -1); [[ "$BADGING" == *"name='$EXPECTED_PACKAGE'"* && "$BADGING" == *"versionCode='$EXPECTED_VERSION_CODE'"* && "$BADGING" == *"versionName='$EXPECTED_VERSION_NAME'"* ]]
-          SHA=$(sha256sum "$APK"|awk '{print $1}'); SIZE=$(stat -c%s "$APK"); printf '%s  %s\n' "$SHA" 'pick-pack-1291-public-beta-0.4.2-beta.29.apk' >/tmp/beta29-release/SHA256SUMS-beta29.txt
+          SHA=$(sha256sum "$APK"|awk '{print $1}'); SIZE=$(stat -c%s "$APK"); printf '%s  %s\n' "$SHA" 'pick-pack-1291-public-beta-0.4.2-beta.30.apk' >/tmp/beta30-release/SHA256SUMS-beta30.txt
           echo sign=PASS >> "$OUT"; echo "apk_size=$SIZE" >> "$OUT"; echo "apk_sha256=$SHA" >> "$OUT"; echo "signer_sha256=$SIGNER" >> "$OUT"
       - name: Upload exact signed candidate
         uses: actions/upload-artifact@v4
         with:
-          name: beta29-release-candidate
-          path: /tmp/beta29-release/
+          name: beta30-release-candidate
+          path: /tmp/beta30-release/
           retention-days: 14
           if-no-files-found: error
       - name: Record artifact id
@@ -107,15 +109,15 @@ jobs:
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
           set -euo pipefail
-          for i in 1 2 3 4 5; do curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" >/tmp/artifacts.json; ID=$(jq -r '.artifacts[]|select(.name=="beta29-release-candidate")|.id' /tmp/artifacts.json|head -1); [[ -n "$ID" && "$ID" != null ]]&&break; sleep 2; done
-          [[ -n "$ID" && "$ID" != null ]]; echo "artifact_id=$ID" >> /tmp/session6-beta29-build-candidate-result.txt; echo "artifact_name=beta29-release-candidate" >> /tmp/session6-beta29-build-candidate-result.txt; echo verdict=PASS >> /tmp/session6-beta29-build-candidate-result.txt
+          for i in 1 2 3 4 5; do curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" >/tmp/artifacts.json; ID=$(jq -r '.artifacts[]|select(.name=="beta30-release-candidate")|.id' /tmp/artifacts.json|head -1); [[ -n "$ID" && "$ID" != null ]]&&break; sleep 2; done
+          [[ -n "$ID" && "$ID" != null ]]; echo "artifact_id=$ID" >> /tmp/session7-beta30-build-candidate-result.txt; echo "artifact_name=beta30-release-candidate" >> /tmp/session7-beta30-build-candidate-result.txt; echo verdict=PASS >> /tmp/session7-beta30-build-candidate-result.txt
       - name: Record sanitized result
         if: always()
         shell: bash
         run: |
-          test -f /tmp/session6-beta29-build-candidate-result.txt || echo result_missing=true >/tmp/session6-beta29-build-candidate-result.txt
-          cp /tmp/session6-beta29-build-candidate-result.txt /tmp/result.copy
+          test -f /tmp/session7-beta30-build-candidate-result.txt || echo result_missing=true >/tmp/session7-beta30-build-candidate-result.txt
+          cp /tmp/session7-beta30-build-candidate-result.txt /tmp/result.copy
           git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true
-          cp /tmp/result.copy ops/session6-beta29-build-candidate-result.txt
+          cp /tmp/result.copy ops/session7-beta30-build-candidate-result.txt
           git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ops/session6-beta29-build-candidate-result.txt; git diff --cached --quiet && exit 0; git commit -m 'ops: record Beta29 signed release candidate'; git push origin HEAD:agent/service-migration-m2
+          git add ops/session7-beta30-build-candidate-result.txt; git diff --cached --quiet && exit 0; git commit -m 'ops: record Beta30 signed release candidate'; git push origin HEAD:agent/service-migration-m2
