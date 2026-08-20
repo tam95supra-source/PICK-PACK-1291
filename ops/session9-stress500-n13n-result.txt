@@ -1,5 +1,10 @@
-checked_at=2026-08-20T10:05:11Z
-head_sha=1c4bebca629097d9ef7824bb0027f64f805aca85
+checked_at=2026-08-20T10:08:36Z
+head_sha=f67f94a61da0512c6b9ce7ee6a72051cbc6d1daf
+secrets=PASS
+authority_gate=PASS
+d1_list=PASS
+d1_auth_query=PASS
+business_date_count=13
 failed_phase=PREFLIGHT
 failed_rc=1
 stable=UNTOUCHED
