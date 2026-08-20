@@ -40,7 +40,12 @@ export async function exchangeGasSession(request:Request,env:Env):Promise<Respon
 
   const account=await env.DB.prepare("SELECT login_id,role,display_name,position,email,verifier_hash,status FROM accounts WHERE login_id=?1")
     .bind(String(payload.l)).first<{login_id:string;role:string;display_name:string;position:string;email:string;verifier_hash:string;status:string}>();
-  if(!account||account.status!=="ACTIVE"||account.role!==String(payload.r)||account.verifier_hash!==String(payload.v))return apiError("SESSION_EXCHANGE_ACCOUNT_MISMATCH","AUTH",401);
+  // S41_SERVICE_SESSION_BRIDGE_FIX: GAS already validated the signed, active GAS session above.
+  // D1 is a replica for account verifier material and may lag a password/verifier update; requiring
+  // byte-for-byte verifier equality here can deadlock every PDA background outbox while both GAS
+  // and Service are healthy. Keep the authoritative security checks: active GAS token, ACTIVE D1
+  // account and matching role. Do not make replica verifier freshness a transport availability gate.
+  if(!account||account.status!=="ACTIVE"||account.role!==String(payload.r))return apiError("SESSION_EXCHANGE_ACCOUNT_MISMATCH","AUTH",401);
 
   const sessionId=crypto.randomUUID(),issuedAt=nowIso();
   await env.DB.prepare(`INSERT INTO auth_sessions(login_id,session_id,device_id,issued_at) VALUES(?1,?2,?3,?4)

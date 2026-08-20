@@ -1,5 +1,6 @@
 import current, { RealtimeHub } from "./entry";
 import { authenticate } from "./auth";
+import { exchangeGasSession, mobileRead } from "./mobile_hotfix";
 import { apiError, json } from "./util";
 
 export { RealtimeHub };
@@ -17,6 +18,9 @@ async function historicalBusinessDates(request:Request,env:Env):Promise<Response
 export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
     const u=new URL(request.url);
+    // S39B_PRODUCT_MOBILE_ROUTES: production entrypoint owns these routes directly; no wrapper indirection.
+    if(u.pathname==="/v1/auth/gas-session"&&request.method==="POST")return exchangeGasSession(request,env);
+    if(u.pathname==="/v1/mobile/read"&&request.method==="POST")return mobileRead(request,env);
     if(u.pathname==="/v1/admin/business-dates"&&request.method==="GET")return historicalBusinessDates(request,env);
     return current.fetch(request,env,ctx);
   },
