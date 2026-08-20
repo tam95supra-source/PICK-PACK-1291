@@ -1,5 +1,5 @@
-requested_at=2026-08-20T08:10:00+07:00
+requested_at=2026-08-20T08:53:00+07:00
 mode=READ_ONLY
-reason=pre-beta29-owner-change-refresh
+reason=beta29-deploy-authority-gate-diagnostic
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
