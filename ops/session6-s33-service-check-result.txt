@@ -1,20 +1,24 @@
-checked_at=2026-08-20T01:46:02Z
-head_sha=46f161c640369072c33cf42072f79efa4085a72a
+checked_at=2026-08-20T02:01:18Z
+head_sha=c50a0d993329e6e039b8d62cad2552f3cccf15de
 service_s33_check=PASS
+timezone_guard=PASS_ASIA_HO_CHI_MINH
 verdict=PASS
 --- diagnostic tail ---
-+ python3 tools/apply_s33_service_resource_history.py
-Applied S33 Service resource admin, role-window correction, Google master replication and VN timezone
-+ code=0
-+ [[ 0 -eq 0 ]]
 + python3 tools/apply_s33b_service_permission_guard.py
 Applied S33B correction role guard: USER read-only, ADMIN N/N-1, SUPERADMIN N..N-6
++ code=0
++ [[ 0 -eq 0 ]]
++ python3 tools/apply_s33c_service_timezone_guard.py
+S33C Service timezone guard PASS; Asia/Ho_Chi_Minh canonical; changed=service/src/dr.ts,service/src/mobile_hotfix.ts
++ code=0
++ [[ 0 -eq 0 ]]
++ grep -R Asia/Bangkok service/src '--include=*.ts'
 + code=0
 + [[ 0 -eq 0 ]]
 + cd service
 + npm install --no-audit --no-fund
 
-added 40 packages in 7s
+added 40 packages in 5s
 + code=0
 + [[ 0 -eq 0 ]]
 + npm run check
