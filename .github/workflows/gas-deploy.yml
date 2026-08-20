@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth=1 https://github.com/tam95supra-source/bao-hang-1291.git /tmp/bao-hang >/dev/null 2>&1
-          python3 -m py_compile ops/install_staff_bridge_hmac.py
+          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/run_install_staff_bridge_hmac.py
           cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/pp-bridge.js
           cp /tmp/bao-hang/google-apps-script/STAFF_SOURCE_BRIDGE_RECEIVER.gs /tmp/bh-receiver.js
           node --check /tmp/pp-bridge.js
@@ -45,17 +45,21 @@ jobs:
 
       - name: Bootstrap properties, deploy, probe and restore
         shell: bash
-        run: python3 ops/install_staff_bridge_hmac.py
+        run: python3 ops/run_install_staff_bridge_hmac.py
 
       - name: Commit sanitized proof
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          test -f ops/staff-bridge-hmac-live-proof.json
-          jq -e '.status=="PASS" and .service_upsert_runtime=="PASS" and .source_restored==true and .temporary_deployments_cleanup=="PASS"' ops/staff-bridge-hmac-live-proof.json >/dev/null
+          if [[ ! -f ops/staff-bridge-hmac-live-proof.json ]]; then
+            printf '%s\n' '{"status":"FAIL","stage":"PREPARE_CANONICAL_OR_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-hmac-live-proof.json
+          fi
+          cat ops/staff-bridge-hmac-live-proof.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ops/staff-bridge-hmac-live-proof.json
           git diff --cached --quiet || git commit -m 'chore(staff): record signed bridge live proof'
           git pull --rebase origin main
           git push origin HEAD:main
+          jq -e '.status=="PASS" and .service_upsert_runtime=="PASS" and .source_restored==true and .temporary_deployments_cleanup=="PASS"' ops/staff-bridge-hmac-live-proof.json >/dev/null
