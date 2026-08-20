@@ -1,0 +1,6 @@
+checked_at=2026-08-20T01:52:03.898Z
+service=true|SERVICE_PRIMARY|8|18|PRODUCTION|rep:HEALTHY:3
+gas=false|top::|nested:::|error:UNAUTHORIZED
+verdict=FAIL
+service_http=200
+gas_http=200
