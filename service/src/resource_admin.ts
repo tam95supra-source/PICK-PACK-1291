@@ -20,7 +20,7 @@ export async function resourceAdminList(request:Request,env:Env):Promise<Respons
     env.DB.prepare("SELECT pack_table,shift,user_pack,label,available FROM resource_pack_map ORDER BY pack_table,shift,user_pack"),
     env.DB.prepare("SELECT namespace,ordinal,value FROM catalog_values WHERE namespace IN ('DANH SÁCH PDA_Tình trạng','DANH SÁCH USER PICK_Tình trạng','DANH SÁCH BÀN PACK_Tình trạng','DANH SÁCH USER PACK_Tình trạng') ORDER BY namespace,ordinal"),
   ]);
-  return json({ok:true,resources:resources.results??[],pack_map:maps.results??[],catalogs:catalogs.results??[],can_edit:auth.role==="ADMIN"||auth.role==="SUPERADMIN"});
+  return json({ok:true,resources:resources?.results??[],pack_map:maps?.results??[],catalogs:catalogs?.results??[],can_edit:auth.role==="ADMIN"||auth.role==="SUPERADMIN"});
 }
 
 export async function resourceAdminMutate(request:Request,env:Env):Promise<Response>{
@@ -30,6 +30,9 @@ export async function resourceAdminMutate(request:Request,env:Env):Promise<Respo
   const prior=await env.DB.prepare("SELECT * FROM events WHERE idempotency_key=?1").bind(idem).first<EventRow>();if(prior)return json({ok:true,duplicate:true,event:prior});
   const authority=await currentAuthority(env.DB);if(authority.mode!=="SERVICE_PRIMARY"||authority.scope!=="PRODUCTION")return apiError("SERVICE_NOT_WRITE_AUTHORITY","CONFLICT",409,true);
   const leased=await env.DB.prepare("SELECT 1 x FROM resource_leases WHERE resource_type=?1 AND resource_id=?2 LIMIT 1").bind(type,id).first();if(operation==="DELETE"&&leased)return apiError("RESOURCE_IN_USE","RESOURCE",409,false);
+  if(operation==="DELETE"&&type==="PACK_TABLE"){
+    const mapped=await env.DB.prepare("SELECT 1 x FROM resource_pack_map WHERE pack_table=?1 LIMIT 1").bind(id).first();if(mapped)return apiError("RESOURCE_HAS_PACK_MAPPING","RESOURCE",409,false);
+  }
   const before=await env.DB.prepare("SELECT resource_type,resource_id,status_label,available,metadata_json FROM resources WHERE resource_type=?1 AND resource_id=?2").bind(type,id).first<Record<string,unknown>>();
   if(operation==="DELETE"&&!before)return apiError("RESOURCE_NOT_FOUND","VALIDATION",404);
   const at=nowIso(),meta=cleanMeta(b.metadata);
@@ -46,7 +49,6 @@ export async function resourceAdminMutate(request:Request,env:Env):Promise<Respo
   }else{
     stmts.push(env.DB.prepare("DELETE FROM resources WHERE resource_type=?1 AND resource_id=?2").bind(type,id));
     if(type==="USER_PACK")stmts.push(env.DB.prepare("DELETE FROM resource_pack_map WHERE user_pack=?1").bind(id));
-    if(type==="PACK_TABLE")stmts.push(env.DB.prepare("DELETE FROM resource_pack_map WHERE pack_table=?1").bind(id));
   }
   stmts.push(env.DB.prepare("UPDATE revision_state SET revision=?1,updated_at=?2 WHERE namespace=?3 AND revision=?4").bind(newRev,at,namespace,rev));
   stmts.push(env.DB.prepare("UPDATE authority_state SET authority_seq=?1,updated_at=?2 WHERE singleton_id=1 AND authority_epoch=?3 AND authority_seq=?4").bind(seq,at,authority.authority_epoch,authority.authority_seq));
