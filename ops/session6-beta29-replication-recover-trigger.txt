@@ -1,0 +1,6 @@
+requested_at=2026-08-20T09:14:00+07:00
+mode=READ_ERROR_AND_CANONICAL_RETRY
+delete_events=FORBIDDEN
+fake_ack=FORBIDDEN
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
