@@ -54,6 +54,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s33_owner_ui_sync_resources.py"))
     inputs.file(rootProject.file("tools/apply_s34_owner_six_requests.py"))
     inputs.file(rootProject.file("tools/apply_s35_owner_ui_history_consistency.py"))
+    inputs.file(rootProject.file("tools/apply_s35_owner_ui_history_consistency_wrapper.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
