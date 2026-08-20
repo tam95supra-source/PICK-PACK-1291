@@ -49,7 +49,7 @@ jobs:
           node - <<'NODE'
           const h=require('/tmp/h0.json'),g=require('/tmp/g0.json'),a=h.authority||{},ga=g.authority||{};
           if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||Number(a.authority_epoch)<8)throw Error('SERVICE_AUTHORITY_GATE');
-          if(g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)<8)throw Error('GAS_DISCOVERY_GATE');
+          if(!g.ok||g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)<8)throw Error('GAS_DISCOVERY_GATE');
           NODE
           echo authority_pre=PASS >> "$OUT"
       - name: Deploy same production Worker and D1
@@ -61,10 +61,11 @@ jobs:
           npx wrangler d1 list --json >/tmp/list.json
           ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
           [[ -n "$ID" ]]; export ID
-          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('/tmp/w-s33.jsonc',JSON.stringify(c,null,2))"
-          npx wrangler deploy --config /tmp/w-s33.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-s33-prod.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler deploy --config .wrangler-s33-prod.jsonc --keep-vars --dry-run >/tmp/dry.out 2>/tmp/dry.err
+          npx wrangler deploy --config .wrangler-s33-prod.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
           cd ..
-          echo deploy=PASS >> "$OUT"
+          echo dry_run=PASS >> "$OUT"; echo deploy=PASS >> "$OUT"
       - name: Live verify and recover replication ledger
         shell: bash
         run: |
@@ -86,7 +87,6 @@ jobs:
           cd ..
           d1(){ (cd service && npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s6recover.jsonc --command "$1" --json); }
 
-          # Inspect the detailed ledger even when aggregate health already says pending=0.
           d1 "SELECT outbox_id,status,attempt_count,claimed_at,next_attempt_at FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT') ORDER BY outbox_id" >/tmp/active0.json
           STALE=$(node -e 'const x=require("/tmp/active0.json").flatMap(v=>v.results||[]),now=Date.now();process.stdout.write(x.filter(r=>r.status==="INFLIGHT"&&r.claimed_at&&now-Date.parse(r.claimed_at)>=120000).map(r=>r.outbox_id).join(","))')
           if [[ -n "$STALE" ]]; then
@@ -112,7 +112,7 @@ jobs:
           node - <<'NODE'
           const fs=require('fs'),h=require('/tmp/hf.json'),g=require('/tmp/gf.json'),a=h.authority||{},ga=g.authority||{},o='/tmp/result';
           if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0)throw Error('FINAL_SERVICE_GATE');
-          if(g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('FINAL_GAS_GATE');
+          if(!g.ok||g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('FINAL_GAS_GATE');
           fs.appendFileSync(o,`authority=SERVICE_PRIMARY_${a.authority_epoch}\nauthority_seq=${a.authority_seq}\nreplication=HEALTHY_0\nresource_endpoint=PASS\ncorrection_endpoint=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n`);
           NODE
       - name: Record result
@@ -120,7 +120,11 @@ jobs:
         shell: bash
         run: |
           test -f /tmp/result || echo result_missing=true >/tmp/result
-          if ! grep -q '^verdict=' /tmp/result; then echo stable=UNTOUCHED >>/tmp/result; echo merge_pr38=UNTOUCHED >>/tmp/result; echo verdict=FAILED_OR_STOPPED >>/tmp/result; fi
+          if ! grep -q '^verdict=' /tmp/result; then
+            echo '--- deploy diagnostic ---' >>/tmp/result
+            { tail -n 30 /tmp/dry.err 2>/dev/null; tail -n 40 /tmp/deploy.err 2>/dev/null; } | sed -E 's/(Bearer|token|secret|password)[=: ]+[^ ]+/\1=[REDACTED]/Ig' >>/tmp/result || true
+            echo stable=UNTOUCHED >>/tmp/result; echo merge_pr38=UNTOUCHED >>/tmp/result; echo verdict=FAILED_OR_STOPPED >>/tmp/result
+          fi
           cp /tmp/result /tmp/r
           git reset --hard HEAD >/dev/null
           git pull --rebase origin agent/service-migration-m2 || true
