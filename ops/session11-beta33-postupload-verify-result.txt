@@ -1,5 +1,5 @@
-checked_at=2026-08-20T11:14:39Z
-head_sha=a1fea66af914f1288e52e538cce4de97ce48da09
+checked_at=2026-08-20T11:19:10Z
+head_sha=9903869ec87fc8cac90465387c4bfaef29c189ea
 failed_phase=OTA
 failed_rc=1
 stable=UNTOUCHED
