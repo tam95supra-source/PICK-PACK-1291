@@ -1,4 +1,4 @@
-trigger=2026-08-20T14:53:00Z
-purpose=rerun signed Beta37 after S43 post-S33 lifecycle anchor fix
+trigger=beta37-s43-immediate-async-v2
+purpose=build signed Beta37 with SQLite-first immediate async Service flush and WorkManager retry backup
 stable=UNTOUCHED
 merge_pr38=UNTOUCHED
