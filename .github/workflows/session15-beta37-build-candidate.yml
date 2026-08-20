@@ -50,9 +50,13 @@ jobs:
           from pathlib import Path
           o=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text();s=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt').read_text();p=Path('app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt').read_text();t=Path('app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt').read_text();w=Path('app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt').read_text()
           assert 'S43_FOREGROUND_OUTBOX_WAKE' in o
-          assert o.count('M2WorkScheduler.schedule(this)') >= 2
+          assert o.count('M2ImmediateOutbox.kick(this)') >= 2
           assert 'OperationalDataStore(this).pendingMutationCount()' in o
           assert 'foregroundSync.start()' in o
+          assert 'object M2ImmediateOutbox' in w and 'Executors.newSingleThreadExecutor()' in w
+          assert 'if (!M2ServiceTransport(app).flushOutbox()) M2WorkScheduler.schedule(app)' in w
+          assert 'store.enqueueMutation(request, exclusive)' in t and 'M2ImmediateOutbox.kick(app)' in t
+          assert t.index('store.enqueueMutation(request, exclusive)') < t.index('M2ImmediateOutbox.kick(app)')
           assert 'S40_OWNER_LOCAL_FIRST_REPAIR' in o
           assert 'fun unresolvedMutations(' in s
           pa=s.index('    fun projectionMutations(');pb=s.index('    fun markMutationSynced(',pa);proj=s[pa:pb]
@@ -67,7 +71,7 @@ jobs:
           assert 'val pageSize=100;var pageStart=0' in hist and 'drop(pageStart).take(pageSize)' in hist and 'pageSize+=60' not in hist
           for x in ['S38_ATTENDANCE_UI','PHÁT LẠI USER ĐANG DÙNG','TRÙNG USER','pda_status_at_enter','pda_exit_status','PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST','Ca HC','Tình trạng:']: assert x in o,x
           PY
-          APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk'|head -1);[[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]];echo build=PASS >>"$OUT";echo s43_foreground_outbox_wake=PASS >>"$OUT";echo s40_owner_local_first_contract=PASS >>"$OUT";echo background_reauth_contract=PASS >>"$OUT";echo history_page100_contract=PASS >>"$OUT";echo s38_attendance_contract=PASS >>"$OUT"
+          APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk'|head -1);[[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]];echo build=PASS >>"$OUT";echo s43_immediate_async_outbox=PASS >>"$OUT";echo s43_foreground_recovery_wake=PASS >>"$OUT";echo s40_owner_local_first_contract=PASS >>"$OUT";echo background_reauth_contract=PASS >>"$OUT";echo history_page100_contract=PASS >>"$OUT";echo s38_attendance_contract=PASS >>"$OUT"
           PHASE=SIGN;printf '%s' "$ANDROID_SIGNING_KEY_B64"|base64 -d >/tmp/release.jks;mapfile -t ALIASES < <(keytool -list -v -keystore /tmp/release.jks -storepass "$ANDROID_SIGNING_STORE_PASSWORD" 2>/dev/null|sed -n 's/^Alias name: //p');[[ ${#ALIASES[@]} -eq 1 ]];BT="$ANDROID_HOME/build-tools/36.0.0";"$BT/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/beta37-aligned.apk;mkdir -p /tmp/beta37-release;APK=/tmp/beta37-release/pick-pack-1291-public-beta-0.4.2-beta.37.apk;"$BT/apksigner" sign --ks /tmp/release.jks --ks-key-alias "${ALIASES[0]}" --ks-pass "pass:$ANDROID_SIGNING_STORE_PASSWORD" --key-pass "pass:$ANDROID_SIGNING_KEY_PASSWORD" --out "$APK" /tmp/beta37-aligned.apk;"$BT/apksigner" verify --verbose --print-certs "$APK" >/tmp/apksigner.txt;SIGNER=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/apksigner.txt|head -1|tr '[:upper:]' '[:lower:]');[[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]];BADGING=$("$BT/aapt" dump badging "$APK"|head -1);[[ "$BADGING" == *"name='$EXPECTED_PACKAGE'"* && "$BADGING" == *"versionCode='$EXPECTED_VERSION_CODE'"* && "$BADGING" == *"versionName='$EXPECTED_VERSION_NAME'"* ]];SHA=$(sha256sum "$APK"|awk '{print $1}');SIZE=$(stat -c%s "$APK");printf '%s  %s\n' "$SHA" 'pick-pack-1291-public-beta-0.4.2-beta.37.apk' >/tmp/beta37-release/SHA256SUMS-beta37.txt;echo sign=PASS >>"$OUT";echo apk_size=$SIZE >>"$OUT";echo apk_sha256=$SHA >>"$OUT";echo signer_sha256=$SIGNER >>"$OUT"
       - uses: actions/upload-artifact@v4
         with: { name: beta37-release-candidate, path: /tmp/beta37-release/, retention-days: 14, if-no-files-found: error }
