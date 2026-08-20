@@ -1,4 +1,4 @@
-trigger=beta37-s43-immediate-async-v2
-purpose=build signed Beta37 v2 with SQLite-first immediate async Service flush and WorkManager retry backup
+trigger=beta37-s43-immediate-async-v2-rerun
+purpose=rerun signed Beta37 v2 after workflow registration
 stable=UNTOUCHED
 merge_pr38=UNTOUCHED
