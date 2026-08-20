@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "scope": "script.external_request",
+  "present_before": true,
+  "present_after": true,
+  "deployment_version_created": 0,
+  "verified_at": "2026-08-20T01:45:16.854837+00:00"
+}
