@@ -1,0 +1,15 @@
+checked_at=2026-08-20T14:27:48Z
+head_sha=7bc59437164cba75becaaba231109e01b6c381a9
+pre_authority=SERVICE_PRIMARY_8_18505
+pre_replication=HEALTHY_0
+source_gate=PASS
+typecheck=PASS
+d1_id=b619df89-528d-4126-a948-de0425037b11
+deploy=PASS
+authority=SERVICE_PRIMARY_8_18505
+replication=HEALTHY_0
+latest_auth_issued_at=2026-08-20T11:08:39.968Z
+recent_event_rows=0
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS
