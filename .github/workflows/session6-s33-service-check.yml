@@ -1,0 +1,41 @@
+name: Session6 S33 Service Check
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths:
+      - ops/session6-s33-service-check-trigger.txt
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Apply S33 Service transform and typecheck
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/apply_s33_service_resource_history.py
+          cd service
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          printf 'checked_at=%s\nhead_sha=%s\n' "$(date -u +%FT%TZ)" "$GITHUB_SHA" >/tmp/r
+          if [[ "${{ job.status }}" == success ]]; then echo 'service_s33_check=PASS' >>/tmp/r; echo 'verdict=PASS' >>/tmp/r; else echo 'service_s33_check=FAIL' >>/tmp/r; echo 'verdict=FAIL' >>/tmp/r; fi
+          cp /tmp/r /tmp/c
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/c ops/session6-s33-service-check-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-s33-service-check-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S33 Service check'
+          git push origin HEAD:agent/service-migration-m2
