@@ -1,0 +1,6 @@
+{
+  "status": "PASS",
+  "function": "authorizeBaoHangStaffBridgeTransport",
+  "data_mutation": false,
+  "verified_at": "2026-08-20T01:47:15.827657+00:00"
+}
