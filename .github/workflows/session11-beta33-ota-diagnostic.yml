@@ -22,7 +22,7 @@ jobs:
         run: |
           set -u
           OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"
-          HTTP=$(curl -sS -o /tmp/ota.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.32"}' || true)
+          HTTP=$(curl -sSL -o /tmp/ota.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.32"}' || true)
           echo "beta_http=$HTTP" >>"$OUT"
           node - <<'NODE' >>"$OUT"
           const fs=require('fs');let j={};try{j=JSON.parse(fs.readFileSync('/tmp/ota.json','utf8'))}catch(e){console.log('beta_json_parse=false');process.exit(0)}
@@ -30,10 +30,10 @@ jobs:
           NODE
           URL=$(jq -r '.apk_url // .download_url // .url // empty' /tmp/ota.json 2>/dev/null)
           if [[ -n "$URL" ]]; then
-            DHTTP=$(curl -sS -L -o /tmp/public.apk -w '%{http_code}' "$URL" || true); echo "download_http=$DHTTP" >>"$OUT"
+            DHTTP=$(curl -sSL -o /tmp/public.apk -w '%{http_code}' "$URL" || true); echo "download_http=$DHTTP" >>"$OUT"
             if [[ -s /tmp/public.apk ]]; then echo "download_size=$(stat -c%s /tmp/public.apk)" >>"$OUT"; echo "download_sha=$(sha256sum /tmp/public.apk|awk '{print $1}')" >>"$OUT"; fi
           fi
-          SHTTP=$(curl -sS -o /tmp/self.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.33"}' || true); echo "self_http=$SHTTP" >>"$OUT"
+          SHTTP=$(curl -sSL -o /tmp/self.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.33"}' || true); echo "self_http=$SHTTP" >>"$OUT"
           node - <<'NODE' >>"$OUT"
           const fs=require('fs');let j={};try{j=JSON.parse(fs.readFileSync('/tmp/self.json','utf8'))}catch{};console.log(`self_ok=${j.ok}`);console.log(`self_available=${j.available??j.update_available}`);console.log(`self_version=${j.version_name??j.version??''}`);console.log(`self_error=${j.error??''}`);
           NODE
