@@ -1,5 +1,32 @@
 {
   "status": "FAIL",
-  "stage": "SERVICE_PROBE_MARKER_BRIDGE_FAILED",
-  "verified_at": "2026-08-20T01:28:05.288936+00:00"
+  "mode": "SIGNED_SOURCE_DRIVEN_STAFF_BRIDGE_V2_FLUSHED",
+  "pick_pack_gas_version": 97,
+  "pick_pack_live_health": "PASS",
+  "bao_hang_live_health": "PASS",
+  "service_upsert_runtime": "FAIL",
+  "restore_runtime": "FAIL",
+  "marker": {
+    "type": "object",
+    "ok": false,
+    "changed": 0,
+    "updated": 0,
+    "created": 0,
+    "deactivated": 0,
+    "queued": true,
+    "error_code": ""
+  },
+  "restore": {
+    "type": "object",
+    "ok": false,
+    "changed": 0,
+    "updated": 0,
+    "created": 0,
+    "deactivated": 0,
+    "queued": true,
+    "error_code": ""
+  },
+  "source_restored": true,
+  "temporary_deployments_cleanup": "PASS",
+  "verified_at": "2026-08-20T01:33:40.579177+00:00"
 }
