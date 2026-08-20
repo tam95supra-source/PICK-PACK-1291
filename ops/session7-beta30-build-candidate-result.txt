@@ -1,5 +1,5 @@
-checked_at=2026-08-20T03:19:10Z
-head_sha=44730fbe6ec0512a5b7a282a4a2addb8cf7be439
+checked_at=2026-08-20T03:20:55Z
+head_sha=a96009bf4e3dd48ac6b5b38aae26913126db636a
 config=PASS
 failed_phase=BUILD
 failed_rc=1
@@ -7,7 +7,7 @@ failed_rc=1
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
 Daemon will be stopped at the end of the build 
 
-> Task :app:generateS10Operations FAILED
+> Task :app:generateS10Operations
 Generated /home/runner/work/pick-pack-1291/pick-pack-1291/app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt (82803 chars)
 Applied S11 compact/report patch: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
 S12 real-PDA patch applied
@@ -18,7 +18,6 @@ S15 local-first UI + report date selector + compact scanner patch applied
 S17 SQLite recovery UI patch applied
 S18 sync-direction + dual-edge navigation + parent-tab reset patch applied
 Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 runtime patches in build workspace: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-S34C report anchors missing
 Applied S19 M2 production runtime fix; event-driven foreground contract preserved.
 Applied S20 PACK composite identity fix.
 Applied S21 labor shift fix.
@@ -38,13 +37,59 @@ Applied S33 owner UI/history/staff/resources/sync/PDA-exchange/lifecycle/timezon
 Applied S33B compile-safe foreground gate, provider helper and history permission guard
 Applied S34 owner six requests: business cards/nav, rich sync, history filters/status/search/date, logout/login, full local history
 Applied S34B compile hotfix: business QR card uses employeeScan
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787195953203.json
+Applied S34C: Site 1291 manpower/tenure report from canonical entry-day snapshot
+Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+
+> Task :app:preBuild
+> Task :app:preBetaReleaseBuild
+> Task :app:mergeBetaReleaseJniLibFolders
+> Task :app:mergeBetaReleaseNativeLibs
+> Task :app:mergeBetaReleaseArtProfile
+> Task :app:desugarBetaReleaseFileDependencies FROM-CACHE
+> Task :app:generateBetaReleaseBuildConfig
+> Task :app:generateBetaReleaseResources
+> Task :app:packageBetaReleaseResources
+> Task :app:stripBetaReleaseDebugSymbols
+> Task :app:processBetaReleaseNavigationResources
+> Task :app:extractBetaReleaseNativeSymbolTables
+> Task :app:mergeBetaReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:javaPreCompileBetaRelease FROM-CACHE
+> Task :app:parseBetaReleaseLocalResources
+> Task :app:checkBetaReleaseAarMetadata
+> Task :app:mapBetaReleaseSourceSetPaths
+> Task :app:compileBetaReleaseNavigationResources FROM-CACHE
+> Task :app:generateBetaReleaseRFile
+> Task :app:mergeBetaReleaseResources
+> Task :app:createBetaReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksBetaRelease FROM-CACHE
+> Task :app:processBetaReleaseMainManifest
+> Task :app:processBetaReleaseManifest
+> Task :app:processBetaReleaseManifestForPackage
+> Task :app:checkBetaReleaseDuplicateClasses
+> Task :app:mergeBetaReleaseStartupProfile
+> Task :app:compileBetaReleaseKotlin
+> Task :app:processBetaReleaseResources
+> Task :app:mergeExtDexBetaRelease
+
+> Task :app:compileBetaReleaseKotlin FAILED
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:513:244 Unresolved reference 'reportGrid'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:513:342 Unresolved reference 'reportGrid'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:582:9 Function 'statusPalette' without a body must be abstract.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:582:9 Function 'statusPalette' must have a body.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:582:60 Syntax error: Expecting a '>'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:582:60 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:583:25 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:584:26 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:585:13 Syntax error: Expecting an element.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:585:17 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787196059992.json
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:generateS10Operations'.
-> Process 'command 'python3'' finished with non-zero exit value 1
+Execution failed for task ':app:compileBetaReleaseKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
 
 * Try:
 > Run with --stacktrace option to get the stack trace.
@@ -52,5 +97,5 @@ Execution failed for task ':app:generateS10Operations'.
 > Run with --scan to get full insights from a Build Scan (powered by Develocity).
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 13s
-1 actionable task: 1 executed
+BUILD FAILED in 1m 22s
+28 actionable tasks: 24 executed, 4 from cache
