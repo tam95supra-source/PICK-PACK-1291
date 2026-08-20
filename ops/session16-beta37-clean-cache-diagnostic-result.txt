@@ -1,9 +1,9 @@
-checked_at=2026-08-20T15:45:02Z
-head_sha=e456276e49617089bf26e6de40605a56f7c0c3cc
+checked_at=2026-08-20T15:45:30Z
+head_sha=d180f40d07afa3cff1acf830e05918dec55cd683
 service=OK
 authority=SERVICE_PRIMARY_8_18505
 replication=HEALTHY_0
-mobile_unauth_http=401
+mobile_unauth_http=502
 session_empty_http=400
 account_dpchan=USER_ACTIVE
 account_dple=USER_ACTIVE
