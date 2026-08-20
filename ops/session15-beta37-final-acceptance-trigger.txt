@@ -1,0 +1,4 @@
+trigger=beta37-final-acceptance
+purpose=verify Beta36 discovers Beta37, public hash/size, Service route contract, Stable isolation and PR lock
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
