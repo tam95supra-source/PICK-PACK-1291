@@ -1,8 +1,8 @@
 /*
  * PICK PACK 1291 -> BÁO HÀNG 1291 staff event bridge.
  * Source-driven only: DỮ LIỆU THEO NGÀY emits a small event when DANH SÁCH NHÂN SỰ changes.
- * No Báo hàng secret is stored here. Receiver authenticates the trigger owner's Google OAuth identity
- * and then re-reads the trusted source Sheet before applying any backend mutation.
+ * Shared HMAC material is stored only in Apps Script Properties, never in source.
+ * Receiver verifies signed metadata and re-reads the trusted source Sheet before backend mutation.
  */
 
 const PP_BH_STAFF_BRIDGE = Object.freeze({
@@ -12,6 +12,7 @@ const PP_BH_STAFF_BRIDGE = Object.freeze({
   RELEVANT_COLUMNS: [1, 2, 4, 5, 6],
   SNAPSHOT_PROP: 'PP_BH_STAFF_ROW_CODES_V1',
   PENDING_PROP: 'PP_BH_STAFF_PENDING_V1',
+  HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET',
   MAX_PENDING: 30
 });
 
@@ -175,7 +176,10 @@ function ppBaoHangBridgeSendOrQueue_(payload) {
 }
 
 function ppBaoHangBridgePost_(payload) {
-  const body = Object.assign({}, payload, {oauth_token: ScriptApp.getOAuthToken()});
+  const secret = String(PropertiesService.getScriptProperties().getProperty(PP_BH_STAFF_BRIDGE.HMAC_PROP) || '');
+  if (secret.length < 32) throw new Error('BH_BRIDGE_HMAC_NOT_CONFIGURED');
+  const body = Object.assign({}, payload, {sent_at:new Date().toISOString()});
+  body.hmac_sha256 = ppBaoHangBridgeHmacHex_(body, secret);
   const res = UrlFetchApp.fetch(PP_BH_STAFF_BRIDGE.TARGET_URL, {
     method: 'post',
     contentType: 'application/json',
@@ -190,6 +194,21 @@ function ppBaoHangBridgePost_(payload) {
     throw new Error('BH_BRIDGE_HTTP_' + code + ':' + String(out.error || res.getContentText() || '').slice(0,250));
   }
   return out;
+}
+
+function ppBaoHangBridgeCanonical_(payload) {
+  const oldCodes = payload.old_codes && typeof payload.old_codes === 'object' && !Array.isArray(payload.old_codes) ? payload.old_codes : {};
+  const oldPart = Object.keys(oldCodes).sort(function(a,b){
+    const na=Number(a), nb=Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na-nb;
+    return String(a).localeCompare(String(b));
+  }).map(function(k){ return String(k) + '=' + String(oldCodes[k] || ''); }).join('&');
+  return [String(payload.action || ''),String(payload.event_id || ''),String(payload.source_id || ''),String(payload.source_tab || ''),String(payload.change_type || ''),String(payload.row_start || ''),String(payload.row_end || ''),String(payload.col_start || ''),String(payload.col_end || ''),String(payload.at || ''),String(payload.sent_at || ''),oldPart].join('\n');
+}
+
+function ppBaoHangBridgeHmacHex_(payload, secret) {
+  const bytes = Utilities.computeHmacSha256Signature(ppBaoHangBridgeCanonical_(payload), secret, Utilities.Charset.UTF_8);
+  return bytes.map(function(b){ return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
 }
 
 function ppBaoHangBridgeQueue_(payload) {
