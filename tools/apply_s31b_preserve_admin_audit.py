@@ -20,10 +20,9 @@ if 'fun audit(action:String,payload:JSONObject)' not in M2.read_text(encoding='u
     raise SystemExit('S31B audit preservation failed')
 print('Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite')
 
-# S31 generated a compressed bridge during migration; S31D owns the final compile-safe bridge.
 runpy.run_path(str(ROOT/'tools/apply_s31d_runtime_bridge_compile_fix.py'),run_name='__main__')
-# S32 patches durable local History/outbox scheduling; S33 owns product/lifecycle; S34/S34B own the latest requested Android UI layer.
 runpy.run_path(str(ROOT/'tools/apply_s32_local_history_flush_fix.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s33_owner_ui_sync_resources_wrapper.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s34_owner_six_requests.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s34b_compile_hotfix.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s34c_site1291_local_report.py'),run_name='__main__')
