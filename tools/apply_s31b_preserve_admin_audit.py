@@ -30,3 +30,4 @@ runpy.run_path(str(ROOT/'tools/apply_s34d_compile_fixes.py'),run_name='__main__'
 runpy.run_path(str(ROOT/'tools/apply_s35_owner_ui_history_consistency_wrapper.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s36_perf_history_report_service.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s36b_compile_hotfix.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s37_move_service_telemetry_to_sync.py'),run_name='__main__')
