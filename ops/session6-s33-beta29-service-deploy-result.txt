@@ -1,0 +1,8 @@
+checked_at=2026-08-20T01:49:38Z
+head_sha=4797d9bf6d36d47b364f238db1f3a60bd4849cc6
+source=PASS
+failed_phase=AUTHORITY
+failed_rc=1
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
