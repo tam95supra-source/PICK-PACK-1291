@@ -35,7 +35,7 @@ jobs:
           set -Eeuo pipefail
           OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=PREFLIGHT
           trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
-          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do [[ -n "${!v:-}" ]]; done
+          MISS=0; for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do if [[ -z "${!v:-}" ]]; then echo "missing_secret=$v" >>"$OUT"; MISS=1; fi; done; [[ "$MISS" == 0 ]]; echo secrets=PASS >>"$OUT"
           curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
           curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
           node - <<'NODE'
@@ -43,18 +43,19 @@ jobs:
           if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');
           if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');
           NODE
+          echo authority_gate=PASS >>"$OUT"
           cd service; npm install --no-audit --no-fund >/dev/null; npx wrangler d1 list --json >/tmp/list.json
-          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); [[ -n "$ID" ]]
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); [[ -n "$ID" ]]; echo d1_list=PASS >>"$OUT"
           node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s9.jsonc',JSON.stringify(c,null,2))" "$ID"
           cd ..
           d1(){ (cd service && npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s9.jsonc --command "$1" --json); }
-          d1 "SELECT authority_epoch,authority_seq,service_generation FROM authority_state WHERE singleton_id=1" >/tmp/auth.json
+          d1 "SELECT authority_epoch,authority_seq,service_generation FROM authority_state WHERE singleton_id=1" >/tmp/auth.json; echo d1_auth_query=PASS >>"$OUT"
           AUTH_EPOCH=$(node -e 'const r=require("/tmp/auth.json").flatMap(x=>x.results||[])[0];process.stdout.write(String(r.authority_epoch))'); START_SEQ=$(node -e 'const r=require("/tmp/auth.json").flatMap(x=>x.results||[])[0];process.stdout.write(String(r.authority_seq))'); SERVICE_GENERATION=$(node -e 'const r=require("/tmp/auth.json").flatMap(x=>x.results||[])[0];process.stdout.write(String(r.service_generation))')
           echo "AUTH_EPOCH=$AUTH_EPOCH" >> "$GITHUB_ENV"; echo "START_SEQ=$START_SEQ" >> "$GITHUB_ENV"; echo "SERVICE_GENERATION=$SERVICE_GENERATION" >> "$GITHUB_ENV"
           d1 "SELECT business_date,sequence_no FROM business_dates WHERE business_date BETWEEN '2026-08-07' AND '2026-08-20' ORDER BY business_date" >/tmp/dates.json
-          node -e 'const x=require("/tmp/dates.json").flatMap(v=>v.results||[]); if(x.length!==14)throw Error(`BUSINESS_DATES_${x.length}`)'
+          DATECOUNT=$(node -e 'const x=require("/tmp/dates.json").flatMap(v=>v.results||[]);process.stdout.write(String(x.length))'); echo "business_date_count=$DATECOUNT" >>"$OUT"; [[ "$DATECOUNT" == 14 ]]
           FSQL="SELECT 'resources' n,COUNT(*) c,COALESCE(SUM(length(resource_type||'|'||resource_id||'|'||status_label||'|'||metadata_json)),0) s FROM resources UNION ALL SELECT 'resource_pack_map',COUNT(*),COALESCE(SUM(length(pack_table||'|'||shift||'|'||user_pack||'|'||label)),0) FROM resource_pack_map UNION ALL SELECT 'catalog_values',COUNT(*),COALESCE(SUM(length(namespace||'|'||ordinal||'|'||value)),0) FROM catalog_values"
-          d1 "$FSQL" >/tmp/non-target-before.json
+          d1 "$FSQL" >/tmp/non-target-before.json; echo fingerprint_query=PASS >>"$OUT"
           cp /tmp/non-target-before.json /tmp/non-target-before-copy.json
           echo preflight=PASS >>"$OUT"; echo authority_epoch=$AUTH_EPOCH >>"$OUT"; echo start_authority_seq=$START_SEQ >>"$OUT"; echo business_dates_14=PASS >>"$OUT"
       - name: Export D1 rollback snapshot
@@ -89,26 +90,21 @@ jobs:
           d1(){ (cd service && npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s9.jsonc --command "$1" --json); }
           d1 "SELECT (SELECT COUNT(*) FROM employees) employees,(SELECT COUNT(*) FROM attendance_sessions) attendance,(SELECT COUNT(*) FROM labor_sessions) labor,(SELECT COUNT(*) FROM events WHERE event_type IN ('ATTENDANCE_ENTER','ATTENDANCE_EXIT')) ra_events,(SELECT COUNT(*) FROM events WHERE event_type IN ('LABOR_START','LABOR_FINISH')) labor_events" >/tmp/counts.json
           node - <<'NODE' >>/tmp/result
-          const r=require('/tmp/counts.json').flatMap(v=>v.results||[])[0];
-          if(Number(r.employees)!==500||Number(r.attendance)!==5040||Number(r.labor)!==4200||Number(r.ra_events)!==10080||Number(r.labor_events)!==8400)throw Error('D1_COUNTS');
-          console.log(`d1_counts=employees:${r.employees}|attendance:${r.attendance}|labor:${r.labor}|ra_events:${r.ra_events}|labor_events:${r.labor_events}`);
+          const r=require('/tmp/counts.json').flatMap(v=>v.results||[])[0];if(Number(r.employees)!==500||Number(r.attendance)!==5040||Number(r.labor)!==4200||Number(r.ra_events)!==10080||Number(r.labor_events)!==8400)throw Error('D1_COUNTS');console.log(`d1_counts=employees:${r.employees}|attendance:${r.attendance}|labor:${r.labor}|ra_events:${r.ra_events}|labor_events:${r.labor_events}`);
           NODE
           d1 "SELECT business_date,COUNT(*) c FROM attendance_sessions GROUP BY business_date ORDER BY business_date" >/tmp/att-days.json
           d1 "SELECT business_date,COUNT(*) c FROM labor_sessions GROUP BY business_date ORDER BY business_date" >/tmp/lab-days.json
           node - <<'NODE' >>/tmp/result
-          const a=require('/tmp/att-days.json').flatMap(v=>v.results||[]),l=require('/tmp/lab-days.json').flatMap(v=>v.results||[]);
-          if(a.length!==14||l.length!==14||a.some(x=>Number(x.c)!==360)||l.some(x=>Number(x.c)!==300))throw Error('DAY_DISTRIBUTION');
-          console.log('daily_attendance=360x14');console.log('daily_labor=300x14');console.log(`date_range=${a[0].business_date}..${a[a.length-1].business_date}`);
+          const a=require('/tmp/att-days.json').flatMap(v=>v.results||[]),l=require('/tmp/lab-days.json').flatMap(v=>v.results||[]);if(a.length!==14||l.length!==14||a.some(x=>Number(x.c)!==360)||l.some(x=>Number(x.c)!==300))throw Error('DAY_DISTRIBUTION');console.log('daily_attendance=360x14');console.log('daily_labor=300x14');console.log(`date_range=${a[0].business_date}..${a[a.length-1].business_date}`);
           NODE
           FSQL="SELECT 'resources' n,COUNT(*) c,COALESCE(SUM(length(resource_type||'|'||resource_id||'|'||status_label||'|'||metadata_json)),0) s FROM resources UNION ALL SELECT 'resource_pack_map',COUNT(*),COALESCE(SUM(length(pack_table||'|'||shift||'|'||user_pack||'|'||label)),0) FROM resource_pack_map UNION ALL SELECT 'catalog_values',COUNT(*),COALESCE(SUM(length(namespace||'|'||ordinal||'|'||value)),0) FROM catalog_values"
           d1 "$FSQL" >/tmp/non-target-after.json
           node - <<'NODE'
-          const fs=require('fs');const norm=p=>JSON.stringify(require(p).flatMap(v=>v.results||[]));if(norm('/tmp/non-target-before-copy.json')!==norm('/tmp/non-target-after.json'))throw Error('NON_TARGET_D1_CHANGED');
+          const norm=p=>JSON.stringify(require(p).flatMap(v=>v.results||[]));if(norm('/tmp/non-target-before-copy.json')!==norm('/tmp/non-target-after.json'))throw Error('NON_TARGET_D1_CHANGED');
           NODE
           curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json
           node - <<'NODE' >>/tmp/result
-          const h=require('/tmp/hf.json'),a=h.authority||{};if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('FINAL_HEALTH');
-          console.log(`final_authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('replication=HEALTHY_0');console.log('non_target_d1=UNCHANGED');console.log('non_target_google=UNCHANGED');console.log('stable=UNTOUCHED');console.log('verdict=PASS');
+          const h=require('/tmp/hf.json'),a=h.authority||{};if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('FINAL_HEALTH');console.log(`final_authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('replication=HEALTHY_0');console.log('non_target_d1=UNCHANGED');console.log('non_target_google=UNCHANGED');console.log('stable=UNTOUCHED');console.log('verdict=PASS');
           NODE
       - name: Upload D1 rollback artifact
         if: always()
