@@ -1,22 +1,22 @@
-name: Session6 Beta29 OTA Publish
+name: Session7 Beta30 OTA Publish
 on:
   push:
     branches: [agent/service-migration-m2]
-    paths: [ops/session6-beta29-ota-publish-trigger.txt]
+    paths: [ops/session7-beta30-ota-publish-trigger.txt]
 permissions:
   contents: write
   actions: read
   pull-requests: read
 concurrency:
-  group: session6-beta29-ota-publish
+  group: session7-beta30-ota-publish
   cancel-in-progress: false
 env:
-  EXPECTED_VERSION_NAME: 0.4.2-beta.29
-  EXPECTED_VERSION_CODE: '35'
+  EXPECTED_VERSION_NAME: 0.4.2-beta.30
+  EXPECTED_VERSION_CODE: '36'
   EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
   EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
-  APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.29.apk
-  CHECKSUM_NAME: SHA256SUMS-beta29.txt
+  APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.30.apk
+  CHECKSUM_NAME: SHA256SUMS-beta30.txt
   BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
   STABLE_FOLDER_ID: 1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4
   GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
@@ -32,19 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: agent/service-migration-m2, fetch-depth: 0 }
-      - name: Release gates and exact candidate lock
+      - name: Release gates and exact Beta30 candidate lock
         shell: bash
         run: |
           set -Eeuo pipefail
           OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=LOCK
           trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
-          grep -qx 'verdict=PASS' ops/session6-beta29-build-candidate-result.txt
-          grep -qx 'verdict=PASS' ops/session6-beta29-gas-m2-restore-result.txt
-          grep -qx 'verdict=PASS' ops/session6-s33-beta29-service-deploy-result.txt
-          ARTIFACT_ID=$(sed -n 's/^artifact_id=//p' ops/session6-beta29-build-candidate-result.txt|tail -1)
-          EXPECTED_SHA=$(sed -n 's/^apk_sha256=//p' ops/session6-beta29-build-candidate-result.txt|tail -1)
-          EXPECTED_SIZE=$(sed -n 's/^apk_size=//p' ops/session6-beta29-build-candidate-result.txt|tail -1)
-          SIGNER=$(sed -n 's/^signer_sha256=//p' ops/session6-beta29-build-candidate-result.txt|tail -1)
+          grep -qx 'verdict=PASS' ops/session7-beta30-build-candidate-result.txt
+          ARTIFACT_ID=$(sed -n 's/^artifact_id=//p' ops/session7-beta30-build-candidate-result.txt|tail -1)
+          EXPECTED_SHA=$(sed -n 's/^apk_sha256=//p' ops/session7-beta30-build-candidate-result.txt|tail -1)
+          EXPECTED_SIZE=$(sed -n 's/^apk_size=//p' ops/session7-beta30-build-candidate-result.txt|tail -1)
+          SIGNER=$(sed -n 's/^signer_sha256=//p' ops/session7-beta30-build-candidate-result.txt|tail -1)
           [[ "$ARTIFACT_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ && "$EXPECTED_SIZE" =~ ^[0-9]+$ && "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]]
           echo "ARTIFACT_ID=$ARTIFACT_ID" >> "$GITHUB_ENV"; echo "EXPECTED_SHA=$EXPECTED_SHA" >> "$GITHUB_ENV"; echo "EXPECTED_SIZE=$EXPECTED_SIZE" >> "$GITHUB_ENV"
           curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
@@ -67,8 +65,8 @@ jobs:
           list_folder "$BETA_FOLDER_ID" /tmp/beta-before.json; list_folder "$STABLE_FOLDER_ID" /tmp/stable-before.json
           jq -e '.files|length==0' /tmp/stable-before.json >/dev/null
           jq -e --arg a "$APK_NAME" --arg c "$CHECKSUM_NAME" '[.files[]|select(.name==$a or .name==$c)]|length==0' /tmp/beta-before.json >/dev/null
-          echo stable_before=EMPTY >> "$OUT"; echo beta29_absent_before=PASS >> "$OUT"
-      - name: Download exact signed Beta29 artifact
+          echo stable_before=EMPTY >> "$OUT"; echo beta30_absent_before=PASS >> "$OUT"
+      - name: Download exact signed Beta30 artifact
         shell: bash
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
@@ -102,20 +100,20 @@ jobs:
           curl -fsSL -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=1000" >/tmp/stable-after.json
           jq -e '.files|length==0' /tmp/stable-after.json >/dev/null
           for i in 1 2 3 4 5 6 7 8; do
-            curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.28"}' >/tmp/ota.json || true
+            curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.29"}' >/tmp/ota.json || true
             jq -e --arg v "$EXPECTED_VERSION_NAME" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and .available==true and .version_name==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and (.apk_url|length)>20' /tmp/ota.json >/dev/null 2>&1 && break
             sleep 3
           done
           jq -e --arg v "$EXPECTED_VERSION_NAME" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and .available==true and .version_name==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and (.apk_url|length)>20' /tmp/ota.json >/dev/null
           URL=$(jq -r '.apk_url' /tmp/ota.json); curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/public.apk
-          [[ "$(sha256sum /tmp/public.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c%s /tmp/public.apk)" == "$EXPECTED_SIZE" ]]
-          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.29"}' >/tmp/self.json
+          [[ "$(sha256sum /tmp/public.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c%s /tmp/public.apk")" == "$EXPECTED_SIZE" ]]
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.30"}' >/tmp/self.json
           curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' >/tmp/stable-ota.json
           node - <<'NODE'
           const s=require('/tmp/self.json'),t=require('/tmp/stable-ota.json');
           const avail=x=>x.available??x.update_available, ver=x=>String(x.version_name??x.version??'');
           if(s.ok!==true||avail(s)!==false||String(s.channel||'')!=='BETA')throw Error('SELF_UPDATE_GATE');
-          if(t.ok!==true||avail(t)!==false||ver(t)==='0.4.2-beta.29')throw Error('STABLE_OTA_ISOLATION');
+          if(t.ok!==true||avail(t)!==false||ver(t)==='0.4.2-beta.30')throw Error('STABLE_OTA_ISOLATION');
           NODE
           curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json; curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json
           curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr.json
@@ -132,6 +130,6 @@ jobs:
         run: |
           test -f /tmp/result || echo result_missing=true >/tmp/result
           if ! grep -q '^verdict=' /tmp/result; then echo stable=UNTOUCHED_OR_GATE_STOPPED >>/tmp/result; echo merge_pr38=UNTOUCHED >>/tmp/result; echo verdict=FAILED_OR_STOPPED >>/tmp/result; fi
-          cp /tmp/result /tmp/r; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/r ops/session6-beta29-ota-publish-result.txt
+          cp /tmp/result /tmp/r; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/r ops/session7-beta30-ota-publish-result.txt
           git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ops/session6-beta29-ota-publish-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta29 OTA publish'; git push origin HEAD:agent/service-migration-m2
+          git add ops/session7-beta30-ota-publish-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta30 OTA publish'; git push origin HEAD:agent/service-migration-m2
