@@ -1,0 +1,52 @@
+name: Session12 Beta34 Direct Final Acceptance
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session12-beta34-direct-final-acceptance-trigger.txt]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: session12-beta34-direct-final-acceptance
+  cancel-in-progress: false
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  EXPECTED_VERSION: 0.4.2-beta.34
+  EXPECTED_SHA: 2fc98ea64943f6910da626621afcc833d122dc7439a3270211beeb2a7a65821b
+  EXPECTED_SIZE: '12896763'
+jobs:
+  accept:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Verify Service, discovery, public bytes, self-update and isolation
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT";PHASE=PRECHECK
+          trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";if test -f /tmp/beta.json;then echo beta_json=$(jq -c '{ok,available,update_available,version_name,version,sha256,size,apk_url,download_url,url}' /tmp/beta.json) >>"$OUT";fi;exit $rc' ERR
+          grep -qx 'verdict=PASS' ops/session12-s38-attendance-service-deploy-v2-result.txt;grep -qx 'verdict=PASS' ops/session12-beta34-build-candidate-result.txt
+          grep -qx 'apk_sha256=2fc98ea64943f6910da626621afcc833d122dc7439a3270211beeb2a7a65821b' ops/session12-beta34-direct-drive-release-record.txt;grep -qx 'apk_size=12896763' ops/session12-beta34-direct-drive-release-record.txt
+          PHASE=AUTHORITY
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{},se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||ge!==se)throw Error('GAS_GATE');console.log(`authority=SERVICE_PRIMARY_${se}_${a.authority_seq}`);console.log('replication_gate=HEALTHY_0');
+          NODE
+          PHASE=DISCOVERY
+          good=0;for i in 1 2 3 4 5 6 7 8 9 10;do curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.33"}' >/tmp/beta.json || true;if jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and (.available==true or .update_available==true) and (.version_name // .version)==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and ((.apk_url // .download_url // .url)|length)>20' /tmp/beta.json >/dev/null 2>&1;then good=1;break;fi;sleep 3;done;test "$good" = 1;echo ota_discovery=PASS >>"$OUT"
+          PHASE=DOWNLOAD
+          URL=$(jq -r '.apk_url // .download_url // .url' /tmp/beta.json);HTTP=$(curl -sSL --retry 5 --retry-delay 2 -o /tmp/public.apk -w '%{http_code}' "$URL");echo public_http=$HTTP >>"$OUT";[[ "$HTTP" == 200 ]];ACTUAL_SIZE=$(stat -c%s /tmp/public.apk);ACTUAL_SHA=$(sha256sum /tmp/public.apk|awk '{print $1}');echo public_size=$ACTUAL_SIZE >>"$OUT";echo public_sha=$ACTUAL_SHA >>"$OUT";[[ "$ACTUAL_SIZE" == "$EXPECTED_SIZE" && "$ACTUAL_SHA" == "$EXPECTED_SHA" ]];echo public_download=PASS >>"$OUT"
+          PHASE=ISOLATION
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.34"}' >/tmp/self.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' >/tmp/stable.json;curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr.json
+          node - <<'NODE' >>"$OUT"
+          const s=require('/tmp/self.json'),t=require('/tmp/stable.json'),p=require('/tmp/pr.json'),avail=x=>x.available??x.update_available,ver=x=>String(x.version_name??x.version??'');if(s.ok!==true||avail(s)!==false||ver(s)!=='0.4.2-beta.34')throw Error('SELF_UPDATE');if(t.ok!==true||avail(t)===true||ver(t)==='0.4.2-beta.34')throw Error('STABLE_OTA');if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38');console.log('self_update=PASS');console.log('stable_ota_isolation=PASS');console.log('merge_pr38=UNTOUCHED_DRAFT_OPEN');console.log('verdict=PASS');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r || { echo stable=UNTOUCHED >>/tmp/r;echo merge_pr38=UNTOUCHED >>/tmp/r;echo verdict=FAILED_OR_STOPPED >>/tmp/r;};cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session12-beta34-direct-final-acceptance-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session12-beta34-direct-final-acceptance-result.txt;git diff --cached --quiet || git commit -m 'ops: record Beta34 direct final acceptance';git push origin HEAD:agent/service-migration-m2
