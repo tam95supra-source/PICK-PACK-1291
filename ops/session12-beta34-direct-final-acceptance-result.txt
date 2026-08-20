@@ -1,0 +1,5 @@
+checked_at=2026-08-20T12:57:25Z
+head_sha=ddf120e10a24485e7ae6b2f9c61141486a9ed508
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
