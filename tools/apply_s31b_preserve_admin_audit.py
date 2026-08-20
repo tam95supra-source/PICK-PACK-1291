@@ -28,3 +28,4 @@ runpy.run_path(str(ROOT/'tools/apply_s34b_compile_hotfix.py'),run_name='__main__
 runpy.run_path(str(ROOT/'tools/apply_s34c_site1291_local_report.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s34d_compile_fixes.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s35_owner_ui_history_consistency_wrapper.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s36_perf_history_report_service.py'),run_name='__main__')
