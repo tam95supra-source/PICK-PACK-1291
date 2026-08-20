@@ -1,6 +1,6 @@
-checked_at=2026-08-20T11:11:28Z
-head_sha=3706764d9d58d552a4ad262fd6b04c9b41b2df53
-failed_phase=PRECHECK
+checked_at=2026-08-20T11:14:39Z
+head_sha=a1fea66af914f1288e52e538cce4de97ce48da09
+failed_phase=OTA
 failed_rc=1
 stable=UNTOUCHED
 merge_pr38=UNTOUCHED
