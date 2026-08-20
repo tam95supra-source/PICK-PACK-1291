@@ -1,5 +1,5 @@
-checked_at=2026-08-20T01:30:14Z
-head_sha=525bb26b5587705ebbf3bb9309c7faf737b09788
+checked_at=2026-08-20T01:31:32Z
+head_sha=f2a80ca72168ae42cbfb2c94c091f813e37a7a4b
 config=PASS
 failed_phase=BUILD
 failed_rc=1
@@ -7,7 +7,7 @@ failed_rc=1
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
 Daemon will be stopped at the end of the build 
 
-> Task :app:generateS10Operations FAILED
+> Task :app:generateS10Operations
 Generated /home/runner/work/pick-pack-1291/pick-pack-1291/app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt (82803 chars)
 Applied S11 compact/report patch: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
 S12 real-PDA patch applied
@@ -33,27 +33,52 @@ Applied S31 strict Service-first non-blocking PDA hot path + background-only aut
 Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
 Applied S31D compile-safe multiline runtime bridge; Service-primary cannot fall through to GAS
 Applied S32 durable local History + independent immediate outbox flush
-Traceback (most recent call last):
-  File "/home/runner/work/pick-pack-1291/pick-pack-1291/tools/apply_m2_android_transport_patch.py", line 87, in <module>
-    runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
-  File "<frozen runpy>", line 286, in run_path
-  File "<frozen runpy>", line 98, in _run_module_code
-  File "<frozen runpy>", line 88, in _run_code
-  File "/home/runner/work/pick-pack-1291/pick-pack-1291/tools/apply_s31b_preserve_admin_audit.py", line 27, in <module>
-    runpy.run_path(str(ROOT/'tools/apply_s33_owner_ui_sync_resources_wrapper.py'),run_name='__main__')
-  File "<frozen runpy>", line 285, in run_path
-  File "<frozen runpy>", line 259, in _get_code_from_file
-  File "/home/runner/work/pick-pack-1291/pick-pack-1291/tools/apply_s33_owner_ui_sync_resources_wrapper.py", line 8
-    new='''    # S33 wrapper: route owner-only Service actions before the existing S31 call router.\n    call_pos=s.find('fun call(action: String')\n    try_pos=s.find('try {',call_pos) if call_pos>=0 else -1\n    if call_pos<0 or try_pos<0: raise SystemExit('S33 API call router anchor missing')\n    owner_branch=r'''\n      if (action in setOf("resource_master_list","resource_master_upsert","resource_master_delete","history_correction")) {\n          val result=serviceOwnerCall(action,payload)\n          if(result.code==401) clearSession()\n          if(action in setOf("resource_master_upsert","resource_master_delete","history_correction")) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())\n          callback(result)\n          return@execute\n      }\n'''\n    s=s[:try_pos+5]+owner_branch+s[try_pos+5:]\n'''
-                                                                                                                                                                                                                                                                                                                                ^
-SyntaxError: unexpected character after line continuation character
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787189418827.json
+Applied S33 owner UI/history/staff/resources/sync/PDA-exchange/lifecycle/timezone patch
+Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+
+> Task :app:preBuild
+> Task :app:preBetaReleaseBuild
+> Task :app:mergeBetaReleaseJniLibFolders
+> Task :app:mergeBetaReleaseNativeLibs
+> Task :app:mergeBetaReleaseArtProfile
+> Task :app:desugarBetaReleaseFileDependencies FROM-CACHE
+> Task :app:generateBetaReleaseBuildConfig
+> Task :app:generateBetaReleaseResources
+> Task :app:packageBetaReleaseResources
+> Task :app:processBetaReleaseNavigationResources
+> Task :app:stripBetaReleaseDebugSymbols
+> Task :app:javaPreCompileBetaRelease FROM-CACHE
+> Task :app:extractBetaReleaseNativeSymbolTables
+> Task :app:parseBetaReleaseLocalResources
+> Task :app:mergeBetaReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:checkBetaReleaseAarMetadata
+> Task :app:mapBetaReleaseSourceSetPaths
+> Task :app:compileBetaReleaseNavigationResources FROM-CACHE
+> Task :app:generateBetaReleaseRFile
+> Task :app:createBetaReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksBetaRelease FROM-CACHE
+> Task :app:mergeBetaReleaseResources
+> Task :app:processBetaReleaseMainManifest
+> Task :app:processBetaReleaseManifest
+> Task :app:processBetaReleaseManifestForPackage
+> Task :app:checkBetaReleaseDuplicateClasses
+> Task :app:mergeBetaReleaseStartupProfile
+> Task :app:compileBetaReleaseKotlin
+> Task :app:processBetaReleaseResources
+> Task :app:mergeExtDexBetaRelease
+
+> Task :app:compileBetaReleaseKotlin FAILED
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt:20:47 Returns are prohibited for functions with an expression body. Use block body '{...}'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt:28:47 Returns are prohibited for functions with an expression body. Use block body '{...}'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:107:40 Unresolved reference 'serviceProviderFromRuntime'.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787189497058.json
 
 FAILURE: Build failed with an exception.
 
 * What went wrong:
-Execution failed for task ':app:generateS10Operations'.
-> Process 'command 'python3'' finished with non-zero exit value 1
+Execution failed for task ':app:compileBetaReleaseKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
 
 * Try:
 > Run with --stacktrace option to get the stack trace.
@@ -61,5 +86,5 @@ Execution failed for task ':app:generateS10Operations'.
 > Run with --scan to get full insights from a Build Scan (powered by Develocity).
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 18s
-1 actionable task: 1 executed
+BUILD FAILED in 1m 15s
+28 actionable tasks: 24 executed, 4 from cache
