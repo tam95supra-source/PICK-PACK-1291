@@ -1,0 +1,72 @@
+name: Session17 S44 GAS Persist
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session17-s44-gas-persist-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session17-s44-gas-persist
+  cancel-in-progress: false
+jobs:
+  persist:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Apply S44 GAS session-lock isolation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/apply_s44_gas_session_lock_fix.py
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          node --check /tmp/PICK_PACK_API.js
+          grep -q 'S44_LOGIN_SESSION_LOCK_ISOLATION' google-apps-script/PICK_PACK_API.gs
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('google-apps-script/PICK_PACK_API.gs').read_text()
+          a=s.index('function ppBindSession_(');b=s.index('function ppClearActiveSessionForLogin_',a);x=s[a:b]
+          assert 'getScriptLock' not in x and 'waitLock' not in x and 'tryLock' not in x
+          assert 'function ppWithLock_' in s and 'tryLock(20000)' in s
+          print('gas_lock_contract=PASS')
+          PY
+          git diff -- google-apps-script/PICK_PACK_API.gs > /tmp/s44-gas.patch
+      - name: Persist authoritative GAS source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -s /tmp/s44-gas.patch ]]; then
+            git reset --hard HEAD >/dev/null
+            git pull --rebase origin agent/service-migration-m2
+            git apply /tmp/s44-gas.patch
+            python3 tools/apply_s44_gas_session_lock_fix.py
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add google-apps-script/PICK_PACK_API.gs
+            git diff --cached --quiet || git commit -m 'fix(gas): persist S44 login session lock isolation'
+            git push origin HEAD:agent/service-migration-m2
+          fi
+          OUT=/tmp/r
+          echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"
+          echo "source_head=$(git rev-parse HEAD)" >>"$OUT"
+          echo "session_bind_global_lock=REMOVED" >>"$OUT"
+          echo "business_mutation_lock=PRESERVED" >>"$OUT"
+          echo "syntax=PASS" >>"$OUT"
+          echo "stable=UNTOUCHED" >>"$OUT"
+          echo "merge_pr38=UNTOUCHED" >>"$OUT"
+          echo "verdict=PASS" >>"$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || { echo "checked_at=$(date -u +%FT%TZ)" >/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/c
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/c ops/session17-s44-gas-persist-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session17-s44-gas-persist-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S44 GAS persistence'
+          git push origin HEAD:agent/service-migration-m2
