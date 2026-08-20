@@ -32,3 +32,4 @@ runpy.run_path(str(ROOT/'tools/apply_s36_perf_history_report_service.py'),run_na
 runpy.run_path(str(ROOT/'tools/apply_s36b_compile_hotfix.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s37_move_service_telemetry_to_sync.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s38_attendance_ui.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s39_employee_session_history.py'),run_name='__main__')
