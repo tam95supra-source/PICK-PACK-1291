@@ -1,0 +1,6 @@
+requested_at=2026-08-20T09:31:00+07:00
+purpose=next-chat-handover-live-snapshot
+mode=READ_ONLY
+replication_gate=OBSERVE_ONLY_OWNER_WAIVER
+stable=DO_NOT_TOUCH
+merge_pr38=DO_NOT_MERGE
