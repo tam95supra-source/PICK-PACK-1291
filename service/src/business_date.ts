@@ -1,14 +1,14 @@
 import { nowIso } from "./util";
 
 export function bangkokToday():string{
-  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Bangkok",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Ho_Chi_Minh",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
   const get=(type:string)=>parts.find(p=>p.type===type)?.value||"";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 /**
- * Advance the operational business-session sequence when today's Bangkok date first receives work.
- * This does not widen N/N-1: it only adds the actual current Bangkok day, once, after the existing
+ * Advance the operational business-session sequence when today's Vietnam date first receives work.
+ * This does not widen N/N-1: it only adds the actual current Vietnam day, once, after the existing
  * newest session. Historical/future dates are never synthesized here.
  */
 export async function ensureCurrentBangkokBusinessDate(db:D1Database,requestedDate:string):Promise<boolean>{
