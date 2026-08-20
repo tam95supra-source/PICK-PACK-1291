@@ -25,8 +25,8 @@ jobs:
           PRC=$?; echo "patch_rc=$PRC" >>"$OUT"; sed -n '1,120p' /tmp/patch.log >>"$OUT"
           if [[ $PRC -eq 0 ]]; then
             cd service
-            npm ci >/tmp/npm.log 2>&1; NRC=$?; echo "npm_ci_rc=$NRC" >>"$OUT"
-            if [[ $NRC -eq 0 ]]; then npm run typecheck >/tmp/type.log 2>&1; TRC=$?; echo "typecheck_rc=$TRC" >>"$OUT"; sed -n '1,160p' /tmp/type.log >>"$OUT"; else sed -n '1,120p' /tmp/npm.log >>"$OUT"; fi
+            npm install --no-audit --no-fund >/tmp/npm.log 2>&1; NRC=$?; echo "npm_install_rc=$NRC" >>"$OUT"
+            if [[ $NRC -eq 0 ]]; then npm run typecheck >/tmp/type.log 2>&1; TRC=$?; echo "typecheck_rc=$TRC" >>"$OUT"; sed -n '1,220p' /tmp/type.log >>"$OUT"; else sed -n '1,160p' /tmp/npm.log >>"$OUT"; fi
             cd ..
           fi
           if [[ $PRC -eq 0 && ${NRC:-1} -eq 0 && ${TRC:-1} -eq 0 ]]; then echo verdict=PASS >>"$OUT"; else echo verdict=FAIL >>"$OUT"; fi
