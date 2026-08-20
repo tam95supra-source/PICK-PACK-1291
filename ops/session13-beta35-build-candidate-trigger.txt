@@ -1,0 +1,6 @@
+triggered_at=2026-08-20T20:33:00+07:00
+version=0.4.2-beta.35
+version_code=41
+reason=fix_employee_lookup_pending_session_and_history_page100
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
