@@ -3,9 +3,11 @@
   "pp_secret_present": true,
   "bh_secret_present": true,
   "secret_match": true,
+  "receiver_http": 0,
   "receiver_noop_ok": false,
   "receiver_changed": 0,
-  "error_tokens": [],
+  "receiver_error": "You do not have permission to call UrlFetchApp.fetch. Required permissions: https:www.googleapis.comauthscript.external_request. For more information see https:developers.go",
+  "response_json": false,
   "temporary_deployments_cleanup": "PASS",
-  "verified_at": "2026-08-20T01:42:33.378591+00:00"
+  "verified_at": "2026-08-20T01:43:45.302483+00:00"
 }
