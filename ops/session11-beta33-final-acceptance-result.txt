@@ -1,0 +1,11 @@
+checked_at=2026-08-20T11:21:25Z
+head_sha=a6161e6048e897d519ae46f86d724445ec8cf02b
+expected_sha=dde653a4e146874df88f90d758156d5393cc6e4b79bf57c4a8614b7ccda09397
+expected_size=12880379
+authority=PASS
+replication_gate=HEALTHY_0
+failed_phase=DISCOVERY
+failed_rc=1
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
