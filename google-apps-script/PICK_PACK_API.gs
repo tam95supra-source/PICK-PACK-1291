@@ -135,7 +135,7 @@ function ppJson_(obj) {
 
 function ppHealth_() {
   const rows = ppValues_(PP.STAFF);
-  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.2',report_engine:'S12_CURRENT_DAY',history_engine:'S13_SHARED_SESSION',sheet_read:rows.length>1,auth_session_model:'SINGLE_ACTIVE_DEVICE_V1',business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
+  return {ok:true,service:'pick-pack-gsheet-api',mode:'APP_GSHEET',api_version:'0.4.2',report_engine:'S12_CURRENT_DAY',history_engine:'S13_SHARED_SESSION',sheet_read:rows.length>1,auth_session_model:'SINGLE_ACTIVE_DEVICE_V1',login_session_lock_model:'S44_LOCK_ISOLATED',business_date:ppBusinessIso_(),revision:ppRevision_(),master_revision:ppMasterRevision_()};
 }
 
 function ppSs_() { return SpreadsheetApp.openById(PP.SHEET_ID); }
