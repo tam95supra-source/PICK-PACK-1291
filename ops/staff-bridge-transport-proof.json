@@ -1,0 +1,11 @@
+{
+  "status": "DIAGNOSED",
+  "pp_secret_present": true,
+  "bh_secret_present": true,
+  "secret_match": true,
+  "receiver_noop_ok": false,
+  "receiver_changed": 0,
+  "error_tokens": [],
+  "temporary_deployments_cleanup": "PASS",
+  "verified_at": "2026-08-20T01:41:53.747156+00:00"
+}
