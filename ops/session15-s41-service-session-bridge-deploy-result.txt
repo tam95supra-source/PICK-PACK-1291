@@ -1,5 +1,5 @@
-checked_at=2026-08-20T14:27:48Z
-head_sha=7bc59437164cba75becaaba231109e01b6c381a9
+checked_at=2026-08-20T14:28:26Z
+head_sha=308285b963e889b13f97ae747a509e98a55c63ef
 pre_authority=SERVICE_PRIMARY_8_18505
 pre_replication=HEALTHY_0
 source_gate=PASS
