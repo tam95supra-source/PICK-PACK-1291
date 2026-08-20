@@ -24,6 +24,11 @@ jobs:
             python3 tools/apply_s33_service_resource_history.py
             code=$?
             if [[ $code -eq 0 ]]; then python3 tools/apply_s33b_service_permission_guard.py; code=$?; fi
+            if [[ $code -eq 0 ]]; then python3 tools/apply_s33c_service_timezone_guard.py; code=$?; fi
+            if [[ $code -eq 0 ]]; then
+              ! grep -R 'Asia/Bangkok' service/src --include='*.ts'
+              code=$?
+            fi
             if [[ $code -eq 0 ]]; then
               cd service
               npm install --no-audit --no-fund
@@ -38,7 +43,7 @@ jobs:
         run: |
           set -e
           printf 'checked_at=%s\nhead_sha=%s\n' "$(date -u +%FT%TZ)" "$GITHUB_SHA" >/tmp/r
-          if [[ "${{ job.status }}" == success ]]; then echo 'service_s33_check=PASS' >>/tmp/r; echo 'verdict=PASS' >>/tmp/r; else echo 'service_s33_check=FAIL' >>/tmp/r; echo 'verdict=FAIL' >>/tmp/r; fi
+          if [[ "${{ job.status }}" == success ]]; then echo 'service_s33_check=PASS' >>/tmp/r; echo 'timezone_guard=PASS_ASIA_HO_CHI_MINH' >>/tmp/r; echo 'verdict=PASS' >>/tmp/r; else echo 'service_s33_check=FAIL' >>/tmp/r; echo 'verdict=FAIL' >>/tmp/r; fi
           echo '--- diagnostic tail ---' >>/tmp/r
           tail -n 80 /tmp/s33-service-check.log >>/tmp/r 2>/dev/null || true
           cp /tmp/r /tmp/c
