@@ -1,0 +1,91 @@
+name: Session11 Beta33 Final Acceptance
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session11-beta33-final-acceptance-trigger.txt]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: session11-beta33-final-acceptance
+  cancel-in-progress: false
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  EXPECTED_VERSION: 0.4.2-beta.33
+jobs:
+  accept:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Final release acceptance
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=BUILD
+          trap 'rc=$?; echo "failed_phase=$PHASE" >>"$OUT"; echo "failed_rc=$rc" >>"$OUT"; exit $rc' ERR
+          grep -qx 'verdict=PASS' ops/session11-beta33-build-candidate-result.txt
+          EXPECTED_SHA=$(sed -n 's/^apk_sha256=//p' ops/session11-beta33-build-candidate-result.txt|tail -1)
+          EXPECTED_SIZE=$(sed -n 's/^apk_size=//p' ops/session11-beta33-build-candidate-result.txt|tail -1)
+          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ && "$EXPECTED_SIZE" =~ ^[0-9]+$ ]]
+          echo "expected_sha=$EXPECTED_SHA" >>"$OUT"; echo "expected_size=$EXPECTED_SIZE" >>"$OUT"
+
+          PHASE=AUTHORITY
+          HHTTP=$(curl -sS -o /tmp/h.json -w '%{http_code}' "$SERVICE_URL/health"); [[ "$HHTTP" == 200 ]]
+          GHTTP=$(curl -sSL -o /tmp/g.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}'); [[ "$GHTTP" == 200 ]]
+          node - <<'NODE'
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{};
+          const se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||ge!==se)throw Error('GAS_GATE');
+          NODE
+          echo authority=PASS >>"$OUT"; echo replication_gate=HEALTHY_0 >>"$OUT"
+
+          PHASE=DISCOVERY
+          BHTTP=$(curl -sSL -o /tmp/beta.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.32"}'); [[ "$BHTTP" == 200 ]]
+          node - "$EXPECTED_VERSION" "$EXPECTED_SHA" "$EXPECTED_SIZE" <<'NODE'
+          const j=require('/tmp/beta.json'),v=process.argv[2],sha=process.argv[3],size=process.argv[4],avail=j.available??j.update_available,ver=String(j.version_name??j.version??''),s=String(j.sha256??'').toLowerCase(),z=String(j.size??'');
+          if(j.ok!==true||avail!==true||ver!==v||s!==sha||z!==size||String(j.apk_url??j.download_url??j.url??'').length<=20)throw Error(`DISCOVERY_MISMATCH ${JSON.stringify({ok:j.ok,avail,ver,s,z})}`);
+          NODE
+          echo ota_discovery=PASS >>"$OUT"
+
+          PHASE=DOWNLOAD
+          URL=$(jq -r '.apk_url // .download_url // .url' /tmp/beta.json)
+          DHTTP=$(curl -sSL --retry 4 --retry-delay 2 -o /tmp/public.apk -w '%{http_code}' "$URL"); [[ "$DHTTP" == 200 ]]
+          ACTUAL_SIZE=$(stat -c%s /tmp/public.apk); ACTUAL_SHA=$(sha256sum /tmp/public.apk|awk '{print $1}')
+          echo "public_size=$ACTUAL_SIZE" >>"$OUT"; echo "public_sha=$ACTUAL_SHA" >>"$OUT"
+          [[ "$ACTUAL_SIZE" == "$EXPECTED_SIZE" && "$ACTUAL_SHA" == "$EXPECTED_SHA" ]]
+          echo public_download=PASS >>"$OUT"
+
+          PHASE=SELF
+          SHTTP=$(curl -sSL -o /tmp/self.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.33"}'); [[ "$SHTTP" == 200 ]]
+          node - <<'NODE'
+          const j=require('/tmp/self.json'),avail=j.available??j.update_available,ver=String(j.version_name??j.version??'');if(j.ok!==true||avail!==false||ver!=='0.4.2-beta.33')throw Error('SELF_UPDATE');
+          NODE
+          echo self_update=PASS >>"$OUT"
+
+          PHASE=STABLE
+          THTTP=$(curl -sSL -o /tmp/stable.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}'); [[ "$THTTP" == 200 ]]
+          node - <<'NODE'
+          const j=require('/tmp/stable.json'),avail=j.available??j.update_available,ver=String(j.version_name??j.version??'');if(j.ok!==true||avail===true||ver==='0.4.2-beta.33')throw Error(`STABLE_ISOLATION ${JSON.stringify({avail,ver})}`);
+          NODE
+          echo stable_ota_isolation=PASS >>"$OUT"
+
+          PHASE=PR
+          PHTTP=$(curl -sS -o /tmp/pr.json -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38"); [[ "$PHTTP" == 200 ]]
+          node - <<'NODE'
+          const p=require('/tmp/pr.json');if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38');
+          NODE
+          echo merge_pr38=UNTOUCHED_DRAFT_OPEN >>"$OUT"; echo verdict=PASS >>"$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          grep -q '^verdict=' /tmp/r || { echo stable=UNTOUCHED >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session11-beta33-final-acceptance-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session11-beta33-final-acceptance-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta33 final acceptance'; git push origin HEAD:agent/service-migration-m2
