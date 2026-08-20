@@ -1,1 +1,1 @@
-deploy=2026-08-20-staff-bridge-live-scope-fix
+deploy=2026-08-20-staff-bridge-owner-authorizer
