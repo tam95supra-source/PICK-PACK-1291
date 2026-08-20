@@ -1,5 +1,5 @@
-requested_at=2026-08-20T10:39:00+07:00
+requested_at=2026-08-20T10:45:30+07:00
 mode=READ_ONLY
-reason=beta30-post-recovery-health-check
+reason=beta30-pre-schema-fix-authority-check
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
