@@ -1,0 +1,15 @@
+checked_at=2026-08-20T14:36:48Z
+head_sha=fb867db0afdd5834f87eff7265fa0f9f0a0b0fa0
+pre_authority=SERVICE_PRIMARY_8_18505
+pre_replication=HEALTHY_0
+permanent_source_routes=PASS
+typecheck=PASS
+d1_id=b619df89-528d-4126-a948-de0425037b11
+deploy=PASS
+mobile_unauth_http=404
+session_empty_http=404
+failed_phase=VERIFY
+failed_rc=1
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
