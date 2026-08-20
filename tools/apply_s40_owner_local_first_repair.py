@@ -103,14 +103,14 @@ load=r'''    // S40_OWNER_LOCAL_FIRST_REPAIR: owner lock = SQLite/PDA first, Ser
     }'''
 o=replace_fun(o,'loadEmployee(mnv: String, button: Button? = null) {',load)
 
-# 5) History metrics count actual immutable events, not aggregated employee/session cards.
-old_counts='''val groups=groupRows(scope);val waiting=groups.values.count{historyGroupStatus(it)=="Chưa đồng bộ"};val failed=groups.values.count{historyGroupStatus(it)=="Lỗi đồng bộ"}'''
-new_counts='''val groups=groupRows(scope);val waiting=scope.count{historyGroupStatus(listOf(it))=="Chưa đồng bộ"};val failed=scope.count{historyGroupStatus(listOf(it))=="Lỗi đồng bộ"}'''
-if old_counts not in o: raise SystemExit('S40 History metric status anchor missing')
-o=o.replace(old_counts,new_counts,1)
-old_total='''val allMetric=metric("Tổng",groups.size.toString(),navy)'''
-if old_total not in o: raise SystemExit('S40 History total metric anchor missing')
-o=o.replace(old_total,'''val allMetric=metric("Tổng",scope.size.toString(),navy)''',1)
+# 5) History metrics count actual immutable event rows, while cards may remain grouped for readability.
+# S36 owns this History implementation; S39 only changes paging. Patch the S36 render metrics directly.
+old_metrics='''val states=groups.map{g->if(g.value.any{statusOf(it)=="FAILED"})"FAILED" else if(g.value.any{statusOf(it)=="PENDING"})"PENDING" else "SYNCED"};val pending=states.count{it=="PENDING"};val failed=states.count{it=="FAILED"}
+            fun updateMetric(v:View,n:Int){if(v is LinearLayout&&v.childCount>1)(v.getChildAt(1) as? TextView)?.text=n.toString()};updateMetric(allBtn,groups.size);updateMetric(pendingBtn,pending);updateMetric(failBtn,failed)'''
+new_metrics='''val states=groups.map{g->if(g.value.any{statusOf(it)=="FAILED"})"FAILED" else if(g.value.any{statusOf(it)=="PENDING"})"PENDING" else "SYNCED"};val pending=rows.count{statusOf(it)=="PENDING"};val failed=rows.count{statusOf(it)=="FAILED"}
+            fun updateMetric(v:View,n:Int){if(v is LinearLayout&&v.childCount>1)(v.getChildAt(1) as? TextView)?.text=n.toString()};updateMetric(allBtn,rows.size);updateMetric(pendingBtn,pending);updateMetric(failBtn,failed)'''
+if old_metrics not in o: raise SystemExit('S40 S36 History metric anchor missing')
+o=o.replace(old_metrics,new_metrics,1)
 OPS.write_text(o,encoding='utf-8')
 
 # Contract assertions: these are owner locks, not optional optimizations.
@@ -122,9 +122,10 @@ checks=[
     ('store.unresolvedMutations(100)' in tr,'awake worker flushes unresolved'),
     ('PdaLocalProjection.employeeContext(this,resolved)' in ops,'scan renders local projection first'),
     ('Service chưa xác nhận được; thao tác vẫn lưu local' in ops,'remote read never blocks local UI'),
-    ('scope.count{historyGroupStatus(listOf(it))=="Chưa đồng bộ"}' in ops,'waiting count is event-level'),
-    ('metric("Tổng",scope.size.toString()' in ops,'total count is event-level'),
+    ('val pending=rows.count{statusOf(it)=="PENDING"}' in ops,'waiting count is event-level'),
+    ('val failed=rows.count{statusOf(it)=="FAILED"}' in ops,'failed count is event-level'),
+    ('updateMetric(allBtn,rows.size)' in ops,'total count is event-level'),
 ]
 for ok,label in checks:
     if not ok: raise SystemExit('S40 contract missing: '+label)
-print('Applied S40: restored owner-locked PDA-local-first scan/session semantics, unresolved overlay, flush, and exact event metrics')
+print('Applied S40: restored owner-locked PDA-local-first scan/session semantics, unresolved overlay/flush, and exact event metrics')
