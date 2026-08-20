@@ -1,0 +1,57 @@
+name: Session6 Handover GAS Live Probe
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session6-handover-gas-live-probe-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      EXPECTED_BETA: 0.4.2-beta.29
+      EXPECTED_SHA: c8a601f58f974dc4cffa038b892c5489a69e1160166684d4eb0d7c1e318f6ec4
+      EXPECTED_SIZE: '12843347'
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Probe GAS and OTA following redirects
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.28"}' >/tmp/o.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.29"}' >/tmp/s.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' >/tmp/t.json
+          node - <<'NODE' >> "$OUT"
+          const fs=require('fs'),g=require('/tmp/g.json'),o=require('/tmp/o.json'),s=require('/tmp/s.json'),t=require('/tmp/t.json');
+          const ga=g.authority||{},avail=x=>x.available??x.update_available,ver=x=>String(x.version_name??x.version??'');
+          console.log(`gas_discovery=${g.ok===true}|${g.authority_mode||ga.mode||''}|${g.authority_epoch??ga.authority_epoch??''}|${g.authority_seq??ga.authority_seq??''}`);
+          console.log(`beta_ota=${o.ok===true}|available=${avail(o)}|version=${ver(o)}|sha=${String(o.sha256||'').toLowerCase()}|size=${o.size??''}`);
+          console.log(`beta_self=${s.ok===true}|available=${avail(s)}|version=${ver(s)}`);
+          console.log(`stable_ota=${t.ok===true}|available=${avail(t)}|version=${ver(t)}`);
+          fs.writeFileSync('/tmp/url',o.apk_url||o.download_url||o.url||'');
+          NODE
+          URL=$(cat /tmp/url); [[ -n "$URL" ]]; curl -fsSL --retry 4 --retry-delay 2 "$URL" -o /tmp/apk
+          SHA=$(sha256sum /tmp/apk|awk '{print $1}'); SIZE=$(stat -c%s /tmp/apk)
+          echo "public_apk_sha256=$SHA" >> "$OUT"; echo "public_apk_size=$SIZE" >> "$OUT"
+          [[ "$SHA" == "$EXPECTED_SHA" && "$SIZE" == "$EXPECTED_SIZE" ]] && echo public_download_gate=PASS >> "$OUT" || echo public_download_gate=FAIL >> "$OUT"
+          node - <<'NODE' >> "$OUT"
+          const g=require('/tmp/g.json'),o=require('/tmp/o.json'),s=require('/tmp/s.json'),t=require('/tmp/t.json'),avail=x=>x.available??x.update_available,ver=x=>String(x.version_name??x.version??'');
+          const ga=g.authority||{}; const gas=g.ok===true&&g.authority_mode==='SERVICE_PRIMARY'&&Number(g.authority_epoch??ga.authority_epoch)===8;
+          const ota=o.ok===true&&avail(o)===true&&ver(o)===process.env.EXPECTED_BETA&&String(o.sha256||'').toLowerCase()===process.env.EXPECTED_SHA&&String(o.size)===process.env.EXPECTED_SIZE;
+          const self=s.ok===true&&avail(s)===false; const stable=t.ok===true&&avail(t)===false&&ver(t)!==process.env.EXPECTED_BETA;
+          console.log(`gas_gate=${gas?'PASS':'FAIL'}`); console.log(`ota_gate=${ota?'PASS':'FAIL'}`); console.log(`self_gate=${self?'PASS':'FAIL'}`); console.log(`stable_gate=${stable?'PASS':'FAIL'}`);
+          console.log('verdict=READ_ONLY_GAS_LIVE_SNAPSHOT_COMPLETE');
+          NODE
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || printf 'checked_at=%s\nverdict=PROBE_FAILED_BEFORE_RESULT\n' "$(date -u +%FT%TZ)" >/tmp/r
+          cp /tmp/r /tmp/rcopy; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/rcopy ops/session6-handover-gas-live-probe-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-handover-gas-live-probe-result.txt; git diff --cached --quiet || git commit -m 'ops: record handover GAS live snapshot'; git push origin HEAD:agent/service-migration-m2
