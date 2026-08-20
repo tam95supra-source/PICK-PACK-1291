@@ -1,10 +1,9 @@
-checked_at=2026-08-20T09:38:08Z
-head_sha=7c4b80081b087505090008d738a090a2682ed335
+checked_at=2026-08-20T11:13:02Z
+head_sha=8964c4a44d3507457b544ff3ac1e429805318252
 setup=PASS
-active_before=3
-row_before=41|INFLIGHT|attempt=1|class=|error=
-row_before=42|INFLIGHT|attempt=1|class=|error=
-row_before=43|INFLIGHT|attempt=1|class=|error=
+active_before=2
+row_before=44|INFLIGHT|attempt=1|class=|error=
+row_before=45|INFLIGHT|attempt=1|class=|error=
 replicate_round=1|http=200|ok=true|error=|claimed=|acked=|retried=
 active_after=0
 replication=HEALTHY_0
