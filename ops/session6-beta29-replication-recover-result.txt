@@ -1,24 +1,13 @@
-checked_at=2026-08-20T03:38:12Z
-head_sha=67e341db67cd6931f7406c79f55065d5160665fe
+checked_at=2026-08-20T03:47:45Z
+head_sha=77756b37e6d502dca77e1ed1c0859ad8a23b9fd5
 setup=PASS
 active_before=5
-row_before=36|INFLIGHT|attempt=3|class=|error=
-row_before=37|INFLIGHT|attempt=3|class=|error=
-row_before=38|INFLIGHT|attempt=3|class=|error=
-row_before=39|INFLIGHT|attempt=1|class=|error=
-row_before=40|INFLIGHT|attempt=1|class=|error=
-replicate_round=1|http=200|ok=false|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA|claimed=|acked=|retried=
-replicate_round=2|http=200|ok=false|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA|claimed=|acked=|retried=
-replicate_round=3|http=200|ok=false|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA|claimed=|acked=|retried=
-replicate_round=4|http=200|ok=false|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA|claimed=|acked=|retried=
-replicate_round=5|http=200|ok=false|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA|claimed=|acked=|retried=
-replicate_round=6|http=200|ok=false|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA|claimed=|acked=|retried=
-active_after=5
-row_after=36|RETRY|attempt=9|class=TRANSIENT|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA
-row_after=37|RETRY|attempt=9|class=TRANSIENT|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA
-row_after=38|RETRY|attempt=9|class=TRANSIENT|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA
-row_after=39|RETRY|attempt=7|class=TRANSIENT|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA
-row_after=40|RETRY|attempt=7|class=TRANSIENT|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA
-failed_phase=REPLICATION
-failed_rc=2
-verdict=FAILED_OR_STOPPED
+row_before=36|INFLIGHT|attempt=10|class=|error=
+row_before=37|INFLIGHT|attempt=10|class=|error=
+row_before=38|INFLIGHT|attempt=10|class=|error=
+row_before=39|INFLIGHT|attempt=8|class=|error=
+row_before=40|INFLIGHT|attempt=8|class=|error=
+replicate_round=1|http=200|ok=true|error=|claimed=|acked=|retried=
+active_after=0
+replication=HEALTHY_0
+verdict=PASS
