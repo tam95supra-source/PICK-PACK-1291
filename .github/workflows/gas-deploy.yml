@@ -17,7 +17,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -29,23 +29,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare canonical sources
+      - name: Validate final staff bridge source
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth=1 https://github.com/tam95supra-source/bao-hang-1291.git /tmp/bao-hang >/dev/null 2>&1
-          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/run_install_staff_bridge_hmac.py
+          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/fix_staff_bridge_flush_live.py
+          cp google-apps-script/PICK_PACK_API.gs /tmp/pp-api.js
           cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/pp-bridge.js
-          cp /tmp/bao-hang/google-apps-script/STAFF_SOURCE_BRIDGE_RECEIVER.gs /tmp/bh-receiver.js
+          node --check /tmp/pp-api.js
           node --check /tmp/pp-bridge.js
-          node --check /tmp/bh-receiver.js
-          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" /tmp/pp-bridge.js
-          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" /tmp/bh-receiver.js
-          echo 'HMAC source gates: PASS'
+          grep -q "SpreadsheetApp.flush();const bridge=ppBaoHangBridgeNotifyServiceStaffMutation_(eventId,row,oldCode,'UPSERT')" google-apps-script/PICK_PACK_API.gs
+          grep -q "SpreadsheetApp.flush();const bridge=ppBaoHangBridgeNotifyServiceStaffMutation_(eventId,row,mnv,'DELETE')" google-apps-script/PICK_PACK_API.gs
+          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          echo 'Final staff bridge source gates: PASS'
 
-      - name: Bootstrap properties, deploy, probe and restore
+      - name: Deploy flush and run isolated runtime proof
         shell: bash
-        run: python3 ops/run_install_staff_bridge_hmac.py
+        run: python3 ops/fix_staff_bridge_flush_live.py
 
       - name: Commit sanitized proof
         if: always()
@@ -53,13 +53,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ ! -f ops/staff-bridge-hmac-live-proof.json ]]; then
-            printf '%s\n' '{"status":"FAIL","stage":"PREPARE_CANONICAL_OR_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-hmac-live-proof.json
+            printf '%s\n' '{"status":"FAIL","stage":"FLUSH_RUNNER_PREPARE","verified_at":"unknown"}' > ops/staff-bridge-hmac-live-proof.json
           fi
           cat ops/staff-bridge-hmac-live-proof.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ops/staff-bridge-hmac-live-proof.json
-          git diff --cached --quiet || git commit -m 'chore(staff): record signed bridge live proof'
+          git diff --cached --quiet || git commit -m 'chore(staff): record final bridge runtime proof'
           git pull --rebase origin main
           git push origin HEAD:main
-          jq -e '.status=="PASS" and .service_upsert_runtime=="PASS" and .source_restored==true and .temporary_deployments_cleanup=="PASS"' ops/staff-bridge-hmac-live-proof.json >/dev/null
+          jq -e '.status=="PASS" and .service_upsert_runtime=="PASS" and .restore_runtime=="PASS" and .source_restored==true and .temporary_deployments_cleanup=="PASS"' ops/staff-bridge-hmac-live-proof.json >/dev/null
