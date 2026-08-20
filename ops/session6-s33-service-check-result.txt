@@ -1,10 +1,14 @@
-checked_at=2026-08-20T01:27:15Z
-head_sha=b32bf2aa92cecc8fdedb9bd8deabcec055dba414
+checked_at=2026-08-20T01:46:02Z
+head_sha=46f161c640369072c33cf42072f79efa4085a72a
 service_s33_check=PASS
 verdict=PASS
 --- diagnostic tail ---
 + python3 tools/apply_s33_service_resource_history.py
 Applied S33 Service resource admin, role-window correction, Google master replication and VN timezone
++ code=0
++ [[ 0 -eq 0 ]]
++ python3 tools/apply_s33b_service_permission_guard.py
+Applied S33B correction role guard: USER read-only, ADMIN N/N-1, SUPERADMIN N..N-6
 + code=0
 + [[ 0 -eq 0 ]]
 + cd service
