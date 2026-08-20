@@ -26,3 +26,4 @@ runpy.run_path(str(ROOT/'tools/apply_s33_owner_ui_sync_resources_wrapper.py'),ru
 runpy.run_path(str(ROOT/'tools/apply_s34_owner_six_requests.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s34b_compile_hotfix.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s34c_site1291_local_report.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s34d_compile_fixes.py'),run_name='__main__')
