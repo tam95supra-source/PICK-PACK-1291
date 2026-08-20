@@ -25,6 +25,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2Firebase.kt"))
     inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PdaImportActivity.kt"))
+    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PpForegroundGate.kt"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
     inputs.file(rootProject.file("tools/apply_s10_ui_patch_in_place.py"))
     inputs.file(rootProject.file("tools/apply_s11_compact_report_patch.py"))
@@ -50,6 +51,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s30_canonical_admin_audit.py"))
     inputs.file(rootProject.file("tools/apply_s31_service_first_hotpath.py"))
     inputs.file(rootProject.file("tools/apply_s32_local_history_flush_fix.py"))
+    inputs.file(rootProject.file("tools/apply_s33_owner_ui_sync_resources.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
@@ -75,8 +77,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 34
-            versionName = "0.4.2-beta.28"
+            versionCode = 35
+            versionName = "0.4.2-beta.29"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -117,4 +119,4 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// The M2 source transform composes S10..S25 + S27 + S29 + S30 + S31 + S32 in the ephemeral build workspace.
+// The M2 source transform composes S10..S25 + S27 + S29 + S30 + S31 + S32 + S33 in the ephemeral build workspace.
