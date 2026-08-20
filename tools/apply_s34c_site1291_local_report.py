@@ -10,8 +10,9 @@ if MARK in s:
     raise SystemExit(0)
 
 start=s.find('    private fun reportScreen(){')
-end=s.find('\n    private fun reportGrid(',start)
-if start<0 or end<0: raise SystemExit('S34C report anchors missing')
+if start<0: raise SystemExit('S34C reportScreen anchor missing')
+end=s.find('\n    private fun ',start+24)
+if end<0: raise SystemExit('S34C next private function anchor missing')
 
 replacement=r'''    // S34C_SITE1291_LOCAL_REPORT: manpower is derived from the canonical day event snapshot.
     // A person counts on the entry business date as soon as ATTENDANCE_ENTER exists; ATTENDANCE_EXIT is not required.
@@ -22,7 +23,7 @@ replacement=r'''    // S34C_SITE1291_LOCAL_REPORT: manpower is derived from the 
         val box=column(bg);body.addView(box,matchWrap())
         fun fold(v:String)=java.text.Normalizer.normalize(v,java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"),"").uppercase().trim()
         fun site1291(v:String):Boolean{val x=fold(v);return x=="1291"||x=="SITE 1291"||Regex("(^|[^0-9])1291([^0-9]|$)").containsMatchIn(x)}
-        fun shiftBucket(v:String):String{val x=fold(v).replace(Regex("\\s+")," ");return when{ x=="CA 1"||x=="CA1"||x=="1"->"CA1";x=="CA HC"||x=="CAHC"||x=="HC"||x.contains("HANH CHINH")->"HC";x=="CA 2"||x=="CA2"||x=="2"->"CA2";else->x}}
+        fun shiftBucket(v:String):String{val x=fold(v).replace(Regex("\\s+")," ");return when{x=="CA 1"||x=="CA1"||x=="1"->"CA1";x=="CA HC"||x=="CAHC"||x=="HC"||x.contains("HANH CHINH")->"HC";x=="CA 2"||x=="CA2"||x=="2"->"CA2";else->x}}
         fun supplierCode(raw:String):String{val x=fold(raw);return listOf("IH","NLV","VW","MP","MGL","HGP","HAD").firstOrNull{x==it||x.startsWith("$it ")||x.contains(" $it ")||x.endsWith(" $it")}?:raw.trim().takeIf{it.isNotBlank()}?:"Khác"}
         fun reportPosition(emp:JSONObject,work:String):String{val p=fold(emp.optString("main_position"));val d=fold(emp.optString("department"));return when{p=="TRUONG NHOM"->"Trưởng nhóm";p=="CHUYEN VIEN"->"Chuyên viên";p=="TO TRUONG"->"Tổ trưởng";p.contains("DIEU PHOI")&&d.contains("PACK")->"Điều phối khu pack";p.contains("DIEU PHOI")&&d.contains("CHO XUAT")->"Điều phối khu chờ xuất";p.contains("KEO HANG")->"Kéo hàng";p=="5S"||p.contains(" 5S")->"5S";p.contains("PHUC LONG")->"Phúc Long";fold(work)=="PICK"||p.contains("PICK")->"Picker";fold(work)=="PACK"||p.contains("PACK")->"Packer";else->emp.optString("main_position").ifBlank{"Khác"}}}
         fun tenureLabel(emp:JSONObject):String{val raw=emp.optString("start_date").trim();if(raw.isBlank())return "Nhân sự cũ";val started=runCatching{if(raw.matches(Regex("\\d{2}/\\d{2}/\\d{4}")))java.time.LocalDate.parse(raw,DateTimeFormatter.ofPattern("dd/MM/yyyy"))else java.time.LocalDate.parse(raw.take(10))}.getOrNull()?:return "Nhân sự cũ";return if(java.time.temporal.ChronoUnit.DAYS.between(started,java.time.LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh")))<=30)"Nhân sự mới" else "Nhân sự cũ"}
