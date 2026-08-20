@@ -1,4 +1,4 @@
-trigger=2026-08-20T16:20:00Z
+trigger=2026-08-20T16:25:00Z
 purpose=persist and deploy S44 same-device session reuse + attendance source contracts
 stable=UNTOUCHED
 merge_pr38=UNTOUCHED
