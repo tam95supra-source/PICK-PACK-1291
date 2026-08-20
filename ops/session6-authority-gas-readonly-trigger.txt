@@ -1,5 +1,5 @@
-requested_at=2026-08-20T17:50:00+07:00
+requested_at=2026-08-20T18:01:30+07:00
 mode=READ_ONLY
-reason=beta32-postpublish-final-check
+reason=beta33-prepublish-release-gate
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
