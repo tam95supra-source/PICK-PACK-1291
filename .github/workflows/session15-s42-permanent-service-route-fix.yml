@@ -1,0 +1,113 @@
+name: Session15 S42 Permanent Service Route Fix
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session15-s42-permanent-service-route-fix-trigger.txt]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: pick-pack-1291-production-service
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Gate production and permanently compose routes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=GATE
+          trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; tail -60 /tmp/check.log >>"$OUT" 2>/dev/null||true; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g0.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h0.json'),g=require('/tmp/g0.json'),a=h.authority||{},ga=g.authority||{};
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)process.exit(21);
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))process.exit(22);
+          console.log(`pre_authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('pre_replication=HEALTHY_0');
+          NODE
+          # Permanent source fixes first. These are committed below so later deploys cannot silently lose them.
+          python3 tools/apply_s41_service_session_bridge_fix.py
+          python3 tools/apply_s39b_product_mobile_routes.py
+          grep -q 'S39B_PRODUCT_MOBILE_ROUTES' service/src/entry_product.ts
+          grep -q '/v1/auth/gas-session' service/src/entry_product.ts
+          grep -q '/v1/mobile/read' service/src/entry_product.ts
+          grep -q 'S41_SERVICE_SESSION_BRIDGE_FIX' service/src/mobile_hotfix.ts
+          ! grep -q 'account.verifier_hash!==String(payload.v)' service/src/mobile_hotfix.ts
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/src/entry_product.ts service/src/mobile_hotfix.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(service): persist mobile and session routes'
+            git push origin HEAD:agent/service-migration-m2
+          fi
+          echo permanent_source_routes=PASS >>"$OUT"
+          # Compose attendance contract into deploy workspace as before.
+          python3 tools/apply_s38_attendance_service.py
+          python3 tools/apply_s38b_service_compile_fix.py
+          python3 tools/apply_s41_service_session_bridge_fix.py
+          python3 tools/apply_s39b_product_mobile_routes.py
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npm run check >/tmp/check.log 2>&1
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-s42-prod.jsonc',JSON.stringify(c,null,2))"
+          echo typecheck=PASS >>"$OUT"; echo "d1_id=$ID" >>"$OUT"
+      - name: Deploy fixed production entrypoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=DEPLOY; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; tail -60 /tmp/deploy.err >>"$OUT" 2>/dev/null||true; exit $rc' ERR
+          cd service
+          npx wrangler deploy --config .wrangler-s42-prod.jsonc --keep-vars --dry-run >/tmp/dry.out 2>/tmp/dry.err
+          npx wrangler deploy --config .wrangler-s42-prod.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          echo deploy=PASS >>"$OUT"
+      - name: Verify routes health D1 and PR lock
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=VERIFY; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          ok=0; for i in 1 2 3 4 5 6; do if curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json && node -e 'const h=require("/tmp/hf.json"),a=h.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0)process.exit(1)'; then ok=1; break; fi; sleep 2; done; test "$ok" = 1
+          # These two status codes are now release gates. 404 means the production entrypoint regressed.
+          MHTTP=$(curl -sS -o /tmp/mobile.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{}')
+          SHTTP=$(curl -sS -o /tmp/session.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}')
+          echo "mobile_unauth_http=$MHTTP" >>"$OUT"; echo "session_empty_http=$SHTTP" >>"$OUT"
+          [[ "$MHTTP" == 401 ]]; [[ "$SHTTP" == 400 ]]
+          node -e 'const m=require("/tmp/mobile.json");if(String(m.error?.code||m.error||"")!=="UNAUTHORIZED")process.exit(1)'
+          node -e 'const s=require("/tmp/session.json");if(String(s.error?.code||s.error||"")!=="SESSION_EXCHANGE_FIELDS_REQUIRED")process.exit(1)'
+          echo route_contract=PASS >>"$OUT"
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gf.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/hf.json'),g=require('/tmp/gf.json'),a=h.authority||{},ga=g.authority||{};if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');console.log(`authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('replication=HEALTHY_0');
+          NODE
+          cd service
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s42-prod.jsonc --command "SELECT login_id,device_id,issued_at FROM auth_sessions WHERE login_id='dple' ORDER BY issued_at DESC LIMIT 1; SELECT actor_id,event_type,committed_at,authority_seq FROM events WHERE actor_id='dple' ORDER BY authority_seq DESC LIMIT 20;" --json >/tmp/d1.json
+          node - <<'NODE' >>"$OUT"
+          const x=require('/tmp/d1.json'),rows=i=>(Array.isArray(x)?x[i]?.results||[]:[]);const s=rows(0)[0]||{},e=rows(1);console.log(`latest_auth_issued_at=${s.issued_at||''}`);console.log(`recent_event_rows=${e.length}`);if(e[0]){console.log(`latest_event_type=${e[0].event_type||''}`);console.log(`latest_event_at=${e[0].committed_at||''}`);console.log(`latest_event_seq=${e[0].authority_seq||''}`)}
+          NODE
+          cd ..
+          PHTTP=$(curl -sS -o /tmp/pr.json -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38"); [[ "$PHTTP" == 200 ]]
+          node -e 'const p=require("/tmp/pr.json");if(p.state!=="open"||p.draft!==true||p.merged===true)process.exit(1)'
+          echo stable=UNTOUCHED >>"$OUT"; echo merge_pr38=UNTOUCHED_DRAFT_OPEN >>"$OUT"; echo verdict=PASS >>"$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          OUT=/tmp/result; test -f "$OUT"||echo result_missing=true >"$OUT";grep -q '^verdict=' "$OUT"||{ echo stable=UNTOUCHED >>"$OUT";echo merge_pr38=UNTOUCHED >>"$OUT";echo verdict=FAILED_OR_STOPPED >>"$OUT";};cp "$OUT" /tmp/r;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/r ops/session15-s42-permanent-service-route-fix-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session15-s42-permanent-service-route-fix-result.txt;git diff --cached --quiet||git commit -m 'ops: record S42 permanent service route fix';git push origin HEAD:agent/service-migration-m2
