@@ -1,6 +1,6 @@
-requested_at=2026-08-20T10:38:00+07:00
+requested_at=2026-08-20T10:47:00+07:00
 mode=READ_ERROR_AND_CANONICAL_RETRY
-reason=beta30-ota-gate-replication-degraded-5
+reason=beta30-post-schema-fix-replication-recover
 delete_events=FORBIDDEN
 fake_ack=FORBIDDEN
 stable=FORBIDDEN
