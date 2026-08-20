@@ -1,5 +1,5 @@
-checked_at=2026-08-20T01:31:32Z
-head_sha=f2a80ca72168ae42cbfb2c94c091f813e37a7a4b
+checked_at=2026-08-20T01:33:18Z
+head_sha=a7098ab1a84496d0ceab7868f6f68d141b64fe42
 config=PASS
 failed_phase=BUILD
 failed_rc=1
@@ -45,33 +45,34 @@ Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S
 > Task :app:generateBetaReleaseBuildConfig
 > Task :app:generateBetaReleaseResources
 > Task :app:packageBetaReleaseResources
-> Task :app:processBetaReleaseNavigationResources
 > Task :app:stripBetaReleaseDebugSymbols
-> Task :app:javaPreCompileBetaRelease FROM-CACHE
+> Task :app:processBetaReleaseNavigationResources
 > Task :app:extractBetaReleaseNativeSymbolTables
-> Task :app:parseBetaReleaseLocalResources
 > Task :app:mergeBetaReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:javaPreCompileBetaRelease FROM-CACHE
+> Task :app:parseBetaReleaseLocalResources
 > Task :app:checkBetaReleaseAarMetadata
 > Task :app:mapBetaReleaseSourceSetPaths
 > Task :app:compileBetaReleaseNavigationResources FROM-CACHE
 > Task :app:generateBetaReleaseRFile
+> Task :app:mergeBetaReleaseResources
 > Task :app:createBetaReleaseCompatibleScreenManifests
 > Task :app:extractDeepLinksBetaRelease FROM-CACHE
-> Task :app:mergeBetaReleaseResources
 > Task :app:processBetaReleaseMainManifest
 > Task :app:processBetaReleaseManifest
 > Task :app:processBetaReleaseManifestForPackage
 > Task :app:checkBetaReleaseDuplicateClasses
 > Task :app:mergeBetaReleaseStartupProfile
-> Task :app:compileBetaReleaseKotlin
 > Task :app:processBetaReleaseResources
-> Task :app:mergeExtDexBetaRelease
 
-> Task :app:compileBetaReleaseKotlin FAILED
+> Task :app:compileBetaReleaseKotlin
 e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt:20:47 Returns are prohibited for functions with an expression body. Use block body '{...}'.
 e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt:28:47 Returns are prohibited for functions with an expression body. Use block body '{...}'.
 e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:107:40 Unresolved reference 'serviceProviderFromRuntime'.
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787189497058.json
+
+> Task :app:compileBetaReleaseKotlin FAILED
+> Task :app:mergeExtDexBetaRelease
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787189601901.json
 
 FAILURE: Build failed with an exception.
 
@@ -86,5 +87,5 @@ Execution failed for task ':app:compileBetaReleaseKotlin'.
 > Run with --scan to get full insights from a Build Scan (powered by Develocity).
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 1m 15s
+BUILD FAILED in 52s
 28 actionable tasks: 24 executed, 4 from cache
