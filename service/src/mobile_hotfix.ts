@@ -47,14 +47,17 @@ export async function exchangeGasSession(request:Request,env:Env):Promise<Respon
   // account and matching role. Do not make replica verifier freshness a transport availability gate.
   if(!account||account.status!=="ACTIVE"||account.role!==String(payload.r))return apiError("SESSION_EXCHANGE_ACCOUNT_MISMATCH","AUTH",401);
 
-  const sessionId=crypto.randomUUID(),issuedAt=nowIso();
+  // S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE: same device reuses its active PDA session.
+  const current=await env.DB.prepare("SELECT session_id,device_id FROM auth_sessions WHERE login_id=?1").bind(account.login_id).first<{session_id:string;device_id:string}>();
+  const reused=Boolean(current?.session_id&&current.device_id===deviceId);
+  const sessionId=reused?String(current?.session_id):crypto.randomUUID(),issuedAt=nowIso();
   await env.DB.prepare(`INSERT INTO auth_sessions(login_id,session_id,device_id,issued_at) VALUES(?1,?2,?3,?4)
     ON CONFLICT(login_id) DO UPDATE SET session_id=excluded.session_id,device_id=excluded.device_id,issued_at=excluded.issued_at`)
     .bind(account.login_id,sessionId,deviceId,issuedAt).run();
   const servicePayload={l:account.login_id,r:account.role,v:account.verifier_hash,s:sessionId,d:deviceId};
   const encoded=b64u(new TextEncoder().encode(JSON.stringify(servicePayload)));
   const sig=await hmacB64u(new TextEncoder().encode(env.SERVICE_TOKEN_SECRET),encoded);
-  return json({ok:true,token:`${encoded}.${sig}`,account:{login_id:account.login_id,role:account.role,display_name:account.display_name,position:account.position,email:account.email},session:{issued_at:issuedAt,device_label:String(input.device_label||"").slice(0,120)},authority:discovery.authority,authority_mode:discovery.authority_mode,service_generation:discovery.service_generation});
+  return json({ok:true,token:`${encoded}.${sig}`,account:{login_id:account.login_id,role:account.role,display_name:account.display_name,position:account.position,email:account.email},session:{issued_at:issuedAt,device_label:String(input.device_label||"").slice(0,120),session_id:sessionId,reused},authority:discovery.authority,authority_mode:discovery.authority_mode,service_generation:discovery.service_generation});
 }
 
 async function businessDate(db:D1Database):Promise<string>{
@@ -86,7 +89,7 @@ async function employeeContext(env:Env,body:Record<string,unknown>):Promise<Resp
   const date=await businessDate(env.DB);
   const employee=await env.DB.prepare("SELECT mnv,full_name,phone,main_position,supplier,department,site,warehouse,start_date,note FROM employees WHERE mnv=?1").bind(mnv).first<Employee>();
   if(!employee)return apiError("EMPLOYEE_NOT_FOUND","VALIDATION",404);
-  const session=await env.DB.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,enter_at,exit_at,entered_by,exited_by,version FROM attendance_sessions WHERE business_date=?1 AND mnv=?2").bind(date,mnv).first<Record<string,unknown>>();
+  const session=await env.DB.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,pda_enter_status,pda_exit_status,resource_note,enter_at,exit_at,entered_by,exited_by,version FROM attendance_sessions WHERE business_date=?1 AND mnv=?2").bind(date,mnv).first<Record<string,unknown>>();
   const state=!session?"NOT_ENTERED":String(session.state)==="ACTIVE"?"ACTIVE":"ENDED";
   let sessionOut:Record<string,unknown>|null=session?{...session,work_choice:visibleWork(String(session.work_choice||""))}:null;
   const activeLabor=body.include_labor===true?await env.DB.prepare("SELECT labor_id,mnv,business_date,shift,labor_type,time_marker,state,start_at,end_at,note,deduct_staff,start_event_id,finish_event_id,version FROM labor_sessions WHERE business_date=?1 AND mnv=?2 AND state='OPEN' ORDER BY start_at DESC LIMIT 1").bind(date,mnv).first<Record<string,unknown>>():null;

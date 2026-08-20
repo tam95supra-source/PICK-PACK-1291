@@ -21,7 +21,10 @@ interface AttendanceRow {
   user_pick: string | null;
   pack_table: string | null;
   user_pack: string | null;
-  version: number;
+  pda_enter_status: string | null;
+  pda_exit_status: string | null;
+  resource_note: string;
+  version: number; // S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE
 }
 
 interface LaborRow {
@@ -131,10 +134,10 @@ function leaseStatements(db: D1Database, sessionId: string, mnv: string, date: s
 async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: CanonicalMutationRequest, a: AuthorityRow): Promise<EventRow> {
   const p=req.payload, mnv=text(p,"mnv",80), shift=text(p,"shift",80), choice=workChoice(p.work_choice);
   if(!mnv||!shift) throw new CoreError("ATTENDANCE_FIELDS_REQUIRED","VALIDATION",400);
-  const pda=text(p,"pda_serial"), pick=text(p,"user_pick"), table=text(p,"pack_table"), pack=text(p,"user_pack");
+  const pda=text(p,"pda_serial"), pick=text(p,"user_pick"), table=text(p,"pack_table"), pack=text(p,"user_pack"), pdaEnterStatus=text(p,"pda_enter_status",180), resourceNote=text(p,"resource_note",500);
   const checks=await db.batch([
     db.prepare("SELECT 1 AS x FROM employees WHERE mnv=?1").bind(mnv),
-    db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
+    db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,pda_enter_status,pda_exit_status,resource_note,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
     db.prepare("SELECT available FROM resources WHERE resource_type='PDA' AND resource_id=?1").bind(pda),
     db.prepare("SELECT available FROM resources WHERE resource_type='USER_PICK' AND resource_id=?1").bind(pick),
     db.prepare("SELECT available FROM resources WHERE resource_type='PACK_TABLE' AND resource_id=?1").bind(table),
@@ -158,6 +161,7 @@ async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: Can
     VALUES(?1,?2,?3,?4,?5,'ACTIVE',?6,?7,?8,?9,?10,?11,?12,?13)
     ON CONFLICT(mnv,business_date) DO UPDATE SET session_id=excluded.session_id,shift=excluded.shift,work_choice=excluded.work_choice,state='ACTIVE',pda_serial=excluded.pda_serial,user_pick=excluded.user_pick,pack_table=excluded.pack_table,user_pack=excluded.user_pack,enter_at=excluded.enter_at,entered_by=excluded.entered_by,version=excluded.version,updated_at=excluded.updated_at`)
     .bind(sessionId,mnv,req.business_date,shift,choice,pda||null,pick||null,table||null,pack||null,event.committed_at,auth.login_id,event.new_version,event.committed_at));
+  stmts.push(db.prepare("UPDATE attendance_sessions SET pda_enter_status=?1,resource_note=?2 WHERE session_id=?3").bind(pdaEnterStatus||null,resourceNote,sessionId));
   stmts.push(...leaseStatements(db,sessionId,mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]]));
   try { await db.batch(stmts); } catch (e) {
     const msg=String(e);
@@ -170,28 +174,32 @@ async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: Can
 async function commitAttendanceExit(db:D1Database, auth:AuthContext, req:CanonicalMutationRequest, a:AuthorityRow):Promise<EventRow>{
   const p=req.payload,mnv=text(p,"mnv",80);
   const checks=await db.batch([
-    db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
+    db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,pda_enter_status,pda_exit_status,resource_note,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date),
     db.prepare("SELECT COUNT(*) AS n FROM labor_sessions WHERE mnv=?1 AND business_date=?2 AND state='OPEN'").bind(mnv,req.business_date),
   ]);
   const current=(checks[0]?.results?.[0]??null) as AttendanceRow|null;
   if(!current||current.state!=="ACTIVE") throw new CoreError("ATTENDANCE_NOT_ACTIVE","CONFLICT",409);
   if(current.version!==req.base_version) throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:current.version});
   const open=(checks[1]?.results?.[0]??null) as {n?:number}|null;if((open?.n??0)>0) throw new CoreError("OPEN_LABOR_BLOCKS_EXIT","CONFLICT",409);
+  const pdaExitStatus=text(p,"pda_exit_status",180);
   const event=await buildEvent(req,auth,a,current.version+1),stmts=eventStatements(db,event,a.authority_seq);
   stmts.push(db.prepare("UPDATE attendance_sessions SET state='ENDED',exit_at=?1,exited_by=?2,version=?3,updated_at=?1 WHERE session_id=?4 AND version=?5 AND state='ACTIVE'").bind(event.committed_at,auth.login_id,event.new_version,current.session_id,current.version));
+  stmts.push(db.prepare("UPDATE attendance_sessions SET pda_exit_status=?1 WHERE session_id=?2").bind(pdaExitStatus||null,current.session_id));
   stmts.push(db.prepare("DELETE FROM resource_leases WHERE session_id=?1").bind(current.session_id));
   await db.batch(stmts); return event;
 }
 
 async function commitResourceChange(db:D1Database, auth:AuthContext, req:CanonicalMutationRequest, a:AuthorityRow):Promise<EventRow>{
   const p=req.payload,mnv=text(p,"mnv",80);
-  const current=await db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date).first<AttendanceRow>();
+  const current=await db.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,pda_enter_status,pda_exit_status,resource_note,version FROM attendance_sessions WHERE mnv=?1 AND business_date=?2").bind(mnv,req.business_date).first<AttendanceRow>();
   if(!current||current.state!=="ACTIVE") throw new CoreError("ATTENDANCE_NOT_ACTIVE","CONFLICT",409);
   if(current.version!==req.base_version) throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:current.version});
   const pda=text(p,"pda_serial")||current.pda_serial||"",pick=text(p,"user_pick")||"",table=text(p,"pack_table")||"",pack=text(p,"user_pack")||"";
   const event=await buildEvent(req,auth,a,current.version+1),stmts=eventStatements(db,event,a.authority_seq);
   stmts.push(db.prepare("DELETE FROM resource_leases WHERE session_id=?1").bind(current.session_id));
   stmts.push(db.prepare("UPDATE attendance_sessions SET pda_serial=?1,user_pick=?2,pack_table=?3,user_pack=?4,version=?5,updated_at=?6 WHERE session_id=?7 AND version=?8").bind(pda||null,pick||null,table||null,pack||null,event.new_version,event.committed_at,current.session_id,current.version));
+  const resourceNote=text(p,"resource_note",500);
+  if(resourceNote)stmts.push(db.prepare("UPDATE attendance_sessions SET resource_note=?1 WHERE session_id=?2").bind(resourceNote,current.session_id));
   stmts.push(...leaseStatements(db,current.session_id,current.mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]]));
   try{await db.batch(stmts);}catch(e){if(String(e).includes("UNIQUE constraint"))throw new CoreError("EXCLUSIVE_RESOURCE_CONFLICT","RESOURCE",409);throw e;} return event;
 }

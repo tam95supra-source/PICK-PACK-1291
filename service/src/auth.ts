@@ -40,7 +40,9 @@ export async function createSession(db: D1Database, env: Env, input: {login_id:s
   if(!constantTimeEqual(expected,input.proof)) return {ok:false,error:{code:"INVALID_CREDENTIALS",error_class:"AUTH",retryable:false}};
   const deviceId=String(input.device_id||"").trim().slice(0,180); if(!deviceId) return {ok:false,error:{code:"DEVICE_ID_REQUIRED",error_class:"VALIDATION",retryable:false}};
   const kind:SessionKind=String(input.client_source||"").toUpperCase()==="WEB"?"WEB":"PDA";
-  const sessionId=crypto.randomUUID(), issuedAt=nowIso();
+  // S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE: repeated same-device auth must not invalidate an in-flight PDA bearer.
+  const currentPda=kind==="PDA"?await db.prepare("SELECT session_id,device_id FROM auth_sessions WHERE login_id=?1").bind(account.login_id).first<SessionRow>():null;
+  const sessionId=kind==="PDA"&&currentPda?.device_id===deviceId&&currentPda.session_id?currentPda.session_id:crypto.randomUUID(), issuedAt=nowIso();
   if(kind==="WEB"){
     await db.prepare(`INSERT INTO auth_web_sessions(login_id,session_id,device_id,issued_at) VALUES(?1,?2,?3,?4)
       ON CONFLICT(login_id) DO UPDATE SET session_id=excluded.session_id,device_id=excluded.device_id,issued_at=excluded.issued_at`).bind(account.login_id,sessionId,deviceId,issuedAt).run();
