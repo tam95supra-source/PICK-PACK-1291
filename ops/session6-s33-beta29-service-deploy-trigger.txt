@@ -1,7 +1,8 @@
-requested_at=2026-08-20T09:04:00+07:00
+requested_at=2026-08-20T09:07:00+07:00
 release=0.4.2-beta.29
 service_transform=S33_PLUS_S33B
 gas_restore=PASS_V108
+wrangler_config=SERVICE_RELATIVE
 replication_recovery=DETAILED_LEDGER_REQUIRED
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
