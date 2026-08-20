@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:09:00Z
+purpose=Beta36 final local-first build gate
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
