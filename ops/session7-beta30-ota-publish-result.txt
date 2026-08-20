@@ -1,0 +1,7 @@
+checked_at=2026-08-20T03:36:33Z
+head_sha=b68a8f2353785b809c440baa8f002243a2dc2289
+failed_phase=LOCK
+failed_rc=1
+stable=UNTOUCHED_OR_GATE_STOPPED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
