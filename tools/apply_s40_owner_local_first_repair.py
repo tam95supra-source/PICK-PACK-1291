@@ -42,8 +42,13 @@ if 'fun unresolvedMutations(' not in s:
 STORE.write_text(s,encoding='utf-8')
 
 # 2) Device projection overlays all unresolved local events, including RETRY rows waiting for network retry.
+# It must also be able to render NOT_ENTERED from master data on a cold/no-day-snapshot PDA.
 p=PROJ.read_text(encoding='utf-8')
 p=p.replace('store.pendingMutations(500)','store.unresolvedMutations(500)')
+p=p.replace('''        val day = store.loadDay(businessDate) ?: return null
+        val sessions = day.optJSONArray("sessions") ?: JSONArray()''','''        val day = store.loadDay(businessDate)
+        val sessions = day?.optJSONArray("sessions") ?: JSONArray()''',1)
+p=p.replace('''.put("business_date", day.optString("business_date", businessDate))''','''.put("business_date", day?.optString("business_date", businessDate) ?: businessDate)''',1)
 old='''                        copyIfPresent(payload, this, "shift", "work_choice", "pda_serial", "user_pick", "pack_table", "user_pack")'''
 if old in p:
     p=p.replace(old,'''                        copyIfPresent(payload, this, "shift", "work_choice", "pda_serial", "user_pick", "pack_table", "user_pack", "resource_note")
@@ -118,6 +123,7 @@ store=STORE.read_text(encoding='utf-8');proj=PROJ.read_text(encoding='utf-8');tr
 checks=[
     ('fun unresolvedMutations(' in store,'all unresolved local state'),
     ('store.unresolvedMutations(500)' in proj,'projection includes retry rows'),
+    ('val day = store.loadDay(businessDate)\n        val sessions = day?.optJSONArray("sessions") ?: JSONArray()' in proj,'cold-cache local employee projection'),
     ('pda_status_at_enter' in proj and 'pda_enter_status' in proj,'local PDA condition'),
     ('store.unresolvedMutations(100)' in tr,'awake worker flushes unresolved'),
     ('PdaLocalProjection.employeeContext(this,resolved)' in ops,'scan renders local projection first'),
@@ -128,4 +134,4 @@ checks=[
 ]
 for ok,label in checks:
     if not ok: raise SystemExit('S40 contract missing: '+label)
-print('Applied S40: restored owner-locked PDA-local-first scan/session semantics, unresolved overlay/flush, and exact event metrics')
+print('Applied S40: restored owner-locked PDA-local-first scan/session semantics, cold-cache projection, unresolved overlay/flush, and exact event metrics')
