@@ -1,0 +1,116 @@
+name: Patch staff bridge HMAC
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/patch-staff-bridge-hmac.trigger'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Patch canonical Pick Pack sender
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('google-apps-script/BAO_HANG_STAFF_BRIDGE.gs')
+          s=p.read_text()
+          s=s.replace(" * No Báo hàng secret is stored here. Receiver authenticates the trigger owner's Google OAuth identity\n * and then re-reads the trusted source Sheet before applying any backend mutation.\n", " * Shared HMAC material is stored only in Apps Script Properties, never in source.\n * Receiver verifies the signed metadata and re-reads the trusted source Sheet before backend mutation.\n")
+          if "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" not in s:
+              anchor="  PENDING_PROP: 'PP_BH_STAFF_PENDING_V1',\n"
+              assert anchor in s
+              s=s.replace(anchor, anchor+"  HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET',\n",1)
+          old="""function ppBaoHangBridgePost_(payload) {
+  const body = Object.assign({}, payload, {oauth_token: ScriptApp.getOAuthToken()});
+  const res = UrlFetchApp.fetch(PP_BH_STAFF_BRIDGE.TARGET_URL, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(body),
+    followRedirects: true,
+    muteHttpExceptions: true
+  });
+  const code = res.getResponseCode();
+  let out = {};
+  try { out = JSON.parse(res.getContentText() || '{}'); } catch (_) {}
+  if (code < 200 || code >= 300 || !out.ok) {
+    throw new Error('BH_BRIDGE_HTTP_' + code + ':' + String(out.error || res.getContentText() || '').slice(0,250));
+  }
+  return out;
+}
+"""
+          new="""function ppBaoHangBridgePost_(payload) {
+  const secret = String(PropertiesService.getScriptProperties().getProperty(PP_BH_STAFF_BRIDGE.HMAC_PROP) || '');
+  if (secret.length < 32) throw new Error('BH_BRIDGE_HMAC_NOT_CONFIGURED');
+  const body = Object.assign({}, payload, {sent_at:new Date().toISOString()});
+  body.hmac_sha256 = ppBaoHangBridgeHmacHex_(body, secret);
+  const res = UrlFetchApp.fetch(PP_BH_STAFF_BRIDGE.TARGET_URL, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(body),
+    followRedirects: true,
+    muteHttpExceptions: true
+  });
+  const code = res.getResponseCode();
+  let out = {};
+  try { out = JSON.parse(res.getContentText() || '{}'); } catch (_) {}
+  if (code < 200 || code >= 300 || !out.ok) {
+    throw new Error('BH_BRIDGE_HTTP_' + code + ':' + String(out.error || res.getContentText() || '').slice(0,250));
+  }
+  return out;
+}
+
+function ppBaoHangBridgeCanonical_(payload) {
+  const oldCodes = payload.old_codes && typeof payload.old_codes === 'object' && !Array.isArray(payload.old_codes) ? payload.old_codes : {};
+  const oldPart = Object.keys(oldCodes).sort(function(a,b){
+    const na=Number(a), nb=Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb) && na !== nb) return na-nb;
+    return String(a).localeCompare(String(b));
+  }).map(function(k){ return String(k) + '=' + String(oldCodes[k] || ''); }).join('&');
+  return [
+    String(payload.action || ''),
+    String(payload.event_id || ''),
+    String(payload.source_id || ''),
+    String(payload.source_tab || ''),
+    String(payload.change_type || ''),
+    String(payload.row_start || ''),
+    String(payload.row_end || ''),
+    String(payload.col_start || ''),
+    String(payload.col_end || ''),
+    String(payload.at || ''),
+    String(payload.sent_at || ''),
+    oldPart
+  ].join('\\n');
+}
+
+function ppBaoHangBridgeHmacHex_(payload, secret) {
+  const bytes = Utilities.computeHmacSha256Signature(ppBaoHangBridgeCanonical_(payload), secret, Utilities.Charset.UTF_8);
+  return bytes.map(function(b){ return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+"""
+          if old in s:
+              s=s.replace(old,new,1)
+          elif 'function ppBaoHangBridgeHmacHex_' not in s:
+              raise SystemExit('POST_ANCHOR_NOT_FOUND')
+          p.write_text(s)
+          PY
+          cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/bridge.js
+          node --check /tmp/bridge.js
+          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          grep -q 'function ppBaoHangBridgeHmacHex_' google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          ! grep -q 'ScriptApp.getOAuthToken()' google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+      - name: Commit canonical source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          git diff --cached --quiet || git commit -m 'fix(staff): sign bridge events with HMAC'
+          git pull --rebase origin main
+          git push origin HEAD:main
