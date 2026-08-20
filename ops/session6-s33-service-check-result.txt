@@ -1,4 +1,81 @@
-checked_at=2026-08-20T01:20:31Z
-head_sha=c7c1fed1a7c7cedd4d187ce6d294ec3320bccbc2
+checked_at=2026-08-20T01:25:59Z
+head_sha=45da3e63cd05095ac9da9b72923cdc5a1c095020
 service_s33_check=FAIL
 verdict=FAIL
+--- diagnostic tail ---
++ python3 tools/apply_s33_service_resource_history.py
+Applied S33 Service resource admin, role-window correction, Google master replication and VN timezone
++ code=0
++ [[ 0 -eq 0 ]]
++ cd service
++ npm install --no-audit --no-fund
+
+added 40 packages in 8s
++ code=0
++ [[ 0 -eq 0 ]]
++ npm run check
+
+> check
+> npm run cf:types && npm run typecheck
+
+
+> cf:types
+> wrangler types
+
+
+ ⛅️ wrangler 4.119.0
+────────────────────
+Generating project types...
+
+interface __BaseEnv_Env {
+	DB: D1Database;
+	ASSETS: Fetcher;
+	SERVICE_GENERATION: "m2-precutover-20260819-001";
+	GOOGLE_SOURCE_SHEET_ID: "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78";
+	SERVICE_TOKEN_SECRET: string;
+	M1_ADMIN_TOKEN: string;
+	GAS_BRIDGE_SHARED_SECRET: string;
+	GOOGLE_OAUTH_CLIENT_ID: string;
+	GOOGLE_OAUTH_CLIENT_SECRET: string;
+	GOOGLE_OAUTH_REFRESH_TOKEN: string;
+	GOOGLE_STAGING_SHEET_ID: string;
+	REALTIME_HUB: DurableObjectNamespace<import("./src/entry_product").RealtimeHub>;
+}
+declare namespace Cloudflare {
+	interface GlobalProps {
+		mainModule: typeof import("./src/entry_product");
+		durableNamespaces: "RealtimeHub";
+	}
+	interface Env extends __BaseEnv_Env {}
+}
+interface Env extends __BaseEnv_Env {}
+type StringifyValues<EnvType extends Record<string, unknown>> = {
+	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
+};
+declare namespace NodeJS {
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SERVICE_GENERATION" | "GOOGLE_SOURCE_SHEET_ID" | "SERVICE_TOKEN_SECRET" | "M1_ADMIN_TOKEN" | "GAS_BRIDGE_SHARED_SECRET" | "GOOGLE_OAUTH_CLIENT_ID" | "GOOGLE_OAUTH_CLIENT_SECRET" | "GOOGLE_OAUTH_REFRESH_TOKEN" | "GOOGLE_STAGING_SHEET_ID">> {}
+}
+
+Generating runtime types...
+
+Runtime types generated.
+
+
+✨ Types written to worker-configuration.d.ts
+
+Action required Install @types/node
+Since you have the `nodejs_compat` flag, you should install Node.js types by running "npm i --save-dev @types/node".
+
+📖 Read about runtime types
+https://developers.cloudflare.com/workers/languages/typescript/#generate-types
+📣 Remember to rerun 'wrangler types' after you change your wrangler.jsonc file.
+
+
+> typecheck
+> tsc --noEmit
+
+src/resource_admin.ts(23,34): error TS18048: 'resources' is possibly 'undefined'.
+src/resource_admin.ts(23,65): error TS18048: 'maps' is possibly 'undefined'.
+src/resource_admin.ts(23,91): error TS18048: 'catalogs' is possibly 'undefined'.
++ code=2
++ exit 2
