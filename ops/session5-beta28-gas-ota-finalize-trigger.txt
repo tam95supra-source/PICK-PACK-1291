@@ -1,7 +1,10 @@
-triggered_at=2026-08-20T07:01:00+07:00
+triggered_at=2026-08-20T07:10:00+07:00
 version=0.4.2-beta.28
 sha256=a40a977dcb2c6b77ba549797ca511ee990bf74b4507939c23779e95e1f999a21
 size=12826963
 beta_drive_apk_id=19uYJwgBQ9EX-OTjELDPDkThjPK3VUysm
+replication_recovered=HEALTHY_0
+gas_restore=OFFICIAL_EXISTING_DEPLOYMENT_TRIGGERED
 stable=UNTOUCHED
 merge_pr38=NO
+retry=2
