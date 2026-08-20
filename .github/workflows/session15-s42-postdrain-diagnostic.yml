@@ -1,0 +1,50 @@
+name: Session15 S42 Postdrain Diagnostic
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session15-s42-postdrain-diagnostic-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session15-s42-postdrain-diagnostic
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Probe live routes and D1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+          MHTTP=$(curl -sS -o /tmp/m.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{}')
+          SHTTP=$(curl -sS -o /tmp/s.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}')
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h.json'),a=h.authority||{};console.log(`service=${h.ok?'OK':'BAD'}`);console.log(`authority=${a.mode||''}_${a.authority_epoch||''}_${a.authority_seq||''}`);console.log(`replication=${h.replication?.state||''}_${Number(h.replication?.pending_count??-1)}`);
+          NODE
+          echo "mobile_unauth_http=$MHTTP" >>"$OUT"; echo "session_empty_http=$SHTTP" >>"$OUT"
+          cd service
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-diag.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-diag.jsonc --command "SELECT login_id,device_id,issued_at FROM auth_sessions WHERE login_id='dple' ORDER BY issued_at DESC LIMIT 1; SELECT actor_id,event_type,business_date,committed_at,authority_seq FROM events WHERE actor_id='dple' ORDER BY authority_seq DESC LIMIT 20;" --json >/tmp/d1.json
+          node - <<'NODE' >>"$OUT"
+          const x=require('/tmp/d1.json'),r=i=>(Array.isArray(x)?x[i]?.results||[]:[]),s=r(0)[0]||{},e=r(1);console.log(`latest_auth_issued_at=${s.issued_at||''}`);console.log(`latest_auth_device=${s.device_id||''}`);console.log(`recent_event_rows=${e.length}`);if(e[0]){console.log(`latest_event_type=${e[0].event_type||''}`);console.log(`latest_event_at=${e[0].committed_at||''}`);console.log(`latest_event_seq=${e[0].authority_seq||''}`)}console.log('verdict=PASS');
+          NODE
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r||echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r||echo verdict=FAILED_OR_STOPPED >>/tmp/r;cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session15-s42-postdrain-diagnostic-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session15-s42-postdrain-diagnostic-result.txt;git diff --cached --quiet||git commit -m 'ops: record S42 postdrain diagnostic';git push origin HEAD:agent/service-migration-m2
