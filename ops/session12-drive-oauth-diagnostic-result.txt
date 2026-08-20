@@ -1,0 +1,6 @@
+checked_at=2026-08-20T12:58:23Z
+head_sha=217345d0446d57dc95a3610a5041e65e4efe9527
+token_http=200
+file_http=403
+permissions_http=403
+verdict=OAUTH_DRIVE_READ_FAIL
