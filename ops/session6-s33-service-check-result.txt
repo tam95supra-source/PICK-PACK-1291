@@ -1,7 +1,7 @@
-checked_at=2026-08-20T01:25:59Z
-head_sha=45da3e63cd05095ac9da9b72923cdc5a1c095020
-service_s33_check=FAIL
-verdict=FAIL
+checked_at=2026-08-20T01:27:15Z
+head_sha=b32bf2aa92cecc8fdedb9bd8deabcec055dba414
+service_s33_check=PASS
+verdict=PASS
 --- diagnostic tail ---
 + python3 tools/apply_s33_service_resource_history.py
 Applied S33 Service resource admin, role-window correction, Google master replication and VN timezone
@@ -10,7 +10,7 @@ Applied S33 Service resource admin, role-window correction, Google master replic
 + cd service
 + npm install --no-audit --no-fund
 
-added 40 packages in 8s
+added 40 packages in 7s
 + code=0
 + [[ 0 -eq 0 ]]
 + npm run check
@@ -74,8 +74,5 @@ https://developers.cloudflare.com/workers/languages/typescript/#generate-types
 > typecheck
 > tsc --noEmit
 
-src/resource_admin.ts(23,34): error TS18048: 'resources' is possibly 'undefined'.
-src/resource_admin.ts(23,65): error TS18048: 'maps' is possibly 'undefined'.
-src/resource_admin.ts(23,91): error TS18048: 'catalogs' is possibly 'undefined'.
-+ code=2
-+ exit 2
++ code=0
++ exit 0
