@@ -1,7 +1,7 @@
-requested_at=2026-08-20T09:02:00+07:00
+requested_at=2026-08-20T09:34:00+07:00
 version=0.4.2-beta.29
 version_code=35
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
 signer=LOCKED
-rerun=S33_ROUTER_FIX
+rerun=S33_WRAPPER_SYNTAX_FIX
