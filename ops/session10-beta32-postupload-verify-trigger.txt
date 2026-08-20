@@ -1,0 +1,9 @@
+requested_at=2026-08-20T17:49:00+07:00
+version=0.4.2-beta.32
+apk_drive_id=15ZhyzAIjSQoNrtdJvn_hYl84zznV1WyY
+checksum_drive_id=1D8nL44iT33k-j_Iy-ScyuCQAYD5T3XIT
+apk_sha256=e83b6225b003869b1f4cd75858d2ee47c0ab5d9a2b7bfe22cd447a0024d83b77
+apk_size=12880379
+publicize_via=GAS_UPDATE_CHECK
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
