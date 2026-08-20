@@ -1,0 +1,14 @@
+checked_at=2026-08-20T15:45:02Z
+head_sha=e456276e49617089bf26e6de40605a56f7c0c3cc
+service=OK
+authority=SERVICE_PRIMARY_8_18505
+replication=HEALTHY_0
+mobile_unauth_http=401
+session_empty_http=400
+account_dpchan=USER_ACTIVE
+account_dple=USER_ACTIVE
+session_dpchan=2026-08-20T15:39:47.845Z|m2-97682220e609ffec5fc2ffc90de546a81fad01094768644e305058cb6ed32fe4|3c605fd9-a8a1-4ba8-af21-215c44676d20
+session_dple=2026-08-20T11:08:39.968Z|m2-97682220e609ffec5fc2ffc90de546a81fad01094768644e305058cb6ed32fe4|cbe82403-1935-4285-98dc-52a4cfcdce0c
+recent_actor_event_rows=0
+total_events_after_1500z=539
+verdict=PASS
