@@ -1,0 +1,6 @@
+triggered_at=2026-08-20T19:57:00+07:00
+version=0.4.2-beta.34
+expected_sha256=2fc98ea64943f6910da626621afcc833d122dc7439a3270211beeb2a7a65821b
+drive_apk_id=11Pngzs7Sio4Xl2WW6kPjUbjsMXd2mEyc
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
