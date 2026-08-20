@@ -1,0 +1,39 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pick-pack-1291-service-m1-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "vars": {
+    "SERVICE_GENERATION": "m1-staging-20260818-001"
+  },
+  "secrets": {
+    "required": [
+      "SERVICE_TOKEN_SECRET",
+      "M1_ADMIN_TOKEN",
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "GOOGLE_OAUTH_REFRESH_TOKEN",
+      "GOOGLE_STAGING_SHEET_ID"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pick-pack-1291-m1-staging",
+      "database_id": "__M1_D1_DATABASE_ID__",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {"name": "REALTIME_HUB", "class_name": "RealtimeHub"}
+    ]
+  },
+  "migrations": [
+    {"tag": "v1", "new_sqlite_classes": ["RealtimeHub"]}
+  ],
+  "triggers": {"crons": ["*/1 * * * *"]},
+  "observability": {"enabled": true, "head_sampling_rate": 1}
+}

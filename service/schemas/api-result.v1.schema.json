@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pick-pack-1291.invalid/schema/api-result.v1.json",
+  "title": "Pick Pack 1291 Mutation Result V1",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["ok", "result"],
+      "properties": {
+        "ok": {"const": true},
+        "idempotent": {"type": "boolean"},
+        "result": {
+          "type": "object",
+          "required": ["event_id", "entity_type", "entity_id", "new_version", "authority_epoch", "authority_seq", "service_generation"],
+          "properties": {
+            "event_id": {"type": "string"},
+            "entity_type": {"type": "string"},
+            "entity_id": {"type": "string"},
+            "new_version": {"type": "integer"},
+            "authority_epoch": {"type": "integer"},
+            "authority_seq": {"type": "integer"},
+            "service_generation": {"type": "string"}
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": {"const": false},
+        "error": {
+          "type": "object",
+          "required": ["code", "error_class", "retryable"],
+          "properties": {
+            "code": {"type": "string"},
+            "error_class": {"enum": ["VALIDATION", "AUTH", "PERMISSION", "CONFLICT", "RESOURCE", "TRANSIENT", "INTEGRITY", "SCHEMA", "INTERNAL"]},
+            "retryable": {"type": "boolean"},
+            "conflict": {"type": ["object", "null"]}
+          }
+        }
+      }
+    }
+  ]
+}

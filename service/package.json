@@ -1,0 +1,14 @@
+{
+  "name": "pick-pack-1291-service-m1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cf:types": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run cf:types && npm run typecheck"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2",
+    "wrangler": "4.119.0"
+  }
+}
