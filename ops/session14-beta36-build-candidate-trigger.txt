@@ -1,0 +1,4 @@
+trigger=2026-08-20T13:56:00Z
+purpose=Beta36 owner-locked local-first repair build
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
