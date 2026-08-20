@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:41:00Z
+purpose=read-only route/session/event checkpoint after S42 live
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
