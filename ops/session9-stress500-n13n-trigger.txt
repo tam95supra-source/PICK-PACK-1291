@@ -1,0 +1,16 @@
+requested_at=2026-08-20T16:57:00+07:00
+scope=ONLY_EMPLOYEES_ATTENDANCE_LABOR
+employees=500
+from=2026-08-07
+to=2026-08-20
+attendance_sessions_per_day=360
+labor_sessions_per_day=300
+backup_sheet_id=1oB6FyiODQ1nuzCRvvA8yPDM_uH0ONLBfrHb1EZMMONk
+resources=FORBIDDEN
+catalogs=FORBIDDEN
+pda=FORBIDDEN
+user_pick=FORBIDDEN
+user_pack=FORBIDDEN
+pack_table=FORBIDDEN
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
