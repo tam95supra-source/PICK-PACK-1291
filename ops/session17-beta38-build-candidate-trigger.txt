@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:33:00Z
+purpose=build signed Beta38 with S44 single-flight and rich diagnostics
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
