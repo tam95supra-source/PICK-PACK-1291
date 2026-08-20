@@ -1,0 +1,64 @@
+name: Session13 S39 D1 Employee Diagnostic
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session13-s39-d1-employee-diagnostic-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_NAME: pick-pack-1291-service-prod
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read-only production D1 employee check
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=AUTHORITY
+          trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; echo stable=UNTOUCHED >>"$OUT"; echo merge_pr38=UNTOUCHED >>"$OUT"; echo verdict=FAILED_OR_STOPPED >>"$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{};
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(g.authority_epoch??ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');
+          console.log(`authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`); console.log('replication=HEALTHY_0');
+          NODE
+          PHASE=D1_READ
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); [[ -n "$ID" ]]; export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-s39-diag.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s39-diag.jsonc --command "SELECT COUNT(*) AS employee_count FROM employees; SELECT SUM(CASE WHEN mnv='30001' THEN 1 ELSE 0 END) AS has_30001,SUM(CASE WHEN mnv='30007' THEN 1 ELSE 0 END) AS has_30007,SUM(CASE WHEN mnv='30008' THEN 1 ELSE 0 END) AS has_30008,SUM(CASE WHEN mnv='30011' THEN 1 ELSE 0 END) AS has_30011 FROM employees; SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 1;" --json >/tmp/q.json
+          node - <<'NODE' >>"$OUT"
+          const q=require('/tmp/q.json');const sets=Array.isArray(q)?q:[];
+          const rows=sets.flatMap(x=>Array.isArray(x.results)?x.results:[]);
+          const count=rows.find(x=>x.employee_count!==undefined)?.employee_count;
+          const p=rows.find(x=>x.has_30001!==undefined)||{};
+          const d=rows.find(x=>x.business_date!==undefined)||{};
+          console.log(`d1_employee_count=${Number(count??-1)}`);
+          for(const id of ['30001','30007','30008','30011'])console.log(`d1_has_${id}=${Number(p['has_'+id]??0)}`);
+          console.log(`business_date=${String(d.business_date||'')}`);
+          if(Number(count??0)<=0)throw Error('D1_EMPLOYEES_EMPTY');
+          console.log('d1_read=PASS');console.log('stable=UNTOUCHED');console.log('merge_pr38=UNTOUCHED');console.log('verdict=PASS');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          grep -q '^verdict=' /tmp/r || { echo stable=UNTOUCHED >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session13-s39-d1-employee-diagnostic-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session13-s39-d1-employee-diagnostic-result.txt; git diff --cached --quiet || git commit -m 'ops: record S39 D1 employee diagnostic'; git push origin HEAD:agent/service-migration-m2
