@@ -12,17 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: agent/service-migration-m2, fetch-depth: 0 }
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
       - name: Generate final Android source and inspect diagnostics anchors
         shell: bash
         run: |
-          set -Eeuo pipefail
-          ./gradlew :app:generateS10Operations >/tmp/generate.log 2>&1
-          F=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          set +e
           OUT=/tmp/r
           echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"
           echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          python3 tools/apply_m2_android_transport_patch.py >/tmp/generate.log 2>&1
+          RC=$?
+          echo "transform_rc=$RC" >>"$OUT"
+          if [[ $RC -ne 0 ]]; then cat /tmp/generate.log >>"$OUT"; echo verdict=FAILED >>"$OUT"; exit 0; fi
+          F=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -n -E 'MANUAL|DAILY|sync_state|diagnostic_log|file_name' "$F" | tail -80 >>"$OUT" || true
           echo '--- snippets ---' >>"$OUT"
           python3 - <<'PY' >>"$OUT"
@@ -31,7 +32,7 @@ jobs:
           for needle in ['sync_state=', 'type=MANUAL', 'type=DAILY', 'diagnostic_log']:
               i=s.find(needle)
               print('NEEDLE',needle,'AT',i)
-              if i>=0: print(s[max(0,i-1000):i+2200].replace('\r',''))
+              if i>=0: print(s[max(0,i-1200):i+2600].replace('\r',''))
           PY
           echo 'verdict=PASS' >>"$OUT"
       - name: Record
