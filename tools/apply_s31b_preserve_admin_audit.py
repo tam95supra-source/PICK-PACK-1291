@@ -34,3 +34,4 @@ runpy.run_path(str(ROOT/'tools/apply_s37_move_service_telemetry_to_sync.py'),run
 runpy.run_path(str(ROOT/'tools/apply_s38_attendance_ui.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s39_employee_session_history_wrapper.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s40_owner_local_first_repair_wrapper.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s43_foreground_outbox_wake.py'),run_name='__main__')
