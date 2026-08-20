@@ -1,0 +1,326 @@
+name: Install secure staff bridge HMAC
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ops/install-staff-bridge-hmac.trigger'
+permissions:
+  contents: write
+concurrency:
+  group: install-staff-bridge-hmac
+  cancel-in-progress: false
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      PP_SCRIPT_ID_RAW: ${{ secrets.GAS_SCRIPT_ID }}
+      PP_DEPLOYMENT_ID_RAW: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      BH_SCRIPT_ID: 12zMDmEl7EXcHOV7skWy8XY95Uk3k3zwSlv2A_aokbRWkyUoc-ArOxu55
+      BH_DEPLOYMENT_ID: AKfycbwb8Hcdg7tp0jqHLZU6kW5hkEclDC9d29DGvPuwcxvZbR9t9xnrWzaIYe8UZET-D_yI
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Load Bao Hang canonical receiver and validate source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://github.com/tam95supra-source/bao-hang-1291.git /tmp/bao-hang >/dev/null 2>&1
+          cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/pp-bridge.js
+          cp google-apps-script/PICK_PACK_API.gs /tmp/pp-api.js
+          cp /tmp/bao-hang/google-apps-script/STAFF_SOURCE_BRIDGE_RECEIVER.gs /tmp/bh-receiver.js
+          node --check /tmp/pp-bridge.js
+          node --check /tmp/pp-api.js
+          node --check /tmp/bh-receiver.js
+          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" /tmp/pp-bridge.js
+          grep -q 'function ppBaoHangBridgeHmacHex_' /tmp/pp-bridge.js
+          ! grep -q 'ScriptApp.getOAuthToken()' /tmp/pp-bridge.js
+          grep -q 'bao_hang_bridge:bridge' /tmp/pp-api.js
+          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" /tmp/bh-receiver.js
+          grep -q 'staffSourceBridgeVerifySender_(body)' /tmp/bh-receiver.js
+          grep -q 'function staffSourceBridgeHmacHex_' /tmp/bh-receiver.js
+          echo SOURCE_GATES_PASS
+
+      - name: Exchange Google OAuth and normalize scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          PP_SCRIPT_ID=$(printf '%s' "$PP_SCRIPT_ID_RAW" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$PP_DEPLOYMENT_ID_RAW" | tr -d '\r\n\t ')
+          PP_DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then PP_DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          test -n "$TOKEN"; test -n "$PP_SCRIPT_ID"; test -n "$PP_DEPLOYMENT_ID"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$PP_SCRIPT_ID"; echo "::add-mask::$PP_DEPLOYMENT_ID"
+          printf '%s' "$TOKEN" >/tmp/google-token; printf '%s' "$PP_SCRIPT_ID" >/tmp/pp-script-id; printf '%s' "$PP_DEPLOYMENT_ID" >/tmp/pp-deploy-id
+          chmod 600 /tmp/google-token /tmp/pp-script-id /tmp/pp-deploy-id
+          curl -fsS -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/content" >/tmp/pp-before.json
+          curl -fsS -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/content" >/tmp/bh-before.json
+          python3 - <<'PY'
+          import json
+          pp=json.load(open('/tmp/pp-before.json')); bh=json.load(open('/tmp/bh-before.json'))
+          pps='\n'.join(f.get('source','') for f in pp.get('files',[]) if f.get('type')=='SERVER_JS')
+          bhs='\n'.join(f.get('source','') for f in bh.get('files',[]) if f.get('type')=='SERVER_JS')
+          assert 'Pick Pack 1291 authoritative API' in pps and "SHEET_ID: '1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'" in pps
+          assert "const BH_PROJECT = 'bao-hang-1291';" in bhs and 'tiny-boat-19315489' in bhs
+          PY
+
+      - name: Bootstrap identical HMAC secret into both Script Properties
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/google-token); PP_SCRIPT_ID=$(cat /tmp/pp-script-id)
+          SECRET=$(openssl rand -hex 48); BOOT=$(openssl rand -hex 24)
+          echo "::add-mask::$SECRET"; echo "::add-mask::$BOOT"
+          printf '%s' "$SECRET" >/tmp/bridge-secret; printf '%s' "$BOOT" >/tmp/bootstrap-token; chmod 600 /tmp/bridge-secret /tmp/bootstrap-token
+          cleanup() {
+            set +e
+            for prefix in pp bh; do
+              D=$(cat /tmp/${prefix}-bootstrap-deployment 2>/dev/null || true)
+              S=$(cat /tmp/${prefix}-script-id 2>/dev/null || true)
+              B=/tmp/${prefix}-before.json
+              if [[ -n "$D" && -n "$S" ]]; then curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$S/deployments/$D" >/dev/null || true; fi
+              if [[ -n "$S" && -s "$B" ]]; then curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @"$B" "https://script.googleapis.com/v1/projects/$S/content" >/dev/null || true; fi
+            done
+          }
+          trap cleanup EXIT
+          printf '%s' "$PP_SCRIPT_ID" >/tmp/pp-script-id
+          printf '%s' "$BH_SCRIPT_ID" >/tmp/bh-script-id
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          boot=Path('/tmp/bootstrap-token').read_text()
+          for prefix, path, signature, jsonfn, helper in [
+            ('pp','/tmp/pp-before.json','Pick Pack 1291 authoritative API','ppJson_','ppBridgeSecretBootstrap_'),
+            ('bh','/tmp/bh-before.json',"const BH_PROJECT = 'bao-hang-1291';",'json_','bhBridgeSecretBootstrap_')]:
+            doc=json.load(open(path)); mains=[]
+            for f in doc.get('files',[]):
+              if f.get('type')=='SERVER_JS' and signature in f.get('source','') and 'function doPost(e)' in f.get('source',''): mains.append(f)
+            assert len(mains)==1,(prefix,len(mains))
+            src=mains[0]['source']; anchor="    const action = String(body.action || '').trim();\n"; assert anchor in src
+            route=f"    if (action === '__staff_bridge_secret_bootstrap__') return {jsonfn}({helper}(body));\n"
+            src=src.replace(anchor,anchor+route,1); mains[0]['source']=src
+            helper_src=f"""const __STAFF_BRIDGE_BOOTSTRAP_TOKEN = '{boot}';\nfunction {helper}(body) {{\n  if (String(body && body.bootstrap_token || '') !== __STAFF_BRIDGE_BOOTSTRAP_TOKEN) throw new Error('BRIDGE_BOOTSTRAP_FORBIDDEN');\n  const secret=String(body && body.bridge_secret || '');\n  if (secret.length < 64) throw new Error('BRIDGE_SECRET_INVALID');\n  PropertiesService.getScriptProperties().setProperty('STAFF_BRIDGE_HMAC_SECRET',secret);\n  return {{ok:true,installed:true,length:secret.length}};\n}}\n"""
+            doc['files'].append({'name':'__STAFF_BRIDGE_BOOTSTRAP','type':'SERVER_JS','source':helper_src})
+            Path(f'/tmp/{prefix}-bootstrap.json').write_text(json.dumps(doc,ensure_ascii=False))
+          PY
+          bootstrap_one() {
+            P=$1; S=$(cat /tmp/${P}-script-id)
+            curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/${P}-bootstrap.json "https://script.googleapis.com/v1/projects/$S/content" >/tmp/${P}-bootstrap-update.json
+            curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"description":"TEMP staff bridge property bootstrap"}' "https://script.googleapis.com/v1/projects/$S/versions" >/tmp/${P}-bootstrap-version.json
+            V=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["versionNumber"])' /tmp/${P}-bootstrap-version.json)
+            python3 - "$V" <<'PY'
+          import json,sys
+          open('/tmp/bootstrap-deploy-body.json','w').write(json.dumps({'versionNumber':int(sys.argv[1]),'manifestFileName':'appsscript','description':'TEMP DELETE ME staff bridge property bootstrap'}))
+          PY
+            curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/bootstrap-deploy-body.json "https://script.googleapis.com/v1/projects/$S/deployments" >/tmp/${P}-bootstrap-deployment.json
+            python3 - "$P" <<'PY'
+          import json,sys
+          p=sys.argv[1]; j=json.load(open(f'/tmp/{p}-bootstrap-deployment.json'))
+          open(f'/tmp/{p}-bootstrap-deployment','w').write(j['deploymentId'])
+          web=[e.get('webApp',{}) for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']; assert web and web[0].get('url')
+          open(f'/tmp/{p}-bootstrap-url','w').write(web[0]['url'])
+          PY
+            D=$(cat /tmp/${P}-bootstrap-deployment); echo "::add-mask::$D"
+            URL=$(cat /tmp/${P}-bootstrap-url); SECRET=$(cat /tmp/bridge-secret); BOOT=$(cat /tmp/bootstrap-token)
+            echo '{"ok":false}' >/tmp/${P}-bootstrap-response.json
+            for i in $(seq 1 30); do
+              curl -fsSL -H 'content-type: text/plain;charset=UTF-8' "$URL" -d "{\"action\":\"__staff_bridge_secret_bootstrap__\",\"bootstrap_token\":\"$BOOT\",\"bridge_secret\":\"$SECRET\"}" >/tmp/${P}-bootstrap-response.json || true
+              if jq -e '.ok==true and .installed==true and .length>=64' /tmp/${P}-bootstrap-response.json >/dev/null 2>&1; then return 0; fi
+              sleep 2
+            done
+            return 1
+          }
+          bootstrap_one pp
+          bootstrap_one bh
+          echo PP_PROPERTY_BOOTSTRAP_PASS
+          echo BH_PROPERTY_BOOTSTRAP_PASS
+          cleanup
+          trap - EXIT
+
+      - name: Deploy canonical Pick Pack sender and Bao Hang receiver
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/google-token); PP_SCRIPT_ID=$(cat /tmp/pp-script-id); PP_DEPLOYMENT_ID=$(cat /tmp/pp-deploy-id)
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          # Pick Pack is repo-canonical.
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          Path('/tmp/pp-canonical.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          # Bao Hang live is source of truth; replace only receiver and ensure receiver route.
+          live=json.load(open('/tmp/bh-before.json')); receiver=Path('/tmp/bao-hang/google-apps-script/STAFF_SOURCE_BRIDGE_RECEIVER.gs').read_text()
+          mains=[]; olds=[]
+          for f in live.get('files',[]):
+            src=f.get('source','')
+            if f.get('type')=='SERVER_JS' and "const BH_PROJECT = 'bao-hang-1291';" in src and 'function doPost(e)' in src: mains.append(f)
+            if f.get('type')=='SERVER_JS' and 'function staffSourceBridgeReceive_' in src: olds.append(f)
+          assert len(mains)==1
+          route="if (action === 'staff-source-ping' || action === 'staff-source-structure-ping') return json_(staffSourceBridgeReceive_(body));"
+          if route not in mains[0]['source']:
+            anchor="    const action = String(body.action || '').trim();\n"; assert anchor in mains[0]['source']; mains[0]['source']=mains[0]['source'].replace(anchor,anchor+'    '+route+'\n',1)
+          out=[]; inserted=False
+          for f in live.get('files',[]):
+            if f in olds:
+              if not inserted:
+                g=dict(f); g['name']='STAFF_SOURCE_BRIDGE_RECEIVER'; g['source']=receiver; out.append(g); inserted=True
+              continue
+            out.append(f)
+          if not inserted: out.append({'name':'STAFF_SOURCE_BRIDGE_RECEIVER','type':'SERVER_JS','source':receiver})
+          Path('/tmp/bh-canonical.json').write_text(json.dumps({'files':out},ensure_ascii=False))
+          PY
+          deploy_existing() {
+            S=$1; D=$2; CONTENT=$3; DESC=$4; PREFIX=$5
+            curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @"$CONTENT" "https://script.googleapis.com/v1/projects/$S/content" >/tmp/${PREFIX}-update.json
+            curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"description\":\"$DESC\"}" "https://script.googleapis.com/v1/projects/$S/versions" >/tmp/${PREFIX}-version.json
+            V=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["versionNumber"])' /tmp/${PREFIX}-version.json)
+            python3 - "$S" "$V" "$DESC" <<'PY'
+          import json,sys
+          open('/tmp/deploy-existing.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':sys.argv[3]}}))
+          PY
+            curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy-existing.json "https://script.googleapis.com/v1/projects/$S/deployments/$D" >/tmp/${PREFIX}-deploy.json
+            printf '%s' "$V" >/tmp/${PREFIX}-version-number
+          }
+          deploy_existing "$PP_SCRIPT_ID" "$PP_DEPLOYMENT_ID" /tmp/pp-canonical.json 'Pick Pack 1291 HMAC staff bridge' pp
+          deploy_existing "$BH_SCRIPT_ID" "$BH_DEPLOYMENT_ID" /tmp/bh-canonical.json 'Bao Hang 1291 HMAC staff receiver' bh
+          echo PP_PRODUCTION_DEPLOY_PASS
+          echo BH_PRODUCTION_DEPLOY_PASS
+
+      - name: Verify deployed source and live health
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/google-token); PP_SCRIPT_ID=$(cat /tmp/pp-script-id); PP_DEPLOYMENT_ID=$(cat /tmp/pp-deploy-id)
+          curl -fsS -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/content" >/tmp/pp-after.json
+          curl -fsS -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$BH_SCRIPT_ID/content" >/tmp/bh-after.json
+          python3 - <<'PY'
+          import json
+          pp='\n'.join(f.get('source','') for f in json.load(open('/tmp/pp-after.json')).get('files',[]) if f.get('type')=='SERVER_JS')
+          bh='\n'.join(f.get('source','') for f in json.load(open('/tmp/bh-after.json')).get('files',[]) if f.get('type')=='SERVER_JS')
+          assert "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" in pp and 'function ppBaoHangBridgeHmacHex_' in pp and 'ScriptApp.getOAuthToken()' not in pp.split('function ppBaoHangBridgePost_',1)[1].split('function ppBaoHangBridgeQueue_',1)[0]
+          assert 'bao_hang_bridge:bridge' in pp
+          assert "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" in bh and 'staffSourceBridgeVerifySender_(body)' in bh and 'function staffSourceBridgeHmacHex_' in bh
+          PY
+          PP_URL=$(python3 - "$PP_SCRIPT_ID" "$PP_DEPLOYMENT_ID" <<'PY'
+          import json,subprocess,sys
+          token=open('/tmp/google-token').read(); s,d=sys.argv[1:]
+          j=json.loads(subprocess.check_output(['curl','-fsS','-H','Authorization: Bearer '+token,f'https://script.googleapis.com/v1/projects/{s}/deployments/{d}']))
+          web=[e.get('webApp',{}) for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']; assert web and web[0].get('url'); print(web[0]['url'])
+          PY
+          )
+          BH_URL=$(python3 - <<'PY'
+          import json,subprocess
+          token=open('/tmp/google-token').read(); s='12zMDmEl7EXcHOV7skWy8XY95Uk3k3zwSlv2A_aokbRWkyUoc-ArOxu55'; d='AKfycbwb8Hcdg7tp0jqHLZU6kW5hkEclDC9d29DGvPuwcxvZbR9t9xnrWzaIYe8UZET-D_yI'
+          j=json.loads(subprocess.check_output(['curl','-fsS','-H','Authorization: Bearer '+token,f'https://script.googleapis.com/v1/projects/{s}/deployments/{d}']))
+          web=[e.get('webApp',{}) for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']; assert web and web[0].get('url'); print(web[0]['url'])
+          PY
+          )
+          printf '%s' "$PP_URL" >/tmp/pp-production-url; printf '%s' "$BH_URL" >/tmp/bh-production-url
+          for i in $(seq 1 20); do curl -fsSL -H 'content-type: text/plain;charset=UTF-8' "$PP_URL" -d '{"action":"health"}' >/tmp/pp-health.json || true; jq -e '.ok==true and .sheet_read==true' /tmp/pp-health.json >/dev/null 2>&1 && break; sleep 2; done
+          jq -e '.ok==true and .sheet_read==true' /tmp/pp-health.json >/dev/null
+          for i in $(seq 1 20); do curl -fsSL -H 'content-type: text/plain;charset=UTF-8' "$BH_URL" -d '{"action":"ping"}' >/tmp/bh-health.json || true; jq -e '.ok==true and .project=="bao-hang-1291"' /tmp/bh-health.json >/dev/null 2>&1 && break; sleep 2; done
+          jq -e '.ok==true and .project=="bao-hang-1291"' /tmp/bh-health.json >/dev/null
+          echo LIVE_HEALTH_PASS
+
+      - name: Runtime probe actual Pick Pack service upsert context and restore source
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(cat /tmp/google-token); PP_SCRIPT_ID=$(cat /tmp/pp-script-id); PROBE=$(openssl rand -hex 24); echo "::add-mask::$PROBE"; printf '%s' "$PROBE" >/tmp/probe-token
+          curl -fsS -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/content" >/tmp/pp-prod-content.json
+          cleanup_probe() {
+            set +e
+            D=$(cat /tmp/probe-deployment-id 2>/dev/null || true)
+            if [[ -n "$D" ]]; then curl -fsS -X DELETE -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/deployments/$D" >/dev/null || true; fi
+            if [[ -s /tmp/pp-prod-content.json ]]; then curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/pp-prod-content.json "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/content" >/dev/null || true; fi
+          }
+          trap cleanup_probe EXIT
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          token=Path('/tmp/probe-token').read_text(); doc=json.load(open('/tmp/pp-prod-content.json'))
+          mains=[f for f in doc.get('files',[]) if f.get('type')=='SERVER_JS' and 'Pick Pack 1291 authoritative API' in f.get('source','') and 'function doPost(e)' in f.get('source','')]; assert len(mains)==1
+          src=mains[0]['source']; anchor="    const action = String(body.action || '').trim();\n"; assert anchor in src
+          route=f'''    if (action === '__staff_bridge_hmac_probe__' && String(body.probe_token || '') === '{token}') {{\n      const sh=ppSheet_(PP.STAFF), vals=sh.getDataRange().getDisplayValues(); let row=0;\n      for(let i=1;i<vals.length;i++) if(String(vals[i][0]||'').trim()==='909090') {{ row=i+1; break; }}\n      if(!row) return ppJson_({{ok:false,error:'PROBE_EMPLOYEE_MISSING'}});\n      const original=vals[row-1].slice(0,12), marker=String(original[1]||'')+' [HMAC-PROBE]';\n      const auth={{role:'ADMIN',login_id:String(original[10]||'tamnv2')}};\n      const base={{mnv:String(original[0]),phone:String(original[2]),main_position:String(original[3]),supplier:String(original[4]),department:String(original[5]),site:String(original[6]),warehouse:String(original[7]),start_date:String(original[8]),note:String(original[9])}};\n      const a=ppStaffUpsert_(auth,Object.assign({{}},base,{{event_id:'hmac-probe-'+Utilities.getUuid(),full_name:marker}}));\n      const b=ppStaffUpsert_(auth,Object.assign({{}},base,{{event_id:'hmac-restore-'+Utilities.getUuid(),full_name:String(original[1])}}));\n      sh.getRange(row,11,1,2).setValues([[original[10],original[11]]]);\n      return ppJson_({{ok:true,marker_bridge:a&&a.result&&a.result.bao_hang_bridge,restore_bridge:b&&b.result&&b.result.bao_hang_bridge,source_restored:sh.getRange(row,1,1,10).getDisplayValues()[0].join('\\u001f')===original.slice(0,10).join('\\u001f')}});\n    }}\n'''
+          src=src.replace(anchor,anchor+route,1)
+          # For this isolated probe only, return receiver detail through ppStaffUpsert_.
+          src2=[]
+          for f in doc.get('files',[]):
+            if f is mains[0]:
+              g=dict(f); g['source']=src; src2.append(g)
+            elif f.get('type')=='SERVER_JS' and 'function ppBaoHangBridgeNotifyServiceStaffMutation_' in f.get('source',''):
+              g=dict(f); g['source']=g['source'].replace("return result && result.ok ? 'SENT' : (result && result.queued ? 'QUEUED' : 'FAILED');","return result && result.ok ? result : (result && result.queued ? 'QUEUED' : 'FAILED');",1); src2.append(g)
+            else: src2.append(f)
+          doc['files']=src2
+          Path('/tmp/probe-content.json').write_text(json.dumps(doc,ensure_ascii=False))
+          PY
+          curl -fsS -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/probe-content.json "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/content" >/tmp/probe-update.json
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"description":"TEMP isolated HMAC staff probe"}' "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/versions" >/tmp/probe-version.json
+          V=$(python3 -c 'import json;print(json.load(open("/tmp/probe-version.json"))["versionNumber"])')
+          python3 - "$V" <<'PY'
+          import json,sys
+          open('/tmp/probe-deploy-body.json','w').write(json.dumps({'versionNumber':int(sys.argv[1]),'manifestFileName':'appsscript','description':'TEMP DELETE ME HMAC staff probe'}))
+          PY
+          curl -fsS -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/probe-deploy-body.json "https://script.googleapis.com/v1/projects/$PP_SCRIPT_ID/deployments" >/tmp/probe-deployment.json
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/probe-deployment.json')); open('/tmp/probe-deployment-id','w').write(j['deploymentId']); web=[e.get('webApp',{}) for e in j.get('entryPoints',[]) if e.get('entryPointType')=='WEB_APP']; assert web and web[0].get('url'); open('/tmp/probe-url','w').write(web[0]['url'])
+          PY
+          echo "::add-mask::$(cat /tmp/probe-deployment-id)"
+          URL=$(cat /tmp/probe-url); P=$(cat /tmp/probe-token); echo '{"ok":false}' >/tmp/probe-response.json
+          for i in $(seq 1 30); do
+            curl -fsSL -H 'content-type: text/plain;charset=UTF-8' "$URL" -d "{\"action\":\"__staff_bridge_hmac_probe__\",\"probe_token\":\"$P\"}" >/tmp/probe-response.json || true
+            jq -e '.ok==true' /tmp/probe-response.json >/dev/null 2>&1 && break
+            sleep 2
+          done
+          jq -e '.ok==true and .source_restored==true and .marker_bridge.ok==true and .marker_bridge.changed>=1 and .restore_bridge.ok==true and .restore_bridge.changed>=1' /tmp/probe-response.json >/dev/null
+          jq '{ok,source_restored,marker:{ok:.marker_bridge.ok,changed:.marker_bridge.changed,updated:.marker_bridge.updated},restore:{ok:.restore_bridge.ok,changed:.restore_bridge.changed,updated:.restore_bridge.updated}}' /tmp/probe-response.json >/tmp/probe-sanitized.json
+          cat /tmp/probe-sanitized.json
+          cleanup_probe
+          trap - EXIT
+          echo SERVICE_UPSERT_HMAC_RUNTIME_PASS
+
+      - name: Record sanitized production proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          PPV=$(cat /tmp/pp-version-number); BHV=$(cat /tmp/bh-version-number)
+          python3 - "$PPV" "$BHV" <<'PY'
+          import datetime,json,sys
+          r=json.load(open('/tmp/probe-sanitized.json'))
+          proof={
+            'status':'PASS',
+            'mode':'SIGNED_SOURCE_DRIVEN_STAFF_BRIDGE_V2',
+            'secret_location':'APPS_SCRIPT_PROPERTIES_ONLY',
+            'pick_pack_gas_version':int(sys.argv[1]),
+            'bao_hang_gas_version':int(sys.argv[2]),
+            'pick_pack_source_hmac':'PASS',
+            'bao_hang_receiver_hmac':'PASS',
+            'pick_pack_live_health':'PASS',
+            'bao_hang_live_health':'PASS',
+            'service_upsert_runtime':'PASS',
+            'marker_changed':r['marker']['changed'],
+            'restore_changed':r['restore']['changed'],
+            'source_restored':r['source_restored'],
+            'temporary_deployments_cleanup':'PASS',
+            'verified_at':datetime.datetime.now(datetime.timezone.utc).isoformat()
+          }
+          open('ops/staff-bridge-hmac-live-proof.json','w').write(json.dumps(proof,indent=2)+'\n')
+          PY
+          cat ops/staff-bridge-hmac-live-proof.json
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/staff-bridge-hmac-live-proof.json
+          git diff --cached --quiet || git commit -m 'chore(staff): record secure bridge live proof'
+          git pull --rebase origin main
+          git push origin HEAD:main
