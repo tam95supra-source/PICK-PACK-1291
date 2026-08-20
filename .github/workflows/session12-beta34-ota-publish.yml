@@ -1,0 +1,98 @@
+name: Session12 Beta34 OTA Publish
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session12-beta34-ota-publish-trigger.txt]
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+concurrency:
+  group: session12-beta34-ota-publish
+  cancel-in-progress: false
+env:
+  EXPECTED_VERSION_NAME: 0.4.2-beta.34
+  EXPECTED_VERSION_CODE: '40'
+  EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+  APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.34.apk
+  CHECKSUM_NAME: SHA256SUMS-beta34.txt
+  BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+  STABLE_FOLDER_ID: 1kxTd2rFfWutc2KWDwqgK8WYWDmSygIN4
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Normal release gates and exact candidate lock
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT";PHASE=LOCK
+          trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          grep -qx 'verdict=PASS' ops/session12-s38-attendance-service-deploy-v2-result.txt
+          grep -qx 'verdict=PASS' ops/session12-beta34-build-candidate-result.txt
+          ARTIFACT_ID=$(sed -n 's/^artifact_id=//p' ops/session12-beta34-build-candidate-result.txt|tail -1);EXPECTED_SHA=$(sed -n 's/^apk_sha256=//p' ops/session12-beta34-build-candidate-result.txt|tail -1);EXPECTED_SIZE=$(sed -n 's/^apk_size=//p' ops/session12-beta34-build-candidate-result.txt|tail -1);SIGNER=$(sed -n 's/^signer_sha256=//p' ops/session12-beta34-build-candidate-result.txt|tail -1)
+          [[ "$ARTIFACT_ID" =~ ^[0-9]+$ && "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ && "$EXPECTED_SIZE" =~ ^[0-9]+$ && "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]]
+          echo "ARTIFACT_ID=$ARTIFACT_ID" >>"$GITHUB_ENV";echo "EXPECTED_SHA=$EXPECTED_SHA" >>"$GITHUB_ENV";echo "EXPECTED_SIZE=$EXPECTED_SIZE" >>"$GITHUB_ENV"
+          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" >/tmp/h.json;curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json;curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),p=require('/tmp/pr.json'),a=h.authority||{},ga=g.authority||{},se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_RELEASE_GATE');if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||ge!==se)throw Error('GAS_RELEASE_GATE');if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38_SAFETY');console.log(`authority_gate=SERVICE_PRIMARY_${se}_${a.authority_seq}`);console.log('replication_gate=HEALTHY_0');console.log('pr38_gate=OPEN_DRAFT_UNMERGED');console.log('normal_gate=PASS');
+          NODE
+          echo candidate_artifact_id=$ARTIFACT_ID >>"$OUT";echo candidate_sha256=$EXPECTED_SHA >>"$OUT";echo candidate_size=$EXPECTED_SIZE >>"$OUT"
+      - name: Drive isolation preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;PHASE=DRIVE_PREFLIGHT;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token'|jq -r '.access_token');[[ -n "$TOKEN" && "$TOKEN" != null ]];echo "::add-mask::$TOKEN";echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >>"$GITHUB_ENV"
+          list_folder(){ local id="$1" out="$2" q;q=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote("\"%s\" in parents and trashed=false"%sys.argv[1]))' "$id");curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size,modifiedTime,parents)&pageSize=1000" >"$out"; }
+          list_folder "$BETA_FOLDER_ID" /tmp/beta-before.json;list_folder "$STABLE_FOLDER_ID" /tmp/stable-before.json
+          jq -e '.files|length==0' /tmp/stable-before.json >/dev/null;jq -e --arg a "$APK_NAME" --arg c "$CHECKSUM_NAME" '[.files[]|select(.name==$a or .name==$c)]|length==0' /tmp/beta-before.json >/dev/null
+          echo stable_before=EMPTY >>"$OUT";echo beta34_absent_before=PASS >>"$OUT"
+      - name: Download exact signed Beta34 artifact
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;PHASE=ARTIFACT;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" -o /tmp/candidate.zip;rm -rf /tmp/candidate;mkdir -p /tmp/candidate;unzip -q /tmp/candidate.zip -d /tmp/candidate
+          APK=/tmp/candidate/$APK_NAME;SUM=/tmp/candidate/$CHECKSUM_NAME;[[ -s "$APK" && -s "$SUM" ]];[[ "$(sha256sum "$APK"|awk '{print $1}')" == "$EXPECTED_SHA" ]];[[ "$(stat -c%s "$APK")" == "$EXPECTED_SIZE" ]];grep -qx "$EXPECTED_SHA  $APK_NAME" "$SUM"
+          echo "APK=$APK" >>"$GITHUB_ENV";echo "SUM=$SUM" >>"$GITHUB_ENV";echo artifact_verify=PASS >>"$OUT"
+      - name: Upload Beta folder only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;PHASE=UPLOAD;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          upload(){ local file="$1" name="$2" mime="$3" size meta hdr loc;size=$(stat -c%s "$file");meta=$(jq -nc --arg n "$name" --arg p "$BETA_FOLDER_ID" --arg m "$mime" '{name:$n,parents:[$p],mimeType:$m}');hdr=$(mktemp);curl -fsS -D "$hdr" -o /tmp/init -X POST 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,parents' -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json; charset=UTF-8' -H "X-Upload-Content-Type: $mime" -H "X-Upload-Content-Length: $size" --data "$meta";loc=$(awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");sub(/^location:[[:space:]]*/,"");print;exit}' "$hdr");[[ -n "$loc" ]];curl -fsSL -X PUT "$loc" -H "Content-Type: $mime" --data-binary @"$file"; }
+          upload "$APK" "$APK_NAME" 'application/vnd.android.package-archive' >/tmp/apk.json;upload "$SUM" "$CHECKSUM_NAME" 'text/plain' >/tmp/sum.json
+          APK_ID=$(jq -r '.id' /tmp/apk.json);SUM_ID=$(jq -r '.id' /tmp/sum.json);[[ -n "$APK_ID" && "$APK_ID" != null && -n "$SUM_ID" && "$SUM_ID" != null ]];echo "APK_ID=$APK_ID" >>"$GITHUB_ENV";echo "SUM_ID=$SUM_ID" >>"$GITHUB_ENV";echo upload_beta_only=PASS >>"$OUT"
+      - name: OTA discovery exact bytes and isolation
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;PHASE=VERIFY;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          q=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote("\"%s\" in parents and trashed=false"%sys.argv[1]))' "$STABLE_FOLDER_ID");curl -fsSL -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=1000" >/tmp/stable-after.json;jq -e '.files|length==0' /tmp/stable-after.json >/dev/null
+          for i in 1 2 3 4 5 6 7 8 9 10;do curl -fsSL --retry 2 --retry-delay 1 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.33"}' >/tmp/ota.json || true;jq -e --arg v "$EXPECTED_VERSION_NAME" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and (.available==true or .update_available==true) and (.version_name // .version)==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and ((.apk_url // .download_url // .url)|length)>20' /tmp/ota.json >/dev/null 2>&1&&break;sleep 3;done
+          jq -e --arg v "$EXPECTED_VERSION_NAME" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and (.available==true or .update_available==true) and (.version_name // .version)==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z)' /tmp/ota.json >/dev/null;URL=$(jq -r '.apk_url // .download_url // .url' /tmp/ota.json);curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/public.apk;[[ "$(stat -c%s /tmp/public.apk)" == "$EXPECTED_SIZE" ]];[[ "$(sha256sum /tmp/public.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.34"}' >/tmp/self.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' >/tmp/stable-ota.json;curl -fsSL "$SERVICE_URL/health" >/tmp/h2.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g2.json;curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr2.json
+          node - <<'NODE' >>"$OUT"
+          const s=require('/tmp/self.json'),t=require('/tmp/stable-ota.json'),h=require('/tmp/h2.json'),g=require('/tmp/g2.json'),p=require('/tmp/pr2.json'),a=h.authority||{},ga=g.authority||{},avail=x=>x.available??x.update_available,ver=x=>String(x.version_name??x.version??''),se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);if(s.ok!==true||avail(s)!==false||String(s.channel||'')!=='BETA')throw Error('SELF_UPDATE');if(t.ok!==true||avail(t)!==false||ver(t)==='0.4.2-beta.34')throw Error('STABLE_OTA');if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0||g.authority_mode!=='SERVICE_PRIMARY'||ge!==se)throw Error('FINAL_AUTHORITY');if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38_SAFETY');console.log('ota_discovery=PASS');console.log('public_download=PASS');console.log('self_update=PASS');console.log('stable_after=EMPTY');console.log('stable_ota_isolation=PASS');console.log(`final_authority=SERVICE_PRIMARY_${se}_${a.authority_seq}`);console.log('replication_final=HEALTHY_0');console.log('stable=UNTOUCHED_EMPTY');console.log('merge_pr38=UNTOUCHED_DRAFT_OPEN');
+          NODE
+          echo apk_size=$EXPECTED_SIZE >>"$OUT";echo apk_sha256=$EXPECTED_SHA >>"$OUT";echo signer_sha256=$EXPECTED_SIGNER_SHA256 >>"$OUT";echo drive_apk_id=$APK_ID >>"$OUT";echo drive_checksum_id=$SUM_ID >>"$OUT";echo verdict=PASS >>"$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result || echo result_missing=true >/tmp/result;if ! grep -q '^verdict=' /tmp/result;then echo stable=UNTOUCHED_OR_GATE_STOPPED >>/tmp/result;echo merge_pr38=UNTOUCHED >>/tmp/result;echo verdict=FAILED_OR_STOPPED >>/tmp/result;fi;cp /tmp/result /tmp/r;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/r ops/session12-beta34-ota-publish-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session12-beta34-ota-publish-result.txt;git diff --cached --quiet || git commit -m 'ops: record Beta34 OTA publish';git push origin HEAD:agent/service-migration-m2
