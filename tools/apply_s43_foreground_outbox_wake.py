@@ -7,14 +7,11 @@ MARK='S43_FOREGROUND_OUTBOX_WAKE'
 
 s=OPS.read_text(encoding='utf-8')
 if MARK not in s:
-    old='''    override fun onStart() {
-        super.onStart()
-        UpdateManager.check(this, force = true)
-        if (api.token != null) foregroundSync.start()
-    }'''
-    new='''    override fun onStart() {
-        super.onStart()
-        UpdateManager.check(this, force = true)
+    # S33 already owns lifecycle and inserts PpForegroundGate.enter() before foregroundSync.start().
+    # Patch that stable post-S33 semantic anchor instead of assuming the pre-S33 onStart body.
+    anchor='''        PpForegroundGate.enter()
+        if (api.token != null) foregroundSync.start()'''
+    replacement='''        PpForegroundGate.enter()
         if (api.token != null) {
             // S43_FOREGROUND_OUTBOX_WAKE: if an earlier Service/session outage left durable local
             // events in WorkManager backoff, foregrounding the app wakes that SAME idempotent
@@ -23,11 +20,10 @@ if MARK not in s:
                 M2WorkScheduler.schedule(this)
             }
             foregroundSync.start()
-        }
-    }'''
-    if old not in s:
-        raise SystemExit('S43 onStart anchor missing')
-    s=s.replace(old,new,1)
+        }'''
+    if anchor not in s:
+        raise SystemExit('S43 post-S33 lifecycle anchor missing')
+    s=s.replace(anchor,replacement,1)
 
     # Opening Sync is an explicit operator intent to reconcile. Wake the durable outbox there too;
     # foreground rendering remains local-only and never waits for this worker.
@@ -45,10 +41,11 @@ checks=[
     ('OperationalDataStore(this).pendingMutationCount()' in s,'pending guard'),
     ('M2WorkScheduler.schedule(this)' in s,'outbox wake'),
     ('foregroundSync.start()' in s,'foreground sync preserved'),
+    ('PpForegroundGate.enter()' in s,'S33 foreground gate preserved'),
     ('private fun syncScreen(){' in s,'sync screen preserved'),
 ]
 for ok,label in checks:
     if not ok: raise SystemExit('S43 contract missing: '+label)
 if s.count('M2WorkScheduler.schedule(this)') < 2:
     raise SystemExit('S43 expected onStart + Sync-screen wake')
-print('Applied S43: foreground/Sync wake durable unresolved outbox without polling or hot-path blocking')
+print('Applied S43: post-S33 foreground/Sync wake durable unresolved outbox without polling or hot-path blocking')
