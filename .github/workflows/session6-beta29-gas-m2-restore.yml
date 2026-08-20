@@ -1,0 +1,125 @@
+name: Session6 Beta29 GAS M2 Restore
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session6-beta29-gas-m2-restore-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: gas-live-deploy
+  cancel-in-progress: false
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Merge M2 GAS with latest staff bridge
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; PHASE=MERGE
+          trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          git fetch origin main --depth=80
+          for f in BAO_HANG_STAFF_BRIDGE.gs BAO_HANG_STAFF_BRIDGE_AUTHORIZE.gs BAO_HANG_STAFF_SETUP_SAFE.gs; do
+            git show "origin/main:google-apps-script/$f" > "google-apps-script/$f"
+          done
+          git show origin/main:google-apps-script/PICK_PACK_API.gs > /tmp/main_PICK_PACK_API.gs
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('google-apps-script/PICK_PACK_API.gs')
+          base=p.read_text(encoding='utf-8')
+          main=Path('/tmp/main_PICK_PACK_API.gs').read_text(encoding='utf-8')
+          def splice(source, donor, start, next_marker):
+              a=source.find(start); b=source.find(next_marker,a)
+              c=donor.find(start); d=donor.find(next_marker,c)
+              if min(a,b,c,d)<0: raise SystemExit('GAS_STAFF_SPLICE_ANCHOR_MISSING:'+start)
+              return source[:a]+donor[c:d]+source[b:]
+          base=splice(base,main,'function ppStaffUpsert_(auth,body){','\nfunction ppStaffDelete_(auth,body){')
+          base=splice(base,main,'function ppStaffDelete_(auth,body){','\nfunction ppAuthenticate_(body)')
+          base=base.replace("TZ: 'Asia/Bangkok'","TZ: 'Asia/Ho_Chi_Minh'")
+          p.write_text(base,encoding='utf-8')
+          m=Path('google-apps-script/appsscript.json')
+          j=json.loads(m.read_text(encoding='utf-8'))
+          j['timeZone']='Asia/Ho_Chi_Minh'
+          scopes=list(j.get('oauthScopes') or [])
+          for s in ['https://www.googleapis.com/auth/script.scriptapp','https://www.googleapis.com/auth/userinfo.email']:
+              if s not in scopes: scopes.append(s)
+          j['oauthScopes']=scopes
+          j['webapp']={'access':'ANYONE_ANONYMOUS','executeAs':'USER_DEPLOYING'}
+          m.write_text(json.dumps(j,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+          grep -q "action === 'service_discovery'" google-apps-script/PICK_PACK_API.gs
+          grep -q 'function ppM2Discovery_' google-apps-script/SERVICE_MIGRATION_M2.gs
+          grep -q 'function ppM2StateSnapshot_' google-apps-script/SERVICE_MIGRATION_M2.gs
+          grep -q "TZ: 'Asia/Ho_Chi_Minh'" google-apps-script/PICK_PACK_API.gs
+          grep -q 'ppBaoHangBridgeNotifyServiceStaffMutation_' google-apps-script/PICK_PACK_API.gs
+          grep -q 'SpreadsheetApp.flush();' google-apps-script/PICK_PACK_API.gs
+          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          grep -q 'function ppBaoHangBridgeHmacHex_' google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          grep -q 'function authorizeBaoHangStaffBridgeTransport' google-apps-script/BAO_HANG_STAFF_BRIDGE_AUTHORIZE.gs
+          ! grep -q 'ScriptApp.getOAuthToken()' google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
+          jq -e '.timeZone=="Asia/Ho_Chi_Minh" and (.oauthScopes|index("https://www.googleapis.com/auth/script.external_request")!=null) and (.oauthScopes|index("https://www.googleapis.com/auth/script.scriptapp")!=null) and (.oauthScopes|index("https://www.googleapis.com/auth/userinfo.email")!=null) and .webapp.access=="ANYONE_ANONYMOUS" and .webapp.executeAs=="USER_DEPLOYING"' google-apps-script/appsscript.json >/dev/null
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js; cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js; cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/BAO_HANG_STAFF_BRIDGE.js
+          node --check /tmp/PICK_PACK_API.js; node --check /tmp/SERVICE_MIGRATION_M2.js; node --check /tmp/BAO_HANG_STAFF_BRIDGE.js
+          echo merge=PASS >> "$OUT"; echo timezone=ASIA_HO_CHI_MINH >> "$OUT"; echo staff_bridge_preserved=PASS >> "$OUT"; echo m2_routes_preserved=PASS >> "$OUT"
+      - name: Update same Apps Script deployment
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=DEPLOY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID; do [[ -n "${!v:-}" ]]; done
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID"|tr -d '\r\n\t '); RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID"|tr -d '\r\n\t '); DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token'|jq -r '.access_token')
+          [[ -n "$TOKEN" && "$TOKEN" != null ]]; echo "::add-mask::$TOKEN"
+          export SCRIPT_ID DEPLOYMENT_ID TOKEN
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          b=Path('google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text(encoding='utf-8')})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text(encoding='utf-8')})
+          Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False),encoding='utf-8')
+          PY
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content"); [[ "$H" == 200 ]]
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 Beta29 M2 + staff bridge merged"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions"); [[ "$H" == 200 ]]
+          V=$(jq -r '.versionNumber' /tmp/version.json); [[ "$V" =~ ^[0-9]+$ ]]
+          jq -nc --arg sid "$SCRIPT_ID" --argjson v "$V" '{deploymentConfig:{scriptId:$sid,versionNumber:$v,manifestFileName:"appsscript",description:"Pick Pack 1291 Beta29 M2 + staff bridge merged"}}' >/tmp/deploy.json
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID"); [[ "$H" == 200 ]]
+          echo "gas_version=$V" >> "$OUT"; echo deploy=PASS >> "$OUT"
+      - name: Verify live M2, OTA and bridge coexistence
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=VERIFY; trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          post_until(){ local payload="$1" file="$2" pred="$3"; for i in 1 2 3 4 5 6 7 8; do curl -sSL --max-time 30 -H 'content-type: application/json' "$GAS_URL" -d "$payload" >"$file" || true; node -e "$pred" "$file" 2>/dev/null && return 0; sleep 3; done; cat "$file"; return 1; }
+          post_until '{"action":"service_discovery"}' /tmp/discovery.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const a=j.authority||{};process.exit(j.ok===true&&j.authority_mode==="SERVICE_PRIMARY"&&Number(a.authority_epoch)>=8&&a.scope==="PRODUCTION"?0:1)'
+          post_until '{"action":"health"}' /tmp/health.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.sheet_read===true?0:1)'
+          post_until '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' /tmp/beta.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="BETA"&&j.available===false?0:1)'
+          curl -fsSL "$SERVICE_URL/health" >/tmp/service.json
+          node - <<'NODE'
+          const fs=require('fs'),g=require('/tmp/discovery.json'),h=require('/tmp/service.json'),a=g.authority||{},sa=h.authority||{},o='/tmp/result';
+          if(!h.ok||sa.mode!=='SERVICE_PRIMARY'||sa.scope!=='PRODUCTION'||Number(sa.authority_epoch)!==Number(a.authority_epoch))throw Error('SERVICE_GAS_AUTHORITY_MISMATCH');
+          fs.appendFileSync(o,`gas_authority=SERVICE_PRIMARY_${a.authority_epoch}\nservice_authority=SERVICE_PRIMARY_${sa.authority_epoch}\nservice_discovery=PASS\nota_channel=PASS\nbridge_coexistence=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n`);
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result || echo result_missing=true >/tmp/result
+          if ! grep -q '^verdict=' /tmp/result; then echo stable=UNTOUCHED >>/tmp/result; echo merge_pr38=UNTOUCHED >>/tmp/result; echo verdict=FAILED_OR_STOPPED >>/tmp/result; fi
+          cp /tmp/result /tmp/r; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/r ops/session6-beta29-gas-m2-restore-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-beta29-gas-m2-restore-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta29 GAS M2 restore'; git push origin HEAD:agent/service-migration-m2
