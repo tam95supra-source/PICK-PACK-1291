@@ -1,91 +1,15 @@
-checked_at=2026-08-20T01:33:18Z
-head_sha=a7098ab1a84496d0ceab7868f6f68d141b64fe42
+checked_at=2026-08-20T01:45:50Z
+head_sha=189b433144b9b5d4c266b16af9ebaf78cabfc890
 config=PASS
-failed_phase=BUILD
-failed_rc=1
---- diagnostic tail ---
-To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
-Daemon will be stopped at the end of the build 
-
-> Task :app:generateS10Operations
-Generated /home/runner/work/pick-pack-1291/pick-pack-1291/app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt (82803 chars)
-Applied S11 compact/report patch: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-S12 real-PDA patch applied
-S12 compile hotfix applied
-S13 shared history + large scanner UI patch applied
-S14 device cache + scanner sizing patch applied
-S15 local-first UI + report date selector + compact scanner patch applied
-S17 SQLite recovery UI patch applied
-S18 sync-direction + dual-edge navigation + parent-tab reset patch applied
-Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 runtime patches in build workspace: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-Applied S19 M2 production runtime fix; event-driven foreground contract preserved.
-Applied S20 PACK composite identity fix.
-Applied S21 labor shift fix.
-Applied S22 PDA local-first + provider/network/sync observability fixes.
-Applied S23 SUPERADMIN PDA Import entry.
-Applied S24 FCM logout revoke.
-Applied S25 cache-first fallback sync + shared PDA history/session UX + full sync diagnostics
-Applied S27 projection ACK gap fix
-Applied S29 owner local-first warm cache + seven-session readable History
-Applied S30 canonical admin audit across Service replication and Android durable outbox
-Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor
-Applied S31 strict Service-first non-blocking PDA hot path + background-only authority fallback + RTT split
-Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
-Applied S31D compile-safe multiline runtime bridge; Service-primary cannot fall through to GAS
-Applied S32 durable local History + independent immediate outbox flush
-Applied S33 owner UI/history/staff/resources/sync/PDA-exchange/lifecycle/timezone patch
-Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
-
-> Task :app:preBuild
-> Task :app:preBetaReleaseBuild
-> Task :app:mergeBetaReleaseJniLibFolders
-> Task :app:mergeBetaReleaseNativeLibs
-> Task :app:mergeBetaReleaseArtProfile
-> Task :app:desugarBetaReleaseFileDependencies FROM-CACHE
-> Task :app:generateBetaReleaseBuildConfig
-> Task :app:generateBetaReleaseResources
-> Task :app:packageBetaReleaseResources
-> Task :app:stripBetaReleaseDebugSymbols
-> Task :app:processBetaReleaseNavigationResources
-> Task :app:extractBetaReleaseNativeSymbolTables
-> Task :app:mergeBetaReleaseNativeDebugMetadata NO-SOURCE
-> Task :app:javaPreCompileBetaRelease FROM-CACHE
-> Task :app:parseBetaReleaseLocalResources
-> Task :app:checkBetaReleaseAarMetadata
-> Task :app:mapBetaReleaseSourceSetPaths
-> Task :app:compileBetaReleaseNavigationResources FROM-CACHE
-> Task :app:generateBetaReleaseRFile
-> Task :app:mergeBetaReleaseResources
-> Task :app:createBetaReleaseCompatibleScreenManifests
-> Task :app:extractDeepLinksBetaRelease FROM-CACHE
-> Task :app:processBetaReleaseMainManifest
-> Task :app:processBetaReleaseManifest
-> Task :app:processBetaReleaseManifestForPackage
-> Task :app:checkBetaReleaseDuplicateClasses
-> Task :app:mergeBetaReleaseStartupProfile
-> Task :app:processBetaReleaseResources
-
-> Task :app:compileBetaReleaseKotlin
-e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt:20:47 Returns are prohibited for functions with an expression body. Use block body '{...}'.
-e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt:28:47 Returns are prohibited for functions with an expression body. Use block body '{...}'.
-e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt:107:40 Unresolved reference 'serviceProviderFromRuntime'.
-
-> Task :app:compileBetaReleaseKotlin FAILED
-> Task :app:mergeExtDexBetaRelease
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787189601901.json
-
-FAILURE: Build failed with an exception.
-
-* What went wrong:
-Execution failed for task ':app:compileBetaReleaseKotlin'.
-> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
-   > Compilation error. See log for more details
-
-* Try:
-> Run with --stacktrace option to get the stack trace.
-> Run with --info or --debug option to get more log output.
-> Run with --scan to get full insights from a Build Scan (powered by Develocity).
-> Get more help at https://help.gradle.org.
-
-BUILD FAILED in 52s
-28 actionable tasks: 24 executed, 4 from cache
+build=PASS
+s31_contract=PASS
+s32_history_flush_contract=PASS
+s33_owner_contract=PASS
+admin_audit_preserved=PASS
+sign=PASS
+apk_size=12843347
+apk_sha256=c8a601f58f974dc4cffa038b892c5489a69e1160166684d4eb0d7c1e318f6ec4
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9390169710
+artifact_name=beta29-release-candidate
+verdict=PASS
