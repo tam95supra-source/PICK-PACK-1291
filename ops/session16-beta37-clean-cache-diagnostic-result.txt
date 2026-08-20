@@ -1,10 +1,11 @@
-checked_at=2026-08-20T15:45:30Z
-head_sha=d180f40d07afa3cff1acf830e05918dec55cd683
+checked_at=2026-08-20T15:54:44Z
+head_sha=59c5419529e7e77f36a11119cdad500e9d99edff
 service=OK
 authority=SERVICE_PRIMARY_8_18505
 replication=HEALTHY_0
-mobile_unauth_http=502
+mobile_unauth_http=401
 session_empty_http=400
+legacy_batch_unauth_http=401
 account_dpchan=USER_ACTIVE
 account_dple=USER_ACTIVE
 session_dpchan=2026-08-20T15:39:47.845Z|m2-97682220e609ffec5fc2ffc90de546a81fad01094768644e305058cb6ed32fe4|3c605fd9-a8a1-4ba8-af21-215c44676d20
