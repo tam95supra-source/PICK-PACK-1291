@@ -1,0 +1,67 @@
+name: Session6 Beta29 Postupload Verify
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session6-beta29-postupload-verify-trigger.txt]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: session6-beta29-postupload-verify
+  cancel-in-progress: false
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  EXPECTED_VERSION: 0.4.2-beta.29
+  EXPECTED_SHA: c8a601f58f974dc4cffa038b892c5489a69e1160166684d4eb0d7c1e318f6ec4
+  EXPECTED_SIZE: '12843347'
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Verify Beta29 OTA public bytes and isolation
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"; echo owner_replication_waiver=YES >> "$OUT"; PHASE=OTA
+          trap 'rc=$?; echo failed_phase=$PHASE >> "$OUT"; echo failed_rc=$rc >> "$OUT"; exit $rc' ERR
+          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" >/tmp/h.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node - <<'NODE'
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{};const se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);
+          if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION")throw Error('SERVICE_AUTHORITY');
+          if(!g.ok||g.authority_mode!=="SERVICE_PRIMARY"||ge!==se)throw Error('GAS_AUTHORITY');
+          NODE
+          for i in 1 2 3 4 5 6 7 8; do
+            curl -fsSL --retry 2 --retry-delay 1 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.28"}' >/tmp/ota.json || true
+            jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and (.available==true or .update_available==true) and (.version_name // .version)==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and ((.apk_url // .download_url // .url)|length)>20' /tmp/ota.json >/dev/null 2>&1 && break
+            sleep 3
+          done
+          jq -e --arg v "$EXPECTED_VERSION" --arg s "$EXPECTED_SHA" --arg z "$EXPECTED_SIZE" '.ok==true and (.available==true or .update_available==true) and (.version_name // .version)==$v and (.sha256|ascii_downcase)==$s and ((.size|tostring)==$z) and ((.apk_url // .download_url // .url)|length)>20' /tmp/ota.json >/dev/null
+          URL=$(jq -r '.apk_url // .download_url // .url' /tmp/ota.json)
+          curl -fsSL --retry 5 --retry-delay 2 "$URL" -o /tmp/public.apk
+          [[ "$(stat -c%s /tmp/public.apk)" == "$EXPECTED_SIZE" ]]; [[ "$(sha256sum /tmp/public.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          PHASE=ISOLATION
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.29"}' >/tmp/self.json
+          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"0.0.0"}' >/tmp/stable.json
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr.json
+          node - <<'NODE'
+          const fs=require('fs'),s=require('/tmp/self.json'),t=require('/tmp/stable.json'),p=require('/tmp/pr.json'),o='/tmp/r';const avail=x=>x.available??x.update_available,ver=x=>String(x.version_name??x.version??'');
+          if(s.ok!==true||avail(s)!==false||String(s.channel||'')!=='BETA')throw Error('SELF_UPDATE');
+          if(t.ok!==true||avail(t)!==false||ver(t)==='0.4.2-beta.29')throw Error('STABLE_OTA');
+          if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38');
+          fs.appendFileSync(o,'ota_discovery=PASS\npublic_download=PASS\nself_update=PASS\nstable_ota_isolation=PASS\nmerge_pr38=UNTOUCHED_DRAFT_OPEN\nreplication_gate=WAIVED_BY_OWNER_2026-08-20\nverdict=PASS\n');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          if ! grep -q '^verdict=' /tmp/r; then echo stable=UNTOUCHED >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; fi
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session6-beta29-postupload-verify-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-beta29-postupload-verify-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta29 direct OTA verification'; git push origin HEAD:agent/service-migration-m2
