@@ -1,0 +1,7 @@
+requested_at=2026-08-20T18:15:00+07:00
+reason=beta33-release-gate-pending-2
+mode=CANONICAL_REPLICATE_ONLY
+delete_events=FORBIDDEN
+fake_ack=FORBIDDEN
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
