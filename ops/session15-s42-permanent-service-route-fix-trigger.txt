@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:35:00Z
+purpose=permanently persist production mobile/session routes and S41 bridge, then deploy with 401/400 route gates
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
