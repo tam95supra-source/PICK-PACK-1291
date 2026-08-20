@@ -1,4 +1,4 @@
-requested_at=2026-08-20T18:21:00+07:00
-reason=beta33-final-release-acceptance
+requested_at=2026-08-20T18:23:30+07:00
+reason=beta33-final-acceptance-latest-artifact-in-place
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
