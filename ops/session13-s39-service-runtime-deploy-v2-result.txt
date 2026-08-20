@@ -1,0 +1,17 @@
+checked_at=2026-08-20T13:31:23Z
+head_sha=fa2c3ce3b81f18372705da2dacb426a5ef786129
+authority_gate=SERVICE_PRIMARY_8_18505
+replication_gate=HEALTHY_0
+pr38_gate=OPEN_DRAFT_UNMERGED
+backup_sha256=803a275d39be048c8a5f589ee56d191a46f63340daef54ac533257581639e12d
+source_check=PASS
+backup=PASS
+deploy=PASS
+mobile_unauth_http=401
+session_empty_http=400
+mobile_routes=PASS
+authority=SERVICE_PRIMARY_8_18505
+replication=HEALTHY_0
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED_DRAFT_OPEN
+verdict=PASS
