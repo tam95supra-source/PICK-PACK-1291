@@ -1,0 +1,4 @@
+triggered_at=2026-08-20T10:35:00+07:00
+purpose=Publish Beta30 after full six-request build/sign PASS
+stable=UNTOUCHED
+signer=LOCKED
