@@ -1,1 +1,1 @@
-deploy=2026-08-20-programmatic-staff-bridge-v1
+deploy=2026-08-20-secure-staff-bridge-hmac-v2
