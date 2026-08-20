@@ -31,10 +31,11 @@ jobs:
           curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
           MHTTP=$(curl -sS -o /tmp/m.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{}')
           SHTTP=$(curl -sS -o /tmp/s.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}')
+          BHTTP=$(curl -sS -o /tmp/b.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/legacy-mutations/batch" -d '{"events":[]}')
           node - <<'NODE' >>"$OUT"
           const h=require('/tmp/h.json'),a=h.authority||{};console.log(`service=${h.ok?'OK':'BAD'}`);console.log(`authority=${a.mode||''}_${a.authority_epoch||''}_${a.authority_seq||''}`);console.log(`replication=${h.replication?.state||''}_${Number(h.replication?.pending_count??-1)}`);
           NODE
-          echo "mobile_unauth_http=$MHTTP" >>"$OUT"; echo "session_empty_http=$SHTTP" >>"$OUT"
+          echo "mobile_unauth_http=$MHTTP" >>"$OUT"; echo "session_empty_http=$SHTTP" >>"$OUT"; echo "legacy_batch_unauth_http=$BHTTP" >>"$OUT"
           cd service
           npx wrangler d1 list --json >/tmp/list.json
           ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); export ID
