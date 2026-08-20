@@ -1,0 +1,16 @@
+checked_at=2026-08-20T01:56:22Z
+head_sha=5cf10568f4e88f1c5493604f4283980817d37c2e
+merge=PASS
+timezone=ASIA_HO_CHI_MINH
+staff_bridge_preserved=PASS
+m2_routes_preserved=PASS
+gas_version=108
+deploy=PASS
+gas_authority=SERVICE_PRIMARY_8
+service_authority=SERVICE_PRIMARY_8
+service_discovery=PASS
+ota_channel=PASS
+bridge_coexistence=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS
