@@ -1,0 +1,146 @@
+checked_at=2026-08-20T16:22:31Z
+head_sha=adf37e496741fe36b99e3ff0a5cfc86b953bd2fd
+config=PASS
+failed_phase=BUILD
+failed_rc=1
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Task :app:generateS10Operations
+Generated /home/runner/work/pick-pack-1291/pick-pack-1291/app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt (82803 chars)
+Applied S11 compact/report patch: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+S12 real-PDA patch applied
+S12 compile hotfix applied
+S13 shared history + large scanner UI patch applied
+S14 device cache + scanner sizing patch applied
+S15 local-first UI + report date selector + compact scanner patch applied
+S17 SQLite recovery UI patch applied
+S18 sync-direction + dual-edge navigation + parent-tab reset patch applied
+Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 runtime patches in build workspace: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+Applied S19 M2 production runtime fix; event-driven foreground contract preserved.
+Applied S20 PACK composite identity fix.
+Applied S21 labor shift fix.
+Applied S22 PDA local-first + provider/network/sync observability fixes.
+Applied S23 SUPERADMIN PDA Import entry.
+Applied S24 FCM logout revoke.
+Applied S25 cache-first fallback sync + shared PDA history/session UX + full sync diagnostics
+Applied S27 projection ACK gap fix
+Applied S29 owner local-first warm cache + seven-session readable History
+Applied S30 canonical admin audit across Service replication and Android durable outbox
+Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor
+Applied S31 strict Service-first non-blocking PDA hot path + background-only authority fallback + RTT split
+Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
+Applied S31D compile-safe multiline runtime bridge; Service-primary cannot fall through to GAS
+Applied S32 durable local History + independent immediate outbox flush
+Applied S33 owner UI/history/staff/resources/sync/PDA-exchange/lifecycle/timezone patch
+Applied S33B compile-safe foreground gate, provider helper and history permission guard
+Applied S34 owner six requests: business cards/nav, rich sync, history filters/status/search/date, logout/login, full local history
+Applied S34B compile hotfix: business QR card uses employeeScan
+Applied S34C: Site 1291 manpower/tenure report from canonical entry-day snapshot
+Applied S34D compile fixes: history palette + Site 1291 report grid
+Applied S35: role-gated business menu, pinned staff search, canonical History catch-up and text overflow fixes
+Applied S36: low-allocation selected-date History/Report + Service online telemetry
+Applied S36B compile hotfix: report renderer, history status chip and detail route
+Applied S37: moved Service telemetry from History to Sync only
+Applied S38 attendance UI: scan field, 3-button assignment, PDA autocomplete/status, duplicate-user reissue, safe exit
+S39 wrapper PASS: History-scoped paging regression check is 100 rows/page
+S40 wrapper PASS: cold-cache local-first, S27 ACK-gap, unresolved flush and exact event metrics
+Applied S43: SQLite-first + immediate background Service flush + WorkManager retry, foreground recovery wake, no polling
+Applied S44 Android: single-flight session/outbox, safe rich diagnostics, dedicated login lane
+Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+
+> Task :app:preBuild
+> Task :app:preBetaReleaseBuild
+> Task :app:mergeBetaReleaseJniLibFolders
+> Task :app:mergeBetaReleaseNativeLibs
+> Task :app:mergeBetaReleaseArtProfile
+> Task :app:desugarBetaReleaseFileDependencies FROM-CACHE
+> Task :app:generateBetaReleaseBuildConfig
+> Task :app:generateBetaReleaseResources
+> Task :app:packageBetaReleaseResources
+> Task :app:stripBetaReleaseDebugSymbols
+> Task :app:processBetaReleaseNavigationResources
+> Task :app:extractBetaReleaseNativeSymbolTables
+> Task :app:mergeBetaReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:javaPreCompileBetaRelease FROM-CACHE
+> Task :app:parseBetaReleaseLocalResources
+> Task :app:mapBetaReleaseSourceSetPaths
+> Task :app:checkBetaReleaseAarMetadata
+> Task :app:compileBetaReleaseNavigationResources FROM-CACHE
+> Task :app:generateBetaReleaseRFile
+> Task :app:createBetaReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksBetaRelease FROM-CACHE
+> Task :app:mergeBetaReleaseResources
+> Task :app:processBetaReleaseMainManifest
+> Task :app:processBetaReleaseManifest
+> Task :app:mergeBetaReleaseStartupProfile
+> Task :app:generateBetaReleaseAssets UP-TO-DATE
+> Task :app:checkBetaReleaseDuplicateClasses
+> Task :app:mergeBetaReleaseAssets
+> Task :app:compileBetaReleaseKotlin
+> Task :app:processBetaReleaseManifestForPackage
+> Task :app:mergeExtDexBetaRelease
+
+> Task :app:compileBetaReleaseKotlin FAILED
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:145:41 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:175:40 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:176:40 Unresolved reference 'SYNC_ACTIONS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:185:44 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:186:44 Unresolved reference 'SYNC_ACTIONS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:198:56 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:200:104 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:200:148 Unresolved reference 'SYNC_ACTIONS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt:205:63 Unresolved reference 'ADMIN_AUDIT_ACTIONS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceSessionManager.kt:40:80 Unresolved reference 'M2DeviceIdentity'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceSessionManager.kt:40:106 Unresolved reference 'put'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:24:50 Unresolved reference 'PREFS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:44:64 Unresolved reference 'KEY_SERVICE_TOKEN'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:52:24 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:68:23 Unresolved reference 'ADMIN_AUDIT_ACTIONS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:107:24 Unresolved reference 'SYNC_ACTIONS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:115:37 Unresolved reference 'KEY_SERVICE_TOKEN'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:126:56 Unresolved reference 'KEY_SERVICE_TOKEN'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:155:32 Unresolved reference 'FALLBACK_PROBE_FAILURES'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:159:35 Unresolved reference 'KEY_SERVICE_TOKEN'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:166:99 Unresolved reference 'FALLBACK_PROBE_FAILURES'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:175:66 Unresolved reference 'KEY_DISCOVERY_JSON'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:180:49 Unresolved reference 'AUTH_PREFS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:180:93 Unresolved reference 'AUTH_TOKEN'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:185:28 Unresolved reference 'OPERATIONAL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:202:42 Unresolved reference 'KEY_DISCOVERY_AT'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:202:94 Unresolved reference 'KEY_DISCOVERY_JSON'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:203:52 Unresolved reference 'DISCOVERY_TTL_MS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:212:36 Unresolved reference 'KEY_DISCOVERY_JSON'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:212:78 Unresolved reference 'KEY_DISCOVERY_AT'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:217:52 Unresolved reference 'KEY_FAILURES'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:218:85 Unresolved reference 'KEY_CIRCUIT_UNTIL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:219:98 Unresolved reference 'KEY_FAILURES'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:219:139 Unresolved reference 'FALLBACK_PROBE_FAILURES'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:219:174 Unresolved reference 'KEY_CIRCUIT_UNTIL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:219:222 Unresolved reference 'CIRCUIT_MS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:220:54 Unresolved reference 'KEY_FAILURES'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:220:79 Unresolved reference 'KEY_CIRCUIT_UNTIL'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:221:90 Unresolved reference 'KEY_LAST_FALLBACK_PROBE_AT'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:221:125 Unresolved reference 'FALLBACK_PROBE_MIN_MS'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:222:60 Unresolved reference 'KEY_LAST_FALLBACK_PROBE_AT'.
+e: file:///home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt:247:668 Syntax error: Missing '}.
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787242955497.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileBetaReleaseKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 21s
+28 actionable tasks: 24 executed, 4 from cache
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
