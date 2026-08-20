@@ -1,0 +1,5 @@
+triggered_at=2026-08-20T19:45:00+07:00
+scope=S38_ATTENDANCE_SERVICE
+owner_request=attendance_enter_exit_beta34
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
