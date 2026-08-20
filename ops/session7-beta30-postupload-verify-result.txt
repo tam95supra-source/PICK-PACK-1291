@@ -1,0 +1,9 @@
+checked_at=2026-08-20T03:50:39Z
+head_sha=95e7be94c270ba45cf3d92aa2be536fe5bd5cfb4
+ota_discovery=PASS
+public_download=PASS
+self_update=PASS
+stable_ota_isolation=PASS
+merge_pr38=UNTOUCHED_DRAFT_OPEN
+replication_gate=HEALTHY_0
+verdict=PASS
