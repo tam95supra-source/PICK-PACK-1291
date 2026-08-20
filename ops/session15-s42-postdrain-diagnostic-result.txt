@@ -1,0 +1,11 @@
+checked_at=2026-08-20T14:40:00Z
+head_sha=56ed0e755730c2d98eeaacf136c75abddf94241e
+service=OK
+authority=SERVICE_PRIMARY_8_18505
+replication=HEALTHY_0
+mobile_unauth_http=401
+session_empty_http=400
+latest_auth_issued_at=2026-08-20T11:08:39.968Z
+latest_auth_device=m2-97682220e609ffec5fc2ffc90de546a81fad01094768644e305058cb6ed32fe4
+recent_event_rows=0
+verdict=PASS
