@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:04:00Z
+purpose=Beta36 S40 local-first plus S27 ACK-gap preservation
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
