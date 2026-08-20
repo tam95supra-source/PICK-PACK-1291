@@ -1,5 +1,15 @@
-checked_at=2026-08-20T09:40:47Z
-head_sha=22363a49cbddd24f5ca368c25e4b96fa791f3981
-failed_phase=CONFIG
-failed_rc=1
---- diagnostic tail ---
+checked_at=2026-08-20T09:42:10Z
+head_sha=0e82ff4e7b1ad0fe67a2419023ea91bf51909f8c
+config=PASS
+build=PASS
+s35_owner_contract=PASS
+history_local_canonical_contract=PASS
+role_gate_contract=PASS
+text_overflow_contract=PASS
+sign=PASS
+apk_size=12863995
+apk_sha256=5b4f90b2de15cc88f8ba8b0b055f09b07fdafe4c3cf6093683c910d82113cae2
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9401429602
+artifact_name=beta31-release-candidate
+verdict=PASS
