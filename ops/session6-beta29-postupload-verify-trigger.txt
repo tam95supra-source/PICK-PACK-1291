@@ -1,0 +1,7 @@
+requested_at=2026-08-20T09:21:00+07:00
+release=0.4.2-beta.29
+apk_drive_id=11aphutCcvs2_bxK-fraEMBT5wnWgH5XJ
+checksum_drive_id=13dkc874-Z5mkX7qhbLlLH5KiWgJ74AqT
+replication_gate=WAIVED_BY_OWNER
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
