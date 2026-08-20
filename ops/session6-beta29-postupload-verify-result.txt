@@ -1,0 +1,10 @@
+checked_at=2026-08-20T02:22:24Z
+head_sha=0a049398f651da8111a478b2dcbadb150c4b6a64
+owner_replication_waiver=YES
+ota_discovery=PASS
+public_download=PASS
+self_update=PASS
+stable_ota_isolation=PASS
+merge_pr38=UNTOUCHED_DRAFT_OPEN
+replication_gate=WAIVED_BY_OWNER_2026-08-20
+verdict=PASS
