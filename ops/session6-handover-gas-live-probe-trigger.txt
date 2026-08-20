@@ -1,0 +1,4 @@
+requested_at=2026-08-20T09:36:00+07:00
+purpose=handover-gas-ota-live-snapshot
+mode=READ_ONLY
+stable=DO_NOT_TOUCH
