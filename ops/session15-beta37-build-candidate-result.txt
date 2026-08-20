@@ -1,5 +1,5 @@
-checked_at=2026-08-20T14:46:02Z
-head_sha=9405076ddd784487a20413ae3a351f2360684f0a
+checked_at=2026-08-20T14:46:38Z
+head_sha=6cf763b584e2103324cf1a72ac867982336b0e60
 config=PASS
 failed_phase=BUILD
 failed_rc=1
@@ -46,7 +46,7 @@ Applied S37: moved Service telemetry from History to Sync only
 Applied S38 attendance UI: scan field, 3-button assignment, PDA autocomplete/status, duplicate-user reissue, safe exit
 S39 wrapper PASS: History-scoped paging regression check is 100 rows/page
 S40 wrapper PASS: cold-cache local-first, S27 ACK-gap, unresolved flush and exact event metrics
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787237165364.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787237201973.json
 
 FAILURE: Build failed with an exception.
 
@@ -60,7 +60,7 @@ Execution failed for task ':app:generateS10Operations'.
 > Run with --scan to get full insights from a Build Scan (powered by Develocity).
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 13s
+BUILD FAILED in 18s
 1 actionable task: 1 executed
 stable=UNTOUCHED
 merge_pr38=UNTOUCHED
