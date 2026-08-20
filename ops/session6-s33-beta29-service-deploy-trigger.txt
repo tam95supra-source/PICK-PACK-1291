@@ -1,0 +1,6 @@
+requested_at=2026-08-20T08:50:00+07:00
+release=0.4.2-beta.29
+service_transform=S33_PLUS_S33B
+replication_recovery=DETAILED_LEDGER_REQUIRED
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
