@@ -3,7 +3,6 @@ import datetime as dt
 import json
 import os
 import pathlib
-import re
 import secrets
 import sys
 
@@ -21,10 +20,15 @@ def add_pp_diag(doc, token):
       const sig=secret?Utilities.computeHmacSha256Signature('bridge-selftest-v1',secret,Utilities.Charset.UTF_8).map(function(b){{return ('0'+((b+256)%256).toString(16)).slice(-2);}}).join(''):'';
       const sh=ppSheet_(PP.STAFF), vals=sh.getDataRange().getDisplayValues(); let row=0;
       for(let i=1;i<vals.length;i++) if(String(vals[i][0]||'').trim()==='909090') {{row=i+1;break;}}
-      if(!row) return ppJson_({{ok:false,tokens:['PROBE_EMPLOYEE_MISSING'],secret_len:secret.length,selftest:sig}});
-      const payload={{action:'staff-source-ping',event_id:'diag-'+Utilities.getUuid(),source_id:PP_BH_STAFF_BRIDGE.SOURCE_ID,source_tab:PP_BH_STAFF_BRIDGE.SOURCE_TAB,change_type:'DIAGNOSTIC_NOOP',row_start:row,row_end:row,col_start:1,col_end:6,old_codes:{{}},at:new Date().toISOString()}};
-      try {{ const r=ppBaoHangBridgePost_(payload); return ppJson_({{ok:true,bridge_ok:r&&r.ok===true,changed:Number(r&&r.changed||0),secret_len:secret.length,selftest:sig}}); }}
-      catch(err) {{ const msg=String(err&&err.message||err); const tokens=(msg.match(/[A-Z][A-Z0-9_]{{3,}}/g)||[]).slice(0,12); return ppJson_({{ok:false,tokens:tokens,secret_len:secret.length,selftest:sig}}); }}
+      if(!row) return ppJson_({{ok:false,diag_error:'PROBE_EMPLOYEE_MISSING',secret_len:secret.length,selftest:sig}});
+      const payload={{action:'staff-source-ping',event_id:'diag-'+Utilities.getUuid(),source_id:PP_BH_STAFF_BRIDGE.SOURCE_ID,source_tab:PP_BH_STAFF_BRIDGE.SOURCE_TAB,change_type:'DIAGNOSTIC_NOOP',row_start:row,row_end:row,col_start:1,col_end:6,old_codes:{{}},at:new Date().toISOString(),sent_at:new Date().toISOString()}};
+      payload.hmac_sha256=ppBaoHangBridgeHmacHex_(payload,secret);
+      try {{
+        const res=UrlFetchApp.fetch(PP_BH_STAFF_BRIDGE.TARGET_URL,{{method:'post',contentType:'application/json',payload:JSON.stringify(payload),followRedirects:true,muteHttpExceptions:true}});
+        const http=res.getResponseCode(); const text=String(res.getContentText()||''); let parsed={{}}; try{{parsed=JSON.parse(text||'{{}}');}}catch(_){{}}
+        const err=String(parsed.error||'').slice(0,180).replace(/[^A-Za-z0-9_:. -]/g,'');
+        return ppJson_({{ok:true,http:http,bridge_ok:parsed&&parsed.ok===true,changed:Number(parsed&&parsed.changed||0),bridge_error:err,response_json:!!parsed&&Object.keys(parsed).length>0,secret_len:secret.length,selftest:sig}});
+      }} catch(err) {{ return ppJson_({{ok:false,diag_error:String(err&&err.message||err).slice(0,180).replace(/[^A-Za-z0-9_:. -]/g,''),secret_len:secret.length,selftest:sig}}); }}
     }}
 '''
     main['source']=main['source'].replace(anchor,anchor+route,1); return out
@@ -69,9 +73,11 @@ def run():
       'pp_secret_present':int(pp_res.get('secret_len') or 0)>=64,
       'bh_secret_present':int(bh_res.get('secret_len') or 0)>=64,
       'secret_match':secret_match,
-      'receiver_noop_ok':pp_res.get('ok') is True and pp_res.get('bridge_ok') is True,
+      'receiver_http':int(pp_res.get('http') or 0),
+      'receiver_noop_ok':pp_res.get('bridge_ok') is True,
       'receiver_changed':int(pp_res.get('changed') or 0),
-      'error_tokens':[str(x)[:80] for x in (pp_res.get('tokens') or [])],
+      'receiver_error':str(pp_res.get('bridge_error') or pp_res.get('diag_error') or '')[:180],
+      'response_json':pp_res.get('response_json') is True,
       'temporary_deployments_cleanup':'PASS',
       'verified_at':dt.datetime.now(dt.timezone.utc).isoformat(),
     }
