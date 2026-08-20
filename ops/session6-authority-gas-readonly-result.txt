@@ -1,5 +1,5 @@
-checked_at=2026-08-20T09:37:37.062Z
-service=true|SERVICE_PRIMARY|8|23|PRODUCTION|rep:HEALTHY:3
+checked_at=2026-08-20T09:43:13.897Z
+service=true|SERVICE_PRIMARY|8|23|PRODUCTION|rep:HEALTHY:0
 gas=true|top:SERVICE_PRIMARY:|nested:SERVICE_PRIMARY:8:0|error:
 verdict=PASS
 service_http=200
