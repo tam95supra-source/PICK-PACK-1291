@@ -1,0 +1,10 @@
+checked_at=2026-08-20T11:17:01Z
+head_sha=41c313399ce460b18a5ca94a742f5efc1e63623c
+beta_http=302
+beta_json_parse=false
+self_http=302
+self_ok=undefined
+self_available=undefined
+self_version=
+self_error=
+verdict=DIAGNOSTIC_COMPLETE
