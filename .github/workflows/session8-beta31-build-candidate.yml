@@ -56,7 +56,8 @@ jobs:
           FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json); FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json); FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json); FIREBASE_API_KEY=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
           grep -q 'versionCode = 37' app/build.gradle.kts; grep -q 'versionName = "0.4.2-beta.31"' app/build.gradle.kts
           grep -q 'apply_s35_owner_ui_history_consistency.py' app/build.gradle.kts
-          grep -q 'apply_s35_owner_ui_history_consistency.py' tools/apply_s31b_preserve_admin_audit.py
+          grep -q 'apply_s35_owner_ui_history_consistency_wrapper.py' app/build.gradle.kts
+          grep -q 'apply_s35_owner_ui_history_consistency_wrapper.py' tools/apply_s31b_preserve_admin_audit.py
           test -s app/src/main/res/drawable/ic_pp_pda_exchange.xml; test -s app/src/main/res/drawable/ic_pp_drop_receive.xml; test -s app/src/main/res/drawable/ic_pp_ccdc.xml
           echo config=PASS >> "$OUT"
           PHASE=BUILD
