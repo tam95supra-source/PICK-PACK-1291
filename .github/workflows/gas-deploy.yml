@@ -28,23 +28,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Run isolated service upsert bridge proof
+      - name: Finalize signed staff bridge and cleanup test residue
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/fix_staff_bridge_flush_live.py
-          python3 ops/fix_staff_bridge_flush_live.py
-      - name: Commit sanitized runtime proof
+          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/finalize_staff_bridge_runtime.py
+          python3 ops/finalize_staff_bridge_runtime.py
+      - name: Commit sanitized final proof
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          test -f ops/staff-bridge-hmac-live-proof.json || printf '%s\n' '{"status":"FAIL","stage":"POST_AUTH_SERVICE_PROBE_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-hmac-live-proof.json
-          cat ops/staff-bridge-hmac-live-proof.json
+          test -f ops/staff-bridge-final-proof.json || printf '%s\n' '{"status":"FAIL","stage":"FINALIZE_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-final-proof.json
+          cat ops/staff-bridge-final-proof.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/staff-bridge-hmac-live-proof.json
-          git diff --cached --quiet || git commit -m 'chore(staff): record post-authorize service bridge proof'
+          git add ops/staff-bridge-final-proof.json
+          git diff --cached --quiet || git commit -m 'chore(staff): record final signed bridge proof'
           git pull --rebase origin main
           git push origin HEAD:main
-          jq -e '.status=="PASS" and .service_upsert_runtime=="PASS" and .restore_runtime=="PASS" and .source_restored==true and .temporary_deployments_cleanup=="PASS"' ops/staff-bridge-hmac-live-proof.json >/dev/null
+          jq -e '.status=="PASS" and .service_restore_bridge=="PASS" and .pending_queue_cleared==true and .retry_trigger_cleared==true and .authorizer_helper_removed==true and .temporary_deployment_cleanup=="PASS"' ops/staff-bridge-final-proof.json >/dev/null
