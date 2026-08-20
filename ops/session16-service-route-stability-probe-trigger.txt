@@ -1,0 +1,4 @@
+trigger=2026-08-20T15:56:00Z
+purpose=20-round no-write probe of health/mobile/session/legacy-batch routes
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
