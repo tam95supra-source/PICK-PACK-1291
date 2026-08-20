@@ -17,7 +17,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
@@ -28,30 +28,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Repair live Apps Script manifest scope
+      - name: Install owner authorization helper into live PICK PACK project
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/fix_staff_bridge_live_manifest.py
-          python3 ops/fix_staff_bridge_live_manifest.py
-      - name: Verify transport after scope repair
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m py_compile ops/diagnose_staff_bridge_transport.py
-          python3 ops/diagnose_staff_bridge_transport.py
-      - name: Commit sanitized proofs
+          python3 -m py_compile ops/install_staff_bridge_hmac.py ops/install_staff_bridge_authorizer.py
+          python3 ops/install_staff_bridge_authorizer.py
+      - name: Commit sanitized proof
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          test -f ops/staff-bridge-manifest-proof.json || printf '%s\n' '{"status":"FAIL","stage":"MANIFEST_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-manifest-proof.json
-          test -f ops/staff-bridge-transport-proof.json || printf '%s\n' '{"status":"FAIL","stage":"TRANSPORT_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-transport-proof.json
-          cat ops/staff-bridge-manifest-proof.json
-          cat ops/staff-bridge-transport-proof.json
+          test -f ops/staff-bridge-authorizer-proof.json || printf '%s\n' '{"status":"FAIL","stage":"AUTHORIZER_RUNNER","verified_at":"unknown"}' > ops/staff-bridge-authorizer-proof.json
+          cat ops/staff-bridge-authorizer-proof.json
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ops/staff-bridge-manifest-proof.json ops/staff-bridge-transport-proof.json
-          git diff --cached --quiet || git commit -m 'chore(staff): record manifest and transport proof'
+          git add ops/staff-bridge-authorizer-proof.json
+          git diff --cached --quiet || git commit -m 'chore(staff): record transport authorizer proof'
           git pull --rebase origin main
           git push origin HEAD:main
