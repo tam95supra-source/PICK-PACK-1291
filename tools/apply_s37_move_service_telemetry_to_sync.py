@@ -26,7 +26,7 @@ if not removed_call: raise SystemExit('S37 history telemetry call anchor missing
 
 sync_anchor='    private fun syncScreen(){\n'
 if sync_anchor not in s: raise SystemExit('S37 syncScreen anchor missing')
-s=s.replace(sync_anchor,'    // S37_SERVICE_TELEMETRY_SYNC_ONLY: Service diagnostics belong to Đồng bộ, never Lịch sử.\n'+sync_anchor,1)
+s=s.replace(sync_anchor,sync_anchor+'        // S37_SERVICE_TELEMETRY_SYNC_ONLY: Service diagnostics belong to Đồng bộ, never Lịch sử.\n',1)
 
 authority_anchor='                    box.addView(section("Authority canonical"));box.addView(details(listOf('
 if authority_anchor not in s: raise SystemExit('S37 sync authority anchor missing')
