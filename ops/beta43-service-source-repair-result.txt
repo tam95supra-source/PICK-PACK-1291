@@ -1,0 +1,8 @@
+checked_at=2026-08-21T11:16:35Z
+source_sha=fec3755879ee6e7a6da9d970711e81a0d6c897a8
+run_id=32476419843
+patch=service/src/session_hotfix.ts
+typecheck=failure
+production_deploy=NOT_RUN
+stable=UNTOUCHED
+verdict=FAIL
