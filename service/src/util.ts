@@ -7,8 +7,23 @@ export function json(data: unknown, status = 200, extra: HeadersInit = {}): Resp
   });
 }
 
-export function apiError(code: string, errorClass: ErrorClass, status: number, retryable = false, message?: string, conflict?: Record<string, unknown> | null): Response {
+export function apiError(
+  code: string,
+  errorClass: ErrorClass,
+  status: number,
+  retryable = false,
+  messageOrConflict?: string | Record<string, unknown>,
+  conflictOrMessage?: Record<string, unknown> | string | null,
+): Response {
   const body: ApiErrorBody = { ok: false, error: { code, error_class: errorClass, retryable } };
+  let message: string | undefined;
+  let conflict: Record<string, unknown> | null | undefined;
+  if (typeof messageOrConflict === "string") message = messageOrConflict;
+  else if (messageOrConflict && typeof messageOrConflict === "object") conflict = messageOrConflict;
+  if (typeof conflictOrMessage === "string") {
+    if (!message) message = conflictOrMessage;
+  } else if (conflictOrMessage && typeof conflictOrMessage === "object") conflict = conflictOrMessage;
+  else if (conflictOrMessage === null) conflict = null;
   if (message) body.error.message = message;
   if (conflict !== undefined) body.error.conflict = conflict;
   return json(body, status);
