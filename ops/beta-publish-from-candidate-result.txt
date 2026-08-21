@@ -1,0 +1,7 @@
+checked_at=2026-08-21T14:20:10Z
+release_sha=5c6e4b806faf5c1307279e02d0f5b95cc25c48f4
+failed_phase=LOCK
+failed_rc=1
+stable_publish=UNTOUCHED_OR_GATE_STOPPED
+pr38_merge=UNTOUCHED
+verdict=FAIL
