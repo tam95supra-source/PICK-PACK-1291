@@ -1,0 +1,80 @@
+name: Beta43 Service Source Repair
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/beta43-service-source-repair-trigger.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta43-service-source-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Repair malformed Google Sheets response generic
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('service/src/session_hotfix.ts')
+          s=p.read_text()
+          old='r.json<{sheets?:Array<{properties?:{sheetId?:number;title?:string}}}>()'
+          new='r.json<{sheets?:Array<{properties?:{sheetId?:number;title?:string}}>}>()'
+          if old not in s:
+              raise SystemExit('source generic repair anchor missing')
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          assert new in p.read_text()
+          print('Repaired Array<> and outer response generic boundary')
+          PY
+      - name: Typecheck repaired Service
+        id: check
+        continue-on-error: true
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Persist repaired source and receipt
+        if: always()
+        shell: bash
+        env:
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p ops
+          verdict=FAIL
+          [[ "$CHECK_OUTCOME" == success ]] && verdict=PASS
+          {
+            echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "source_sha=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "patch=service/src/session_hotfix.ts"
+            echo "typecheck=$CHECK_OUTCOME"
+            echo "production_deploy=NOT_RUN"
+            echo "stable=UNTOUCHED"
+            echo "verdict=$verdict"
+          } > ops/beta43-service-source-repair-result.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -- service/src/session_hotfix.ts ops/beta43-service-source-repair-result.txt
+          git commit -m 'fix(service): repair Beta43 session hotfix TypeScript generic'
+          git push origin HEAD:agent/service-migration-m2
+          [[ "$verdict" == PASS ]]
