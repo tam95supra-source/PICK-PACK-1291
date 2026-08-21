@@ -6,6 +6,10 @@ on:
     branches: [agent/service-migration-m2]
     paths:
       - 'ops/gas-deploy-trigger.txt'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ops/gas-deploy-trigger.txt'
 
 concurrency:
   group: gas-live-deploy
@@ -81,6 +85,69 @@ jobs:
           node --check /tmp/PICK_PACK_API_S17.js
           echo 'S12 + S13 + S15 + S17 GAS transform + syntax: PASS'
 
+      - name: Apply S46 durable authentication challenge hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('google-apps-script/PICK_PACK_API.gs')
+          s=p.read_text()
+          marker='S46_DURABLE_AUTH_CHALLENGE'
+          if marker not in s:
+              old="""function ppLoginChallenge_(body) {
+            const login=String(body.login_id||'').trim(), account=ppAccount_(login), cred=account?ppCredentialParts_(account.verifier):null, usable=cred && (cred.algorithm!=='reset_sha256'||cred.expires_at>Date.now()), fakeSalt=ppB64u_(ppRandom_(16));
+            const id=Utilities.getUuid(), challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:login,purpose:'LOGIN',challenge:challenge}),120);
+            return {ok:true,challenge_id:id,challenge:challenge,algorithm:usable?cred.algorithm:'pbkdf2_sha256',iterations:usable?cred.iterations:120000,salt:usable?cred.salt:fakeSalt};
+          }
+          """
+              new="""function ppLoginChallenge_(body) {
+            const login=String(body.login_id||'').trim(), account=ppAccount_(login), cred=account?ppCredentialParts_(account.verifier):null, usable=cred && (cred.algorithm!=='reset_sha256'||cred.expires_at>Date.now()), fakeSalt=ppB64u_(ppRandom_(16));
+            const id=Utilities.getUuid(), challenge=ppB64u_(ppRandom_(32)); ppPutChallenge_(id,'LOGIN',login,challenge);
+            return {ok:true,challenge_id:id,challenge:challenge,algorithm:usable?cred.algorithm:'pbkdf2_sha256',iterations:usable?cred.iterations:120000,salt:usable?cred.salt:fakeSalt};
+          }
+          """
+              if s.count(old)!=1: raise SystemExit('S46 login challenge anchor mismatch: '+str(s.count(old)))
+              s=s.replace(old,new,1)
+              old="""function ppPasswordChallenge_(auth) {
+            const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:auth.login_id,purpose:'PASSWORD',challenge:challenge}),120); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
+          }
+          """
+              new="""function ppPasswordChallenge_(auth) {
+            const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); ppPutChallenge_(id,'PASSWORD',auth.login_id,challenge); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
+          }
+          """
+              if s.count(old)!=1: raise SystemExit('S46 password challenge anchor mismatch: '+str(s.count(old)))
+              s=s.replace(old,new,1)
+              old="function ppTakeChallenge_(id,purpose,login) {if(!id)return null;const cache=CacheService.getScriptCache(),key='PP_CHAL_'+id,raw=cache.get(key);cache.remove(key);if(!raw)return null;try{const c=JSON.parse(raw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}}"
+              new="""// S46_DURABLE_AUTH_CHALLENGE: authentication correctness must not depend on best-effort CacheService.
+          function ppChallengeKey_(purpose,login){return 'PP_CHAL_V2_'+String(purpose||'')+'_'+ppSha256Hex_(String(login||'')).slice(0,48);}
+          function ppPutChallenge_(id,purpose,login,challenge){
+            const key=ppChallengeKey_(purpose,login),value={id:String(id||''),purpose:String(purpose||''),login_id:String(login||''),challenge:String(challenge||''),expires_at:Date.now()+120000};
+            PropertiesService.getScriptProperties().setProperty(key,JSON.stringify(value));
+          }
+          function ppTakeChallenge_(id,purpose,login) {
+            if(!id)return null;
+            const props=PropertiesService.getScriptProperties(),key=ppChallengeKey_(purpose,login),raw=props.getProperty(key);
+            if(raw){
+              try{
+                const c=JSON.parse(raw),valid=c.id===id&&c.purpose===purpose&&c.login_id===login&&Number(c.expires_at||0)>Date.now();
+                if(c.id===id||Number(c.expires_at||0)<=Date.now())props.deleteProperty(key);
+                if(valid)return c;
+              }catch(_){props.deleteProperty(key);}
+            }
+            const cache=CacheService.getScriptCache(),legacyKey='PP_CHAL_'+id,legacyRaw=cache.get(legacyKey);cache.remove(legacyKey);if(!legacyRaw)return null;
+            try{const c=JSON.parse(legacyRaw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}
+          }"""
+              if s.count(old)!=1: raise SystemExit('S46 take challenge anchor mismatch: '+str(s.count(old)))
+              s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          grep -q 'S46_DURABLE_AUTH_CHALLENGE' google-apps-script/PICK_PACK_API.gs
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S46.js
+          node --check /tmp/PICK_PACK_API_S46.js
+          echo 'S46 durable authentication challenge: PASS'
+
       - name: Exchange OAuth and normalize IDs
         id: auth
         shell: bash
@@ -151,7 +218,7 @@ jobs:
           PY
           URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Verify live recovery, discovery, account reset and OTA isolation
+      - name: Verify live recovery, discovery, auth challenge, account reset and OTA isolation
         shell: bash
         env:
           WEB_URL: ${{ steps.webapp.outputs.url }}
@@ -172,7 +239,8 @@ jobs:
           }
           post_until '{"action":"health"}' /tmp/h.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.sheet_read===true&&j.auth_session_model==="SINGLE_ACTIVE_DEVICE_V1"&&j.report_engine==="S12_CURRENT_DAY"&&j.history_engine==="S13_SHARED_SESSION"&&j.sync_engine==="S15_LOCAL_FIRST_45D"&&Number(j.retention_days)===45&&Number(j.editable_days)===2&&j.recovery_engine==="S17_SQLITE_RECOVERY"?0:1)' 15
           post_until '{"action":"service_discovery"}' /tmp/discovery.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&Number(j.discovery_version)>=2&&j.service_generation&&j.authority&&j.authority.mode?0:1)' 8
+          post_until '{"action":"login_challenge","login_id":"__pp_auth_probe__"}' /tmp/auth.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&typeof j.challenge_id==="string"&&j.challenge_id.length>10&&typeof j.challenge==="string"&&j.challenge.length>10?0:1)' 8
           post_until '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' /tmp/reset.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.delivery==="ACCOUNT_EMAIL"?0:1)' 8
           post_until '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' /tmp/beta.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="BETA"?0:1)' 8
           post_until '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' /tmp/stable.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="STABLE"&&j.available===false?0:1)' 8
-          echo 'Live recovery + discovery + reset route + OTA channel isolation: PASS'
+          echo 'Live recovery + discovery + durable auth challenge + reset route + OTA channel isolation: PASS'
