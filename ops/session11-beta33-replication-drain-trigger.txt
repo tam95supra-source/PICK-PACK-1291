@@ -1,6 +1,9 @@
-requested_at=2026-08-21T21:29:00+07:00
-reason=beta44-release-gate-pending-1
+requested_at=2026-08-21T21:42:00+07:00
+reason=beta44-release-gate-recover-stale-inflight-66
 mode=CANONICAL_REPLICATE_ONLY
+service_fix=STALE_INFLIGHT_RECOVERY_V1
+outbox_id=66
+event_id=cf92a278-130b-4d3e-a056-38d416033da4
 delete_events=FORBIDDEN
 fake_ack=FORBIDDEN
 stable=FORBIDDEN
