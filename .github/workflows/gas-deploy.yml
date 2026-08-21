@@ -1,15 +1,11 @@
 name: Deploy Current GAS
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - 'ops/gas-deploy-trigger.txt'
   pull_request:
     branches: [ main ]
     paths:
       - 'ops/gas-deploy-trigger.txt'
+      - '.github/workflows/gas-deploy.yml'
 
 concurrency:
   group: gas-live-deploy
@@ -30,82 +26,85 @@ jobs:
       GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: 9586780d568115efc5f617b6c04d59f83ed87b9d
 
-      - name: Validate current GAS source
+      - name: Validate production GAS source
         shell: bash
         run: |
           set -euo pipefail
           grep -q "forgot_password" google-apps-script/PICK_PACK_API.gs
-          grep -q "delivery:'ACCOUNT_EMAIL'" google-apps-script/PICK_PACK_API.gs
-          grep -q "a.email||PP.RESET_ADMIN_EMAIL" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
-          grep -q "ppBaoHangBridgeNotifyServiceStaffMutation_" google-apps-script/PICK_PACK_API.gs
-          grep -q "SpreadsheetApp.flush();const bridge=ppBaoHangBridgeNotifyServiceStaffMutation_" google-apps-script/PICK_PACK_API.gs
-          grep -q "HMAC_PROP: 'STAFF_BRIDGE_HMAC_SECRET'" google-apps-script/BAO_HANG_STAFF_BRIDGE.gs
-          grep -q "script.external_request" google-apps-script/appsscript.json
-          grep -q "script.send_mail" google-apps-script/appsscript.json
+          grep -q "function ppM2Discovery_" google-apps-script/SERVICE_MIGRATION_M2.gs
           grep -q "function ppAuthorizeMail_" google-apps-script/AUTH_HELPERS.gs
-          grep -q "include_options===true" google-apps-script/PICK_PACK_API.gs
-          grep -q "'Phúc Long','Kéo hàng'" google-apps-script/PICK_PACK_API.gs
-          ! grep -q "if(!userPick) throw new Error('USER_PICK_REQUIRED')" google-apps-script/PICK_PACK_API.gs
-          python3 -m py_compile tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s13_shared_history_gas_patch.py tools/apply_s15_local_first_gas_patch.py tools/apply_s17_sqlite_recovery_gas_patch.py
+          grep -q "script.send_mail" google-apps-script/appsscript.json
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
-          cp google-apps-script/BAO_HANG_STAFF_BRIDGE.gs /tmp/BAO_HANG_STAFF_BRIDGE.js
+          cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
           node --check /tmp/PICK_PACK_API.js
-          node --check /tmp/BAO_HANG_STAFF_BRIDGE.js
-          echo 'Current GAS source gates: PASS'
+          node --check /tmp/SERVICE_MIGRATION_M2.js
+          echo 'Production GAS source gates: PASS'
 
-      - name: Apply S12 report, S13 history, S15 local-first and S17 recovery transforms
+      - name: Apply S46 durable authentication challenge hotfix
         shell: bash
         run: |
           set -euo pipefail
-          if grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S12 report transform already present; skip.'
-          else
-            python3 tools/apply_s12_gas_patch.py
-          fi
-          if grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S12 health marker already present; skip.'
-          else
-            python3 tools/apply_s12_gas_health_patch.py
-          fi
-          if grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S13 shared history transform already present; skip.'
-          else
-            python3 tools/apply_s13_shared_history_gas_patch.py
-          fi
-          if grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S15 local-first transform already present; skip.'
-          else
-            python3 tools/apply_s15_local_first_gas_patch.py
-          fi
-          if grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs; then
-            echo 'S17 SQLite recovery transform already present; skip.'
-          else
-            python3 tools/apply_s17_sqlite_recovery_gas_patch.py
-          fi
-          grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs
-          grep -q "function ppRowsForDateS12_" google-apps-script/PICK_PACK_API.gs
-          grep -q "'Picker','Packer','Phúc Long'" google-apps-script/PICK_PACK_API.gs
-          grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs
-          grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'history_shared'" google-apps-script/PICK_PACK_API.gs
-          grep -q "LỊCH SỬ NGHIỆP VỤ" google-apps-script/PICK_PACK_API.gs
-          grep -q "Shared operational history only" google-apps-script/PICK_PACK_API.gs
-          grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'sync_day'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'sync_bootstrap'" google-apps-script/PICK_PACK_API.gs
-          grep -q "sync_engine:'S15_LOCAL_FIRST_45D'" google-apps-script/PICK_PACK_API.gs
-          grep -q "retention_days:45" google-apps-script/PICK_PACK_API.gs
-          grep -q "editable_days:2" google-apps-script/PICK_PACK_API.gs
-          grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs
-          grep -q "recovery_engine:'S17_SQLITE_RECOVERY'" google-apps-script/PICK_PACK_API.gs
-          grep -q "legacy_sqlite_recovery:true" google-apps-script/PICK_PACK_API.gs
-          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S17.js
-          node --check /tmp/PICK_PACK_API_S17.js
-          echo 'S12 + S13 + S15 + S17 GAS transform + syntax: PASS'
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('google-apps-script/PICK_PACK_API.gs')
+          s=p.read_text()
+          marker='S46_DURABLE_AUTH_CHALLENGE'
+          if marker not in s:
+              old="""function ppLoginChallenge_(body) {
+            const login=String(body.login_id||'').trim(), account=ppAccount_(login), cred=account?ppCredentialParts_(account.verifier):null, usable=cred && (cred.algorithm!=='reset_sha256'||cred.expires_at>Date.now()), fakeSalt=ppB64u_(ppRandom_(16));
+            const id=Utilities.getUuid(), challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:login,purpose:'LOGIN',challenge:challenge}),120);
+            return {ok:true,challenge_id:id,challenge:challenge,algorithm:usable?cred.algorithm:'pbkdf2_sha256',iterations:usable?cred.iterations:120000,salt:usable?cred.salt:fakeSalt};
+          }
+          """
+              new="""function ppLoginChallenge_(body) {
+            const login=String(body.login_id||'').trim(), account=ppAccount_(login), cred=account?ppCredentialParts_(account.verifier):null, usable=cred && (cred.algorithm!=='reset_sha256'||cred.expires_at>Date.now()), fakeSalt=ppB64u_(ppRandom_(16));
+            const id=Utilities.getUuid(), challenge=ppB64u_(ppRandom_(32)); ppPutChallenge_(id,'LOGIN',login,challenge);
+            return {ok:true,challenge_id:id,challenge:challenge,algorithm:usable?cred.algorithm:'pbkdf2_sha256',iterations:usable?cred.iterations:120000,salt:usable?cred.salt:fakeSalt};
+          }
+          """
+              if s.count(old)!=1: raise SystemExit('S46 login challenge anchor mismatch: '+str(s.count(old)))
+              s=s.replace(old,new,1)
+              old="""function ppPasswordChallenge_(auth) {
+            const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:auth.login_id,purpose:'PASSWORD',challenge:challenge}),120); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
+          }
+          """
+              new="""function ppPasswordChallenge_(auth) {
+            const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); ppPutChallenge_(id,'PASSWORD',auth.login_id,challenge); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
+          }
+          """
+              if s.count(old)!=1: raise SystemExit('S46 password challenge anchor mismatch: '+str(s.count(old)))
+              s=s.replace(old,new,1)
+              old="function ppTakeChallenge_(id,purpose,login) {if(!id)return null;const cache=CacheService.getScriptCache(),key='PP_CHAL_'+id,raw=cache.get(key);cache.remove(key);if(!raw)return null;try{const c=JSON.parse(raw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}}"
+              new="""// S46_DURABLE_AUTH_CHALLENGE: authentication correctness must not depend on best-effort CacheService.
+          function ppChallengeKey_(purpose,login){return 'PP_CHAL_V2_'+String(purpose||'')+'_'+ppSha256Hex_(String(login||'')).slice(0,48);}
+          function ppPutChallenge_(id,purpose,login,challenge){
+            const key=ppChallengeKey_(purpose,login),value={id:String(id||''),purpose:String(purpose||''),login_id:String(login||''),challenge:String(challenge||''),expires_at:Date.now()+120000};
+            PropertiesService.getScriptProperties().setProperty(key,JSON.stringify(value));
+          }
+          function ppTakeChallenge_(id,purpose,login) {
+            if(!id)return null;
+            const props=PropertiesService.getScriptProperties(),key=ppChallengeKey_(purpose,login),raw=props.getProperty(key);
+            if(raw){
+              try{
+                const c=JSON.parse(raw),valid=c.id===id&&c.purpose===purpose&&c.login_id===login&&Number(c.expires_at||0)>Date.now();
+                if(c.id===id||Number(c.expires_at||0)<=Date.now())props.deleteProperty(key);
+                if(valid)return c;
+              }catch(_){props.deleteProperty(key);}
+            }
+            const cache=CacheService.getScriptCache(),legacyKey='PP_CHAL_'+id,legacyRaw=cache.get(legacyKey);cache.remove(legacyKey);if(!legacyRaw)return null;
+            try{const c=JSON.parse(legacyRaw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}
+          }"""
+              if s.count(old)!=1: raise SystemExit('S46 take challenge anchor mismatch: '+str(s.count(old)))
+              s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          grep -q 'S46_DURABLE_AUTH_CHALLENGE' google-apps-script/PICK_PACK_API.gs
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_S46.js
+          node --check /tmp/PICK_PACK_API_S46.js
+          echo 'S46 durable authentication challenge: PASS'
 
       - name: Exchange OAuth and normalize IDs
         id: auth
@@ -116,12 +115,7 @@ jobs:
           RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW"
           if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
-            -H 'Content-Type: application/x-www-form-urlencoded' \
-            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
-            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
-            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
-            --data-urlencode 'grant_type=refresh_token')
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
           [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
           echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
@@ -129,7 +123,7 @@ jobs:
           echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
-      - name: Update Apps Script source and deployment
+      - name: Update Apps Script source and existing deployment
         id: deploy
         shell: bash
         env:
@@ -142,26 +136,25 @@ jobs:
           import json
           from pathlib import Path
           b=Path('google-apps-script'); files=[]
-          for p in sorted(b.glob('*.gs')):
-              files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
           files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
           Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
           PY
           H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
           [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
-          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 validated live API"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 S46 durable auth challenge"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
           [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
           V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
           python3 - "$SCRIPT_ID" "$V" <<'PY'
           import json,sys
-          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API'}}))
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API S46'}}))
           PY
           H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
           [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "Deployment version $V: PASS"
 
-      - name: Read live WEB_APP URL
+      - name: Resolve live web app URL
         id: webapp
         shell: bash
         env:
@@ -183,24 +176,24 @@ jobs:
           PY
           URL=$(cat /tmp/weburl); echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Verify live S17 recovery health, account reset route and OTA isolation
+      - name: Verify live health challenge reset and OTA isolation
         shell: bash
         env:
           WEB_URL: ${{ steps.webapp.outputs.url }}
         run: |
           set -euo pipefail
-          OK=false
-          for i in $(seq 1 15); do
-            curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"health"}' > /tmp/h.json || true
-            if grep -q '"ok":true' /tmp/h.json && grep -q '"sheet_read":true' /tmp/h.json && grep -q '"auth_session_model":"SINGLE_ACTIVE_DEVICE_V1"' /tmp/h.json && grep -q '"report_engine":"S12_CURRENT_DAY"' /tmp/h.json && grep -q '"history_engine":"S13_SHARED_SESSION"' /tmp/h.json && grep -q '"sync_engine":"S15_LOCAL_FIRST_45D"' /tmp/h.json && grep -q '"retention_days":45' /tmp/h.json && grep -q '"editable_days":2' /tmp/h.json && grep -q '"recovery_engine":"S17_SQLITE_RECOVERY"' /tmp/h.json; then OK=true; break; fi
-            sleep 4
-          done
-          [[ "$OK" == true ]] || { cat /tmp/h.json; exit 1; }
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' > /tmp/reset.json
-          grep -q '"ok":true' /tmp/reset.json
-          grep -q '"delivery":"ACCOUNT_EMAIL"' /tmp/reset.json
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta.json
-          curl -fsSL -H 'content-type: application/json' "$WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/beta.json; grep -q '"channel":"BETA"' /tmp/beta.json
-          grep -q '"source":"GOOGLE_DRIVE"' /tmp/stable.json; grep -q '"channel":"STABLE"' /tmp/stable.json
-          echo 'Live S17 recovery health + reset route + OTA channel isolation: PASS'
+          post_until(){
+            local payload="$1" outfile="$2" predicate="$3" attempts="${4:-10}"
+            for i in $(seq 1 "$attempts"); do
+              curl -sSL --max-time 25 -H 'content-type: application/json' "$WEB_URL" -d "$payload" >"$outfile" || true
+              if node -e "$predicate" "$outfile" 2>/dev/null; then return 0; fi
+              sleep 3
+            done
+            cat "$outfile"; return 1
+          }
+          post_until '{"action":"health"}' /tmp/h.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.sheet_read===true&&j.auth_session_model==="SINGLE_ACTIVE_DEVICE_V1"?0:1)' 15
+          post_until '{"action":"login_challenge","login_id":"__pp_auth_probe__"}' /tmp/auth.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&typeof j.challenge_id==="string"&&j.challenge_id.length>10&&typeof j.challenge==="string"&&j.challenge.length>10?0:1)' 10
+          post_until '{"action":"forgot_password","login_id":"__pp_reset_route_probe__","_device_id":"ci-probe"}' /tmp/reset.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.delivery==="ACCOUNT_EMAIL"?0:1)' 10
+          post_until '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' /tmp/beta.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="BETA"?0:1)' 10
+          post_until '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' /tmp/stable.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GOOGLE_DRIVE"&&j.channel==="STABLE"&&j.available===false?0:1)' 10
+          echo 'PASS - live S46 auth challenge + reset route + OTA isolation.'
