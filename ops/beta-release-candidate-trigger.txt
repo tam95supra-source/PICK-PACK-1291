@@ -1,6 +1,6 @@
-build=2026-08-21T17:59:00+07:00
+build=2026-08-21T18:04:00+07:00
 target=0.4.2-beta.43
 version_code=49
-source=Beta43 plus S49B tolerant normalization and S49C Kotlin syntax fix
+source=Beta43 plus complete S49C Kotlin declaration-boundary fixes
 stable_publish=FORBIDDEN
 merge_pr38=FORBIDDEN
