@@ -1,0 +1,174 @@
+name: Beta42 Exact Release Preflight
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ops/release-preflight-trigger.txt'
+      - '.github/workflows/beta42-exact-preflight.yml'
+
+concurrency:
+  group: beta42-exact-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CANDIDATE_SHA: f17f98dae7d352a8b78474465e9ce667f437fa02
+  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+
+jobs:
+  live-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Verify live authority and OTA isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" > /tmp/service.json
+          jq -e '.ok==true and .environment=="production" and .authority.mode=="SERVICE_PRIMARY"' /tmp/service.json >/dev/null
+          probe() {
+            local payload="$1" out="$2"
+            for i in 1 2 3 4 5; do
+              code=$(curl -sSL -o "$out" -w '%{http_code}' -H 'content-type: application/json' "$GSHEET_API_URL" -d "$payload" || true)
+              if [[ "$code" == 2* ]] && jq -e '.ok==true' "$out" >/dev/null 2>&1; then return 0; fi
+              sleep 2
+            done
+            echo "GAS probe failed: $payload" >&2; cat "$out" >&2 || true; return 1
+          }
+          probe '{"action":"health"}' /tmp/gas.json
+          jq -e '.sheet_read==true and .auth_session_model=="SINGLE_ACTIVE_DEVICE_V1"' /tmp/gas.json >/dev/null
+          probe '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' /tmp/beta.json
+          probe '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' /tmp/stable.json
+          jq -e '.source=="GOOGLE_DRIVE" and .channel=="BETA" and .available==false' /tmp/beta.json >/dev/null
+          jq -e '.source=="GOOGLE_DRIVE" and .channel=="STABLE" and .available==false' /tmp/stable.json >/dev/null
+          echo 'PASS live Service authority + GAS compatibility + Beta/Stable OTA isolation.'
+
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+      - name: Verify Beta42 source contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 48' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.42"' app/build.gradle.kts
+          grep -q 'versionCode = 1' app/build.gradle.kts
+          grep -q 'versionName = "0.1.0-stable"' app/build.gradle.kts
+          grep -q 'apply_s48_beta42_shift_work_summary.py' app/build.gradle.kts
+          grep -q 'apply_s48_beta42_shift_work_summary.py' tools/apply_s44b_compile_hotfix.py
+          grep -q 'S48_BETA42_SHIFT_WORK_SUMMARY' tools/apply_s48_beta42_shift_work_summary.py
+          grep -q 'S47_BETA41_OWNER_FIVE_FIXES' tools/apply_s47_beta41_owner_fixes.py
+          grep -q 'S47B_BETA41_COMPILE_HOTFIX' tools/apply_s47b_compile_hotfix.py
+          python3 -m py_compile tools/apply_s47_beta41_owner_fixes.py tools/apply_s47b_compile_hotfix.py tools/apply_s48_beta42_shift_work_summary.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Resolve Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          else
+            SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+            echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+            mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+            echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          fi
+      - name: Assemble Beta and Stable
+        shell: bash
+        run: gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
+      - name: Verify transformed Beta42 contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          F=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'effectiveRole = role' "$F"
+          grep -q 'roleModeScreen' "$F"
+          grep -q 'enteredWithPda=pda.isNotBlank()&&initialStatus.isNotBlank()' "$F"
+          grep -q 'historyTimeline(items)' "$F"
+          grep -q 'S48_BETA42_SHIFT_WORK_SUMMARY' "$F"
+          grep -q 'DIỄN BIẾN CÔNG VIỆC TRONG CA' "$F"
+          grep -q 'THÊM / SỬA CÔNG VIỆC TRONG CA' "$F"
+          grep -q 'SERI PDA' "$F"
+          grep -q 'TÌNH TRẠNG LÚC NHẬN' "$F"
+          grep -q 'localHistoryAll()' "$F"
+          grep -q 'loadDay(date)' "$F"
+          grep -q 'Mỗi lần đổi vị trí / Pick / Pack' "$F"
+          ! grep -q 'historyTimelineScreen(mnv,items.toMutableList())' "$F"
+          ! grep -q 'badge(label,' "$F"
+      - name: Verify package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          test -s "$BETA"; test -s "$STABLE"
+          "$BT/aapt" dump badging "$BETA" > /tmp/beta.txt
+          "$BT/aapt" dump badging "$STABLE" > /tmp/stable.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta.txt
+          grep -q "versionCode='48'" /tmp/beta.txt
+          grep -q "versionName='0.4.2-beta.42'" /tmp/beta.txt
+          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt
+          grep -q "versionCode='1'" /tmp/stable.txt
+          grep -q "versionName='0.1.0-stable'" /tmp/stable.txt
+      - name: Sign Beta42 and verify fixed signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_KEY_B64"; test -n "$SIGNING_STORE_PASSWORD"; test -n "$SIGNING_KEY_PASSWORD"; test -n "$SIGNING_ALIAS"
+          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
+          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"
+          printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          mkdir -p dist/beta
+          OUT=dist/beta/pick-pack-1291-public-beta-0.4.2-beta.42.apk
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" > /tmp/cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          sha256sum "$OUT" > dist/beta/SHA256SUMS.txt
+          stat -c 'size=%s' "$OUT" > dist/beta/APK-METADATA.txt
+          cat dist/beta/SHA256SUMS.txt >> dist/beta/APK-METADATA.txt
+      - name: Upload signed Beta42 validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-0.4.2-beta.42-signed-validation
+          path: dist/beta/*
+          retention-days: 7
+      - name: Cleanup signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
+
+  preflight-pass:
+    needs: [live-gates, android-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo 'PASS - Beta42 exact-source live gates, build, transformed contracts, package metadata and fixed signer validation complete. No Drive publish performed.'
