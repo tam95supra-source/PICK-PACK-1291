@@ -1,5 +1,5 @@
-requested_at=2026-08-20T18:15:00+07:00
-reason=beta33-release-gate-pending-2
+requested_at=2026-08-21T21:29:00+07:00
+reason=beta44-release-gate-pending-1
 mode=CANONICAL_REPLICATE_ONLY
 delete_events=FORBIDDEN
 fake_ack=FORBIDDEN
