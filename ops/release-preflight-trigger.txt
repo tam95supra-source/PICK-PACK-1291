@@ -1,4 +1,4 @@
-release-preflight=2026-08-21T16:14:00+07:00
+release-preflight=2026-08-21T16:17:00+07:00
 target=0.4.2-beta.42
 candidate_sha=f17f98dae7d352a8b78474465e9ce667f437fa02
-purpose=Beta42 shift work summary + explicit PDA serial/status + OTA release preflight
+purpose=Beta42 exact-source signed preflight after observable workflow activation
