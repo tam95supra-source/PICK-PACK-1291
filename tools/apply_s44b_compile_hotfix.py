@@ -14,3 +14,4 @@ assert 'val OPERATIONAL = setOf(' in o and 'val SYNC_ACTIONS = setOf(' in o and 
 print('Applied S44B compile hotfix: companion constants restored after S44 marker')
 runpy.run_path(str(ROOT/'tools/apply_s45_beta40_owner_fixes.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s47_beta41_owner_fixes.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s47b_compile_hotfix.py'),run_name='__main__')
