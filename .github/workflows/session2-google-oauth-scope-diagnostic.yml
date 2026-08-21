@@ -1,0 +1,48 @@
+name: Session2 Google OAuth Scope Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-google-oauth-scope-diagnostic-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect scopes without exposing token
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=/tmp/session2-google-oauth-scope-diagnostic-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token')
+          [[ -n "$TOKEN" && "$TOKEN" != null ]]
+          curl -fsSL --get https://oauth2.googleapis.com/tokeninfo --data-urlencode "access_token=$TOKEN" >/tmp/tokeninfo.json
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/tokeninfo.json'));s=set(str(j.get('scope','')).split())
+          def yes(x): return 'YES' if x else 'NO'
+          with open('/tmp/session2-google-oauth-scope-diagnostic-result.txt','a') as f:
+              f.write('scope_drive='+yes(any(v.endswith('/auth/drive') or v.endswith('/auth/drive.file') for v in s))+'\n')
+              f.write('scope_spreadsheets='+yes(any(v.endswith('/auth/spreadsheets') for v in s))+'\n')
+              f.write('scope_cloud_platform='+yes('https://www.googleapis.com/auth/cloud-platform' in s)+'\n')
+              f.write('scope_firebase_messaging='+yes('https://www.googleapis.com/auth/firebase.messaging' in s)+'\n')
+          PY
+          HTTP=$(curl -sS -o /tmp/fb-project.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" 'https://firebase.googleapis.com/v1beta1/projects/pick-pack-1291-fcm-20260819')
+          echo "firebase_project_http=$HTTP" >> "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-google-oauth-scope-diagnostic-result.txt||echo diagnostic_failed=true>/tmp/session2-google-oauth-scope-diagnostic-result.txt
+          cp /tmp/session2-google-oauth-scope-diagnostic-result.txt ops/session2-google-oauth-scope-diagnostic-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-google-oauth-scope-diagnostic-result.txt;git diff --cached --quiet&&exit 0;git commit -m 'ops: record Google OAuth scope diagnostic';git push

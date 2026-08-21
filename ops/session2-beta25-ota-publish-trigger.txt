@@ -1,0 +1,6 @@
+requested_at=2026-08-19T20:36:00+07:00
+channel=BETA
+version=0.4.2-beta.25
+artifact_id=9367409356
+apk_sha256=5ba70c6ed1c377c41a72f5f1bfe71b8accad6231a147c044614e66a585690aed
+stable=false

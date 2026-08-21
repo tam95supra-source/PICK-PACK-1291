@@ -1,0 +1,6 @@
+requested_at=2026-08-20T05:20:00+07:00
+version_name=0.4.2-beta.27
+version_code=33
+mode=COMPILE_ONLY
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN

@@ -1,0 +1,9 @@
+checked_at=2026-08-19T14:33:18Z
+mode=READ_ONLY
+secret_gate=PASS
+oauth=PASS
+script_get_http=200
+source_files=PASS
+discovery=GOOGLE_FALLBACK|7|7
+adapter_probe=FAIL|UNAUTHORIZED
+verdict=DIAGNOSTIC_COMPLETE

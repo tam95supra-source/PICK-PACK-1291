@@ -1,0 +1,84 @@
+name: Service M1 Source Sync and Acceptance
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: service-m1-source-sync-acceptance
+  cancel-in-progress: false
+
+jobs:
+  source-and-acceptance:
+    if: github.head_ref == 'agent/service-foundation-m1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-foundation-m1
+          fetch-depth: 0
+
+      - name: Decode and repair embedded M1 source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, re
+          files=[Path(f'.m1-source/chunk-{i:02d}.b64') for i in range(4)]
+          text=''.join(p.read_text(encoding='utf-8-sig') for p in files)
+          compact=re.sub(r'\s+', '', text)
+          compact += '=' * (-len(compact) % 4)
+          data=base64.b64decode(compact, validate=True)
+          digest=hashlib.sha256(data).hexdigest()
+          expected='b4e8927d8869256b54e6f241313d76d30327943abf54eb809617da44f21a4bf3'
+          if digest != expected:
+              raise SystemExit(f'embedded bundle checksum changed: {digest}')
+          Path('/tmp/m1-source.truncated.zip').write_bytes(data)
+          print(f'embedded truncated bundle sha256={digest} bytes={len(data)}')
+          PY
+          printf 'y\n' | zip -FF /tmp/m1-source.truncated.zip --out /tmp/m1-source.repaired.zip
+          unzip -t /tmp/m1-source.repaired.zip
+          unzip -oq /tmp/m1-source.repaired.zip -d .
+          rm -rf service/node_modules service/.wrangler service/m1-artifacts service/worker-configuration.d.ts service/package-lock.json
+          rm -f .github/workflows/service-m1-staging.yml
+          for f in \
+            service/src/bootstrap.ts \
+            service/src/core.ts \
+            service/src/index.ts \
+            service/src/replication.ts \
+            service/scripts/m1-bootstrap.mjs \
+            service/scripts/m1-test.mjs; do
+            test -s "$f" || { echo "Missing required recovered source: $f" >&2; exit 1; }
+          done
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Compile recovered Service before committing
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run check
+          rm -rf node_modules .wrangler m1-artifacts worker-configuration.d.ts package-lock.json
+
+      - name: Commit validated recovered source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ARCHITECTURE_GUARDRAILS.md docs/SERVICE_MIGRATION_M1.md service
+          if git diff --cached --quiet; then
+            echo 'Validated Service source already synchronized.'
+          else
+            git commit -m 'feat: recover validated complete M1 service source'
+            git push origin HEAD:agent/service-foundation-m1
+          fi

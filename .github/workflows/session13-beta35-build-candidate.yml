@@ -1,0 +1,115 @@
+name: Session13 Beta35 Build Candidate
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session13-beta35-build-candidate-trigger.txt]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: session13-beta35-build-candidate
+  cancel-in-progress: false
+env:
+  EXPECTED_VERSION_NAME: 0.4.2-beta.35
+  EXPECTED_VERSION_CODE: '41'
+  EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+  EXPECTED_FIREBASE_PROJECT_ID: pick-pack-1291-fcm-20260819
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '9.4.1' }
+      - name: Resolve exact Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"; exit 0; fi
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build S38 plus S39 contract and sign Beta35
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result;echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT";PHASE=CONFIG
+          trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";tail -n 240 /tmp/gradle.log >>"$OUT" 2>/dev/null || true;exit $rc' ERR
+          for v in ANDROID_SIGNING_KEY_B64 ANDROID_SIGNING_STORE_PASSWORD ANDROID_SIGNING_KEY_PASSWORD;do [[ -n "${!v:-}" ]];done
+          test -s app/google-services.json
+          jq -e --arg p "$EXPECTED_PACKAGE" --arg project "$EXPECTED_FIREBASE_PROJECT_ID" '.project_info.project_id==$project and ([.client[]|select(.client_info.android_client_info.package_name==$p)]|length)==1' app/google-services.json >/dev/null
+          FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json);FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json);FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json);FIREBASE_API_KEY=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
+          grep -q 'versionCode = 41' app/build.gradle.kts;grep -q 'versionName = "0.4.2-beta.35"' app/build.gradle.kts;grep -q 'apply_s39_employee_session_history.py' app/build.gradle.kts;grep -q 'apply_s39_employee_session_history.py' tools/apply_s31b_preserve_admin_audit.py
+          echo config=PASS >>"$OUT";PHASE=BUILD
+          gradle --no-daemon --build-cache :app:assembleBetaRelease -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" -PFIREBASE_API_KEY="$FIREBASE_API_KEY" -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID" >/tmp/gradle.log 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          o=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text()
+          m=Path('app/src/main/java/vn/pickpack1291/app/beta/MasterDataCache.kt').read_text()
+          t=Path('app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt').read_text()
+          assert 'S38_ATTENDANCE_UI' in o
+          assert 'S39_EMPLOYEE_SESSION_HISTORY' in o
+          assert 'resolveEmployeeMnv' in m
+          assert 'employeeLookupGeneration' in o
+          assert 'CHƯA XÁC NHẬN ĐƯỢC PHIÊN' in o
+          assert 'val pageSize=100;var pageStart=0' in o
+          assert 'drop(pageStart).take(pageSize)' in o
+          assert 'pageSize+=60' not in o
+          assert 'tối đa 100 bản ghi mỗi trang' in o
+          assert 'exchangeBackgroundServiceSession' in t
+          assert 'SERVICE_SESSION_REAUTH_REQUIRED' in t
+          assert '/v1/auth/gas-session' in t
+          hs=o.index('    private fun historyScreen(){');he=o.index('    private fun historyTimeline(',hs);hist=o[hs:he]
+          assert 'serviceBox' not in hist and 'realtime_connections' not in hist and 'online_recent_devices' not in hist
+          ss=o.index('    private fun syncScreen(){');se=o.find('\n    private fun ',ss+20);sync=o[ss:se if se>0 else len(o)]
+          for x in ['Service RTT','Authority canonical','Nhân bản Google','Service realtime','Realtime đang nối','Online gần đây ≤']:
+              assert x in sync,x
+          for x in ['PHÁT LẠI USER ĐANG DÙNG','TRÙNG USER','pda_status_at_enter','pda_exit_status','PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST','user_picks_reissue','pack_tables_reissue','Tình trạng PDA lúc vào','Ca HC','Tình trạng:']:
+              assert x in o,x
+          emp=o[o.index('    private fun renderEmployee('):o.index('    private fun renderActive(')]
+          assert 'QUÉT / NHẬP MNV KHÁC' not in emp
+          enter=o[o.index('    private fun renderEnter('):o.index('    private fun laborHome(')]
+          assert 'CHƯA VÀO CA' not in enter
+          active=o[o.index('    private fun renderActive('):o.index('    private fun renderEnded(')]
+          assert 'ĐANG TRONG PHIÊN' not in active
+          PY
+          APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk'|head -1);[[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]]
+          echo build=PASS >>"$OUT";echo s38_attendance_contract=PASS >>"$OUT";echo s39_scan_session_contract=PASS >>"$OUT";echo history_page100_contract=PASS >>"$OUT";echo background_reauth_contract=PASS >>"$OUT"
+          PHASE=SIGN;printf '%s' "$ANDROID_SIGNING_KEY_B64"|base64 -d >/tmp/release.jks
+          mapfile -t ALIASES < <(keytool -list -v -keystore /tmp/release.jks -storepass "$ANDROID_SIGNING_STORE_PASSWORD" 2>/dev/null|sed -n 's/^Alias name: //p');[[ ${#ALIASES[@]} -eq 1 ]]
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0";"$BUILD_TOOLS/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/beta35-aligned.apk
+          mkdir -p /tmp/beta35-release;APK=/tmp/beta35-release/pick-pack-1291-public-beta-0.4.2-beta.35.apk
+          "$BUILD_TOOLS/apksigner" sign --ks /tmp/release.jks --ks-key-alias "${ALIASES[0]}" --ks-pass "pass:$ANDROID_SIGNING_STORE_PASSWORD" --key-pass "pass:$ANDROID_SIGNING_KEY_PASSWORD" --out "$APK" /tmp/beta35-aligned.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" >/tmp/apksigner.txt
+          SIGNER=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/apksigner.txt|head -1|tr '[:upper:]' '[:lower:]');[[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]]
+          BADGING=$("$BUILD_TOOLS/aapt" dump badging "$APK"|head -1);[[ "$BADGING" == *"name='$EXPECTED_PACKAGE'"* && "$BADGING" == *"versionCode='$EXPECTED_VERSION_CODE'"* && "$BADGING" == *"versionName='$EXPECTED_VERSION_NAME'"* ]]
+          SHA=$(sha256sum "$APK"|awk '{print $1}');SIZE=$(stat -c%s "$APK");printf '%s  %s\n' "$SHA" 'pick-pack-1291-public-beta-0.4.2-beta.35.apk' >/tmp/beta35-release/SHA256SUMS-beta35.txt
+          echo sign=PASS >>"$OUT";echo "apk_size=$SIZE" >>"$OUT";echo "apk_sha256=$SHA" >>"$OUT";echo "signer_sha256=$SIGNER" >>"$OUT"
+      - name: Upload exact signed candidate
+        uses: actions/upload-artifact@v4
+        with: { name: beta35-release-candidate, path: /tmp/beta35-release/, retention-days: 14, if-no-files-found: error }
+      - name: Record artifact id
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5;do curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" >/tmp/a.json;ID=$(jq -r '.artifacts[]|select(.name=="beta35-release-candidate")|.id' /tmp/a.json|head -1);[[ -n "$ID" && "$ID" != null ]]&&break;sleep 2;done
+          [[ -n "$ID" && "$ID" != null ]];echo "artifact_id=$ID" >>/tmp/result;echo artifact_name=beta35-release-candidate >>/tmp/result;echo stable=UNTOUCHED >>/tmp/result;echo merge_pr38=UNTOUCHED >>/tmp/result;echo verdict=PASS >>/tmp/result
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result||echo result_missing=true >/tmp/result;grep -q '^verdict=' /tmp/result||{ echo stable=UNTOUCHED >>/tmp/result;echo merge_pr38=UNTOUCHED >>/tmp/result;echo verdict=FAILED_OR_STOPPED >>/tmp/result;};cp /tmp/result /tmp/r;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/r ops/session13-beta35-build-candidate-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session13-beta35-build-candidate-result.txt;git diff --cached --quiet||git commit -m 'ops: record Beta35 signed candidate';git push origin HEAD:agent/service-migration-m2

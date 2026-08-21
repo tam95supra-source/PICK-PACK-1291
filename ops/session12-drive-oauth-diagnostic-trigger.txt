@@ -1,0 +1,5 @@
+triggered_at=2026-08-20T19:59:00+07:00
+apk_id=11Pngzs7Sio4Xl2WW6kPjUbjsMXd2mEyc
+scope=READ_ONLY_OAUTH_DIAGNOSTIC
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

@@ -1,0 +1,137 @@
+name: Session17 S44 Service Deploy
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session17-s44-service-deploy-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session17-s44-service-deploy
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  D1_NAME: pick-pack-1291-service-prod
+  PROD_GENERATION: m2-prod-20260819-001
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Pre-deploy authority gate
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL --max-time 12 "$SERVICE_URL/health" >/tmp/pre.json
+          node - <<'NODE'
+          const j=require('/tmp/pre.json'),a=j.authority||{},r=j.replication||{};
+          if(j.ok!==true||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||String(a.service_generation||'')!==process.env.PROD_GENERATION||String(r.state||'')!=='HEALTHY'||Number(r.pending_count||0)!==0) process.exit(2);
+          console.log('pre_authority_gate=PASS');
+          NODE
+      - name: Apply S44 to authoritative Service source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/apply_s44_service_session_attendance.py
+          grep -q 'S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE' service/src/auth.ts
+          grep -q 'S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE' service/src/mobile_hotfix.ts
+          grep -q 'pda_enter_status' service/src/legacy.ts
+          grep -q 'pda_exit_status' service/src/legacy.ts
+          grep -q 'resource_note' service/src/core.ts
+          git diff -- service/src/auth.ts service/src/mobile_hotfix.ts service/src/legacy.ts service/src/core.ts > /tmp/s44-service.patch
+      - name: Typecheck patched Service
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd service
+          npm install --no-audit --no-fund
+          npm run typecheck
+      - name: Persist patched Service source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if [[ -s /tmp/s44-service.patch ]]; then
+            git reset --hard HEAD >/dev/null
+            git pull --rebase origin agent/service-migration-m2
+            git apply /tmp/s44-service.patch
+            python3 tools/apply_s44_service_session_attendance.py
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add service/src/auth.ts service/src/mobile_hotfix.ts service/src/legacy.ts service/src/core.ts
+            git diff --cached --quiet || git commit -m 'fix(service): persist S44 session and attendance contracts'
+            git push origin HEAD:agent/service-migration-m2
+          fi
+          echo "source_head=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Build production Wrangler config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd service
+          npx wrangler d1 list --json >/tmp/d1-list.json
+          ID=$(node -e "const r=require('/tmp/d1-list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          export ID
+          node - <<'NODE'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          c.name='pick-pack-1291-service'; c.main='src/entry_product.ts'; c.keep_vars=true;
+          c.vars={...(c.vars||{}),SERVICE_GENERATION:process.env.PROD_GENERATION,GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};
+          c.d1_databases[0].database_name=process.env.D1_NAME; c.d1_databases[0].database_id=process.env.ID;
+          delete c.secrets;
+          fs.writeFileSync('.wrangler-s44-prod.jsonc',JSON.stringify(c,null,2));
+          NODE
+      - name: Deploy S44 Service
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd service
+          npx wrangler deploy --config .wrangler-s44-prod.jsonc >/tmp/deploy.txt
+          cat /tmp/deploy.txt
+      - name: Verify propagated routes and authority
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r
+          echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"
+          echo "source_head=${source_head:-unknown}" >>"$OUT"
+          ok=0
+          for i in $(seq 1 12); do
+            curl -sSL --max-time 12 "$SERVICE_URL/health" >/tmp/h.json || true
+            M=$(curl -sS --max-time 12 -o /tmp/m.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{}' || true)
+            S=$(curl -sS --max-time 12 -o /tmp/s.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}' || true)
+            B=$(curl -sS --max-time 12 -o /tmp/b.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/legacy-mutations/batch" -d '{"events":[]}' || true)
+            if node -e "const j=require('/tmp/h.json'),a=j.authority||{},r=j.replication||{};process.exit(j.ok===true&&a.mode==='SERVICE_PRIMARY'&&a.scope==='PRODUCTION'&&a.service_generation===process.env.PROD_GENERATION&&r.state==='HEALTHY'&&Number(r.pending_count||0)===0?0:1)" 2>/dev/null && [[ "$M" == 401 && "$S" == 400 && "$B" == 401 ]]; then ok=1; break; fi
+            sleep 2
+          done
+          [[ $ok == 1 ]]
+          node - <<'NODE' >>"$OUT"
+          const j=require('/tmp/h.json'),a=j.authority||{},r=j.replication||{};
+          console.log(`authority=${a.mode}_${a.authority_epoch}_${a.authority_seq}`);console.log(`replication=${r.state}_${Number(r.pending_count||0)}`);
+          NODE
+          echo "mobile_unauth_http=$M" >>"$OUT"
+          echo "session_empty_http=$S" >>"$OUT"
+          echo "legacy_batch_unauth_http=$B" >>"$OUT"
+          echo "same_device_session_reuse=SOURCE_CONTRACT_PASS" >>"$OUT"
+          echo "attendance_source_persistence=PASS" >>"$OUT"
+          echo "stable=UNTOUCHED" >>"$OUT"
+          echo "merge_pr38=UNTOUCHED" >>"$OUT"
+          echo "verdict=PASS" >>"$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || { echo "checked_at=$(date -u +%FT%TZ)" >/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/c
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/c ops/session17-s44-service-deploy-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session17-s44-service-deploy-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S44 Service deploy'
+          git push origin HEAD:agent/service-migration-m2

@@ -1,0 +1,193 @@
+name: Session2 Product Deploy V3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-product-deploy-v3-trigger.txt' ]
+
+permissions:
+  contents: read
+concurrency:
+  group: session2-product-deploy-v3-production
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  PROD_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  FALLBACK_RANGE: __PP_M2_FALLBACK_EVENTS!A:O
+  SERVICE_GENERATION: m2-prod-20260819-001
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Source gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check service/public/app.js
+          node --check service/public/history-admin.js
+          node --check service/public/admin-extension.js
+          grep -q 'entry_product.ts' service/wrangler.jsonc
+          grep -q 'INVALIDATION_V1' app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt
+          grep -q 'Event-driven foreground Service/D1 revision synchronizer' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          ! grep -q 'main.postDelayed(tick, nextDelay' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'LOCAL_PENDING' app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt
+          grep -q 'M2BackgroundSync.catchUp' app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt
+          grep -q 'IMPORT_TEMPLATE_VERSION_STALE' service/src/import_xlsx.ts
+          grep -q 'historicalBusinessDates' service/src/entry_product.ts
+          cd service && npm install --no-audit --no-fund && npm run check
+
+      - name: Validate credential bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do [[ -n "${!v:-}" ]] || { echo "Missing binding $v"; exit 1; }; done
+
+      - name: Resolve production D1 identity
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 list --json > /tmp/d1-list.json
+          D1_ID=$(node - <<'NODE'
+          const fs=require('fs');const rows=JSON.parse(fs.readFileSync('/tmp/d1-list.json','utf8'));const x=rows.find(r=>r.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''));
+          NODE
+          )
+          [[ -n "$D1_ID" ]] || exit 2
+          echo "D1_ID=$D1_ID" >> "$GITHUB_ENV"
+
+      - name: Build and validate production Wrangler config
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('fs');const cfg=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          cfg.name='pick-pack-1291-service';cfg.main='src/entry_product.ts';
+          cfg.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};
+          cfg.d1_databases[0].database_name='pick-pack-1291-service-prod';cfg.d1_databases[0].database_id=process.env.D1_ID;delete cfg.secrets;
+          fs.writeFileSync('/tmp/wrangler-session2-prod.jsonc',JSON.stringify(cfg,null,2));
+          NODE
+          grep -q '"name": "pick-pack-1291-service"' /tmp/wrangler-session2-prod.jsonc
+          grep -q '"main": "src/entry_product.ts"' /tmp/wrangler-session2-prod.jsonc
+          grep -q '"SERVICE_GENERATION": "m2-prod-20260819-001"' /tmp/wrangler-session2-prod.jsonc
+          grep -q "${D1_ID}" /tmp/wrangler-session2-prod.jsonc
+          ! grep -q 'm1-staging' /tmp/wrangler-session2-prod.jsonc
+
+      - name: Fresh authority checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" > /tmp/service-before.json
+          jq -e --arg g "$SERVICE_GENERATION" '.ok==true and .environment=="production" and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/service-before.json >/dev/null
+          echo "SERVICE_EPOCH=$(jq -r '.authority.authority_epoch' /tmp/service-before.json)" >> "$GITHUB_ENV"
+          echo "SERVICE_SEQ=$(jq -r '.authority.authority_seq' /tmp/service-before.json)" >> "$GITHUB_ENV"
+
+      - name: Fresh GAS checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' > /tmp/gas-before.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/gas-before.json')); assert j.get('ok') is True,j
+          a=j.get('authority') or {}; mode=j.get('authority_mode') or a.get('mode'); epoch=int(j.get('authority_epoch') or a.get('authority_epoch') or 0); gen=j.get('service_generation') or a.get('service_generation')
+          assert mode=='GOOGLE_FALLBACK',(mode,j); assert epoch==int(os.environ['SERVICE_EPOCH'])+1,(epoch,os.environ['SERVICE_EPOCH']); assert gen==os.environ['SERVICE_GENERATION'],(gen,os.environ['SERVICE_GENERATION'])
+          open(os.environ['GITHUB_ENV'],'a').write(f'FALLBACK_EPOCH={epoch}\n')
+          print(f'Fresh split checkpoint: Service epoch {os.environ["SERVICE_EPOCH"]}, Google fallback epoch {epoch}')
+          PY
+
+      - name: Bind exact current fallback set dynamically
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token')
+          [[ -n "$TOKEN" && "$TOKEN" != null ]]
+          ENC_RANGE=$(python3 -c 'import urllib.parse,os;print(urllib.parse.quote(os.environ["FALLBACK_RANGE"],safe=""))')
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$PROD_SHEET_ID/values/$ENC_RANGE?majorDimension=ROWS" > /tmp/fallback-before.json
+          python3 - <<'PY'
+          import json,os,hashlib
+          raw=json.load(open('/tmp/fallback-before.json')).get('values',[]);assert raw
+          idx={v:i for i,v in enumerate(raw[0])};req=['authority_epoch','authority_seq','service_generation','event_id','action','status'];assert all(k in idx for k in req),idx
+          epoch=int(os.environ['FALLBACK_EPOCH']);gen=os.environ['SERVICE_GENERATION'];rows=[]
+          for r in raw[1:]:
+            def g(k):return str(r[idx[k]]) if idx[k]<len(r) else ''
+            if g('authority_epoch')==str(epoch) and g('service_generation')==gen:rows.append({'seq':int(g('authority_seq')),'event_id':g('event_id'),'action':g('action'),'status':g('status')})
+          rows.sort(key=lambda x:x['seq']);assert rows;assert [x['seq'] for x in rows]==list(range(1,rows[-1]['seq']+1)),rows;assert all(x['status']=='PENDING' for x in rows),rows
+          safe=json.dumps(rows,separators=(',',':'),sort_keys=True);digest=hashlib.sha256(safe.encode()).hexdigest();open('/tmp/fallback-safe.json','w').write(safe)
+          open(os.environ['GITHUB_ENV'],'a').write(f'FALLBACK_BIND_SHA={digest}\nFALLBACK_BIND_COUNT={len(rows)}\nFALLBACK_BIND_MAX_SEQ={rows[-1]["seq"]}\n')
+          print(f'Bound fallback epoch={epoch}, count={len(rows)}, max_seq={rows[-1]["seq"]}, sha={digest[:16]}...')
+          PY
+
+      - name: Direct D1 recovery gate
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-session2-prod.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT meta_value AS reconciling FROM system_meta WHERE meta_key='m2_reconciling'; SELECT authority_epoch,authority_seq,ingest_status,event_id FROM fallback_event_inbox WHERE authority_epoch=$FALLBACK_EPOCH ORDER BY authority_seq; SELECT recovery_id,recovery_type,status,source_authority_epoch,target_authority_epoch,started_at,completed_at FROM recovery_runs ORDER BY started_at DESC LIMIT 5; SELECT state,pending_count,retry_count,last_error_class,last_error FROM replication_status WHERE singleton_id=1; SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 5;" --json > /tmp/d1-before.json
+          python3 - <<'PY'
+          import json,os,re
+          x=json.load(open('/tmp/d1-before.json'));text=json.dumps(x,separators=(',',':'))
+          assert 'SERVICE_PRIMARY' in text and os.environ['SERVICE_GENERATION'] in text,text[:1600]
+          assert not re.search(r'"reconciling":"?1"?',text),text[:1600]
+          assert '"status":"RUNNING"' not in text and '"status":"VALIDATING"' not in text,text[:1600]
+          assert '0004_session1_foundation' in text,text[-1600:]
+          print('Direct D1 authority/recovery/replication/migration gate PASS.')
+          PY
+
+      - name: Apply migrations and deploy production Service plus Web
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply pick-pack-1291-service-prod --remote --config /tmp/wrangler-session2-prod.jsonc
+          npx wrangler deploy --config /tmp/wrangler-session2-prod.jsonc
+
+      - name: Verify live product and unchanged authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do curl -fsSL "$SERVICE_URL/health" > /tmp/service-after.json && jq -e --arg g "$SERVICE_GENERATION" --argjson e "$SERVICE_EPOCH" '.ok==true and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.authority_epoch==$e' /tmp/service-after.json >/dev/null && break; sleep 3; done
+          jq -e --argjson s "$SERVICE_SEQ" '.authority.authority_seq >= $s' /tmp/service-after.json >/dev/null
+          curl -fsSL "$SERVICE_URL/v1/capabilities" | jq -e '.ok==true and .business_window==7 and .mutation_batch==true and .fcm_wake==true and .import_engine==true and .realtime_protocol=="INVALIDATION_V1"' >/dev/null
+          curl -fsSL "$SERVICE_URL/" > /tmp/index.html; curl -fsSL "$SERVICE_URL/app.js" > /tmp/app.js; curl -fsSL "$SERVICE_URL/history-admin.html" > /tmp/history.html; curl -fsSL "$SERVICE_URL/history-admin.js" > /tmp/history.js
+          grep -q 'Import dữ liệu' /tmp/index.html;grep -q 'DAY_CHANGED' /tmp/app.js;grep -q 'MASTER_CHANGED' /tmp/app.js;grep -q 'Lịch sử toàn phần' /tmp/history.html;grep -q '/v1/admin/business-dates' /tmp/history.js
+          [[ "$(curl -sS -o /tmp/a -w '%{http_code}' "$SERVICE_URL/v1/admin/business-dates?limit=1")" == 401 ]]
+          [[ "$(curl -sS -o /tmp/b -w '%{http_code}' "$SERVICE_URL/v1/import/template?dataset=employees")" == 401 ]]
+
+      - name: Recheck bound fallback set unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' > /tmp/gas-after.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/gas-after.json'));a=j.get('authority') or {};mode=j.get('authority_mode') or a.get('mode');epoch=int(j.get('authority_epoch') or a.get('authority_epoch') or 0);assert mode=='GOOGLE_FALLBACK' and epoch==int(os.environ['FALLBACK_EPOCH']),(mode,epoch)
+          PY
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token');ENC_RANGE=$(python3 -c 'import urllib.parse,os;print(urllib.parse.quote(os.environ["FALLBACK_RANGE"],safe=""))');curl -fsSL -H "Authorization: Bearer $TOKEN" "https://sheets.googleapis.com/v4/spreadsheets/$PROD_SHEET_ID/values/$ENC_RANGE?majorDimension=ROWS" > /tmp/fallback-after.json
+          python3 - <<'PY'
+          import json,os,hashlib
+          raw=json.load(open('/tmp/fallback-after.json')).get('values',[]);idx={v:i for i,v in enumerate(raw[0])};rows=[]
+          for r in raw[1:]:
+            def g(k):return str(r[idx[k]]) if idx[k]<len(r) else ''
+            if g('authority_epoch')==os.environ['FALLBACK_EPOCH'] and g('service_generation')==os.environ['SERVICE_GENERATION']:rows.append({'seq':int(g('authority_seq')),'event_id':g('event_id'),'action':g('action'),'status':g('status')})
+          rows.sort(key=lambda x:x['seq']);safe=json.dumps(rows,separators=(',',':'),sort_keys=True);digest=hashlib.sha256(safe.encode()).hexdigest();assert digest==os.environ['FALLBACK_BIND_SHA'];assert len(rows)==int(os.environ['FALLBACK_BIND_COUNT']) and rows[-1]['seq']==int(os.environ['FALLBACK_BIND_MAX_SEQ'])
+          print('Fallback bind unchanged through deploy.')
+          PY
+
+      - name: Verdict
+        run: echo 'PASS - production Web/Service deployed; no authority transition/failback/Stable/Sheet write/signer change/PR merge.'

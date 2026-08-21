@@ -1,0 +1,4 @@
+trigger=2026-08-20T15:49:00Z
+purpose=query historical Worker requests around Beta37 cache-clear test
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

@@ -1,0 +1,19 @@
+checked_at=2026-08-20T02:35:14Z
+head_sha=c8ff7e7ed6a3777de14f4501649463220df00145
+service_health_ok=true
+service_authority=SERVICE_PRIMARY|8|20|PRODUCTION|m2-prod-20260819-001
+replication=DEGRADED|pending=5|error=Error: GOOGLE_MASTER_SCHEMA_DRIFT:DANH SÁCH PDA
+gas_discovery=false|||
+beta_ota=false|available=undefined|version=|sha=|size=
+beta_self=false|available=undefined|version=
+stable_ota=false|available=undefined|version=
+pr38=open|draft=true|merged=false
+authority_gate=FAIL
+ota_metadata_gate=FAIL
+self_update_gate=FAIL
+stable_isolation_gate=FAIL
+pr38_gate=PASS
+public_download_gate=FAIL
+http_codes=service:200|authority:200|replication:404|gas:302|ota:302|self:302|stable:302|pr:200
+replication_gate=OBSERVE_ONLY_OWNER_WAIVER_2026-08-20
+verdict=READ_ONLY_LIVE_SNAPSHOT_COMPLETE

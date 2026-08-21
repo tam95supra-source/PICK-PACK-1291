@@ -1,0 +1,4 @@
+requested_at=2026-08-20T18:18:30+07:00
+reason=beta33-ota-diagnostic-follow-redirects
+stable=READ_ONLY
+merge_pr38=FORBIDDEN

@@ -1,0 +1,111 @@
+name: Session3 Recovery Resume S28E
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-recovery-resume-s28e-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session3-recovery-resume-s28e
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  D1_NAME: pick-pack-1291-service-prod
+  GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+jobs:
+  resume:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Apply exact compatibility recovery patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo PATCH >/tmp/phase
+          grep -qx 'confirmation=OWNER_LOCKED_M2_FAILBACK_RESUME' ops/session3-recovery-resume-s28e-trigger.txt
+          grep -qx 'expected=RECONCILING|7|0' ops/session3-recovery-resume-s28e-trigger.txt
+          grep -qx 'target_epoch=8' ops/session3-recovery-resume-s28e-trigger.txt
+          grep -qx 'stable=FORBIDDEN' ops/session3-recovery-resume-s28e-trigger.txt
+          python3 tools/apply_s28d_compat_resume_reflected.py
+          grep -q 'export async function recordAlreadyReflectedEnter' service/src/recovery.ts
+          grep -q 'S28D_COMPAT_REFLECTED_ENTER' service/src/recovery_resume_compat.ts
+          grep -q 'recordAlreadyReflectedEnter(db,row)' service/src/recovery_resume_compat.ts
+          cd service; npm install --no-audit --no-fund >/dev/null; npm run check >/dev/null; cd ..
+          echo source_check=PASS >/tmp/result.txt
+      - name: Persist both recovery files
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo PERSIST >/tmp/phase
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/src/recovery.ts service/src/recovery_resume_compat.ts
+          git diff --cached --quiet || git commit -m 'fix: route compat recovery through exact reflected-enter reconciliation'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          echo source_persist=PASS >>/tmp/result.txt
+      - name: Fresh gate and deploy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo PRECHECK >/tmp/phase
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/pre.json
+          node -e 'const j=require("/tmp/pre.json"),a=j.authority||j;if(!j.ok||a.mode!=="RECONCILING"||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==0||a.scope!=="PRODUCTION")throw Error("STATE_CHANGED")'
+          HTTP=$(curl -sS -o /tmp/d1.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/d1.json|head -1); [[ -n "$ID" ]]; export ID
+          cd service
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('/tmp/w-s28e.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler deploy --config /tmp/w-s28e.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          cd ..
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/postdeploy.json
+          node -e 'const j=require("/tmp/postdeploy.json"),a=j.authority||j;if(!j.ok||a.mode!=="RECONCILING"||Number(a.authority_epoch)!==7||Number(a.authority_seq)!==0)throw Error("DEPLOY_AUTH_CHANGED")'
+          echo deploy=PASS >>/tmp/result.txt
+      - name: Resume and complete authority
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo RESUME >/tmp/phase
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}')
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1"|sha256sum|awk '{print $1}')
+          echo "::add-mask::$ADMIN"; echo "::add-mask::$BRIDGE"
+          H=$(curl -sS --max-time 120 -o /tmp/resume.json -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/recovery/failback-resume" -d '{"fallback_epoch":7,"confirmation":"OWNER_LOCKED_M2_FAILBACK_RESUME","initiated_by":"SESSION3_S28E"}' || true)
+          [[ "$H" =~ ^2 ]] || { node -e 'try{const j=require("/tmp/resume.json");console.error(j?.error?.code||j?.error||"RESUME_HTTP_FAIL")}catch{}'; exit 1; }
+          node -e 'const j=require("/tmp/resume.json"),a=j.authority||{};if(!j.ok||a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||Number(a.authority_seq)!==0)throw Error("SERVICE_NOT_EPOCH8")'
+          BODY=$(node -e 'process.stdout.write(JSON.stringify({action:"m2_internal_reconcile_complete",_bridge_secret:process.argv[1],confirmation:"OWNER_LOCKED_M2_FAILBACK",authority_epoch:8,service_generation:process.env.GENERATION,service_url:process.env.SERVICE_URL}))' "$BRIDGE")
+          curl -fsSL --max-time 30 -H 'content-type: application/json' "$GAS_URL" -d "$BODY" >/tmp/gcomplete.json
+          node -e 'const j=require("/tmp/gcomplete.json");if(!j.ok||j.authority_mode!=="SERVICE_PRIMARY"||Number(j.authority_epoch)!==8)throw Error("GAS_NOT_EPOCH8")'
+          echo resume=PASS >>/tmp/result.txt
+      - name: Final live proof
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          echo FINAL >/tmp/phase
+          curl -fsS --max-time 25 "$SERVICE_URL/v1/authority" >/tmp/s.json
+          curl -fsSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node -e 'const s=require("/tmp/s.json"),a=s.authority||s,g=require("/tmp/g.json"),ga=g.authority||{};if(a.mode!=="SERVICE_PRIMARY"||Number(a.authority_epoch)!==8||Number(a.authority_seq)!==0||g.authority_mode!=="SERVICE_PRIMARY"||Number(ga.authority_epoch)!==8)throw Error("FINAL_AUTH_MISMATCH")'
+          printf 'service_authority=SERVICE_PRIMARY|8|0|PRODUCTION|%s\ngas_authority=SERVICE_PRIMARY|8|0|%s\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' "$GENERATION" "$GENERATION" >>/tmp/result.txt
+          echo PASS >/tmp/phase
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || : >/tmp/result.txt
+          grep -q '^verdict=' /tmp/result.txt || printf 'failed_phase=%s\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=FAILED_OR_STOPPED\n' "$(cat /tmp/phase 2>/dev/null||echo BOOTSTRAP)" >>/tmp/result.txt
+          cp /tmp/result.txt /tmp/r
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/r ops/session3-recovery-resume-s28e-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-recovery-resume-s28e-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record S28E recovery result' && git push origin HEAD:agent/service-migration-m2)

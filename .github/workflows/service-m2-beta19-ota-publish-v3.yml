@@ -1,0 +1,16 @@
+name: Historical - Service M2 Beta19 OTA Publish V3
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-only:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo 'HISTORICAL_ONLY: Beta19 publisher V3 is retired.'
+          echo 'Current release metadata must come from app/build.gradle.kts and the deliberate current-version publish path.'
+          echo 'This workflow performs no release, signing, Drive write, GAS deploy, or Stable action.'

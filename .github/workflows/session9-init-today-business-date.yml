@@ -1,0 +1,55 @@
+name: Session9 Init Today Business Date
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session9-init-today-business-date-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  init:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_NAME: pick-pack-1291-service-prod
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Setup and backup
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo checked_at=$(date -u +%FT%TZ)>$OUT; echo head_sha=$GITHUB_SHA>>$OUT
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+          node -e "const h=require('/tmp/h.json'),a=h.authority||{};if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('HEALTH')"
+          cd service; npm install --no-audit --no-fund >/dev/null; npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s9init.jsonc',JSON.stringify(c,null,2))" "$ID"
+          npx wrangler d1 export "$D1_NAME" --remote --config .wrangler-s9init.jsonc --output=/tmp/pre-init-today-d1.sql >/tmp/export.log
+          test -s /tmp/pre-init-today-d1.sql; echo d1_backup=PASS>>/tmp/r
+          cd ..
+      - name: Insert exactly missing today
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          d1(){ (cd service && npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s9init.jsonc --command "$1" --json); }
+          d1 "SELECT business_date,sequence_no FROM business_dates ORDER BY sequence_no DESC LIMIT 1" >/tmp/max.json
+          node -e 'const r=require("/tmp/max.json").flatMap(v=>v.results||[])[0];if(r.business_date!=="2026-08-19"||Number(r.sequence_no)!==45)throw Error(`UNEXPECTED_MAX_${r.business_date}_${r.sequence_no}`)'
+          d1 "INSERT INTO business_dates(business_date,sequence_no,source) SELECT '2026-08-20',46,'SERVICE_DAILY_ROLLOVER' WHERE NOT EXISTS(SELECT 1 FROM business_dates WHERE business_date='2026-08-20')" >/tmp/insert.json
+          d1 "SELECT business_date,sequence_no,source FROM business_dates WHERE business_date BETWEEN '2026-08-07' AND '2026-08-20' ORDER BY business_date" >/tmp/verify.json
+          node - <<'NODE' >>/tmp/r
+          const x=require('/tmp/verify.json').flatMap(v=>v.results||[]);if(x.length!==14||x[x.length-1].business_date!=='2026-08-20'||Number(x[x.length-1].sequence_no)!==46)throw Error('VERIFY');console.log('business_dates_14=PASS');console.log('today=2026-08-20|seq=46|source='+x[x.length-1].source);console.log('verdict=PASS');
+          NODE
+      - name: Upload backup
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: session9-pre-init-today-d1-backup, path: /tmp/pre-init-today-d1.sql, retention-days: 7, if-no-files-found: ignore }
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r; grep -q '^verdict=' /tmp/r || echo verdict=FAILED_OR_STOPPED>>/tmp/r; cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session9-init-today-business-date-result.txt; git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com; git add ops/session9-init-today-business-date-result.txt; git diff --cached --quiet || git commit -m 'ops: record today business-date init'; git push origin HEAD:agent/service-migration-m2

@@ -1,0 +1,4 @@
+mode=READ_ONLY
+requested_at=2026-08-19T22:05:00+07:00
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN

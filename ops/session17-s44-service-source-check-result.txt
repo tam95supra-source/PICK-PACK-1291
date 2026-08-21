@@ -1,0 +1,227 @@
+checked_at=2026-08-20T16:21:15Z
+head_sha=09918bb4713b58c504020ba2d606a5cfecb1d465
+patch_rc=0
+Applied S44 Service: idempotent same-device PDA session + persistent S38 attendance fields
+npm_install_rc=0
+typecheck_rc=2
+
+> typecheck
+> tsc --noEmit
+
+src/admin_audit.ts(25,43): error TS2304: Cannot find name 'D1Database'.
+src/auth.ts(19,43): error TS2304: Cannot find name 'D1Database'.
+src/auth.ts(30,41): error TS2304: Cannot find name 'D1Database'.
+src/auth.ts(30,58): error TS2304: Cannot find name 'Env'.
+src/auth.ts(58,40): error TS2304: Cannot find name 'D1Database'.
+src/auth.ts(58,57): error TS2304: Cannot find name 'Env'.
+src/auth.ts(79,33): error TS2304: Cannot find name 'D1Database'.
+src/auth.ts(84,65): error TS2304: Cannot find name 'Env'.
+src/bootstrap.ts(18,26): error TS2304: Cannot find name 'Env'.
+src/bootstrap.ts(20,165): error TS2558: Expected 0 type arguments, but got 1.
+src/bootstrap.ts(28,29): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap.ts(28,46): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(30,34): error TS2304: Cannot find name 'Env'.
+src/bootstrap.ts(33,31): error TS2558: Expected 0 type arguments, but got 1.
+src/bootstrap.ts(35,38): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/bootstrap.ts(38,35): error TS2558: Expected 0 type arguments, but got 1.
+src/bootstrap.ts(42,35): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/bootstrap.ts(42,77): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/bootstrap.ts(43,114): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/bootstrap.ts(48,46): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap.ts(48,61): error TS2304: Cannot find name 'Env'.
+src/bootstrap.ts(55,23): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(59,58): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(62,67): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(65,20): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(70,68): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(73,264): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(76,20): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap.ts(80,22): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resources.ts(25,24): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resources.ts(40,26): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resources.ts(40,43): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resources.ts(43,26): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resources.ts(43,50): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resources.ts(48,58): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resources.ts(92,15): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(38,32): error TS2304: Cannot find name 'Env'.
+src/bootstrap_resumable.ts(41,24): error TS2558: Expected 0 type arguments, but got 1.
+src/bootstrap_resumable.ts(51,29): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(51,46): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(54,29): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(55,32): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(57,37): error TS2304: Cannot find name 'Env'.
+src/bootstrap_resumable.ts(61,27): error TS2558: Expected 0 type arguments, but got 1.
+src/bootstrap_resumable.ts(63,38): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/bootstrap_resumable.ts(67,35): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(67,50): error TS2304: Cannot find name 'Env'.
+src/bootstrap_resumable.ts(73,30): error TS2558: Expected 0 type arguments, but got 1.
+src/bootstrap_resumable.ts(80,15): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(100,29): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(103,48): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/bootstrap_resumable.ts(104,53): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/bootstrap_resumable.ts(104,101): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/bootstrap_resumable.ts(104,142): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/bootstrap_resumable.ts(107,34): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(108,48): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(112,32): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(113,57): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(117,36): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(118,15): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(124,35): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(125,55): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(129,32): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(130,64): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(135,41): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(140,15): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(152,37): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(153,402): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(157,36): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(159,294): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/bootstrap_resumable.ts(164,28): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(164,43): error TS2304: Cannot find name 'Env'.
+src/bootstrap_resumable.ts(170,47): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(170,62): error TS2304: Cannot find name 'Env'.
+src/bootstrap_resumable.ts(179,48): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(183,46): error TS2304: Cannot find name 'D1Database'.
+src/bootstrap_resumable.ts(183,61): error TS2304: Cannot find name 'Env'.
+src/business_date.ts(14,59): error TS2304: Cannot find name 'D1Database'.
+src/business_date.ts(38,56): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(67,29): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(73,95): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/compat.ts(76,35): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(81,32): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(110,43): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(118,36): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(122,42): error TS2304: Cannot find name 'D1Database'.
+src/compat.ts(123,128): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/core.ts(61,30): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(67,39): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(98,30): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(98,81): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/core.ts(122,30): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(122,153): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/core.ts(123,14): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/core.ts(134,42): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(174,40): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(192,40): error TS2552: Cannot find name 'D1Database'. Did you mean 'IDBDatabase'?
+src/core.ts(207,36): error TS2304: Cannot find name 'D1Database'.
+src/core.ts(225,37): error TS2304: Cannot find name 'D1Database'.
+src/core.ts(234,31): error TS2304: Cannot find name 'D1Database'.
+src/core.ts(236,41): error TS2304: Cannot find name 'D1Database'.
+src/core.ts(236,56): error TS2304: Cannot find name 'Env'.
+src/core.ts(237,201): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/core.ts(249,59): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/core.ts(262,32): error TS2304: Cannot find name 'D1Database'.
+src/core.ts(271,43): error TS2304: Cannot find name 'D1Database'.
+src/core.ts(273,46): error TS2304: Cannot find name 'D1Database'.
+src/correction.ts(10,64): error TS2304: Cannot find name 'Env'.
+src/dr.ts(21,26): error TS2304: Cannot find name 'Env'.
+src/dr.ts(21,397): error TS2558: Expected 0 type arguments, but got 1.
+src/dr.ts(23,31): error TS2304: Cannot find name 'Env'.
+src/dr.ts(27,53): error TS2304: Cannot find name 'D1Database'.
+src/dr.ts(27,68): error TS2304: Cannot find name 'Env'.
+src/dr.ts(31,219): error TS7006: Parameter 'e' implicitly has an 'any' type.
+src/dr.ts(34,36): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(34,68): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(35,37): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(35,75): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(36,38): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(36,77): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(37,276): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(38,38): error TS7006: Parameter 'e' implicitly has an 'any' type.
+src/dr.ts(40,331): error TS2339: Property 'full_name' does not exist on type '{}'.
+src/dr.ts(40,651): error TS2339: Property 'full_name' does not exist on type '{}'.
+src/dr.ts(40,670): error TS2339: Property 'phone' does not exist on type '{}'.
+src/dr.ts(40,685): error TS2339: Property 'supplier' does not exist on type '{}'.
+src/dr.ts(40,703): error TS2339: Property 'department' does not exist on type '{}'.
+src/dr.ts(40,723): error TS2339: Property 'site' does not exist on type '{}'.
+src/dr.ts(40,737): error TS2339: Property 'warehouse' does not exist on type '{}'.
+src/dr.ts(40,756): error TS2339: Property 'main_position' does not exist on type '{}'.
+src/dr.ts(41,557): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/dr.ts(41,639): error TS2339: Property 'full_name' does not exist on type '{}'.
+src/dr.ts(41,656): error TS2339: Property 'phone' does not exist on type '{}'.
+src/dr.ts(41,669): error TS2339: Property 'supplier' does not exist on type '{}'.
+src/dr.ts(41,685): error TS2339: Property 'department' does not exist on type '{}'.
+src/dr.ts(41,703): error TS2339: Property 'site' does not exist on type '{}'.
+src/dr.ts(41,715): error TS2339: Property 'warehouse' does not exist on type '{}'.
+src/dr.ts(41,732): error TS2339: Property 'main_position' does not exist on type '{}'.
+src/dr.ts(42,319): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/entry.ts(22,38): error TS2304: Cannot find name 'D1Database'.
+src/entry.ts(53,47): error TS2304: Cannot find name 'Env'.
+src/entry.ts(62,53): error TS2304: Cannot find name 'Env'.
+src/entry.ts(67,51): error TS2304: Cannot find name 'Env'.
+src/entry.ts(72,47): error TS2304: Cannot find name 'Env'.
+src/entry.ts(79,52): error TS2304: Cannot find name 'Env'.
+src/entry.ts(84,55): error TS2304: Cannot find name 'Env'.
+src/entry.ts(99,56): error TS2304: Cannot find name 'Env'.
+src/entry.ts(103,57): error TS2304: Cannot find name 'Env'.
+src/entry.ts(124,35): error TS2304: Cannot find name 'Env'.
+src/entry.ts(124,44): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry.ts(144,30): error TS2304: Cannot find name 'ScheduledController'.
+src/entry.ts(144,54): error TS2304: Cannot find name 'Env'.
+src/entry.ts(144,62): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry.ts(145,13): error TS2304: Cannot find name 'ExportedHandler'.
+src/entry.ts(145,29): error TS2304: Cannot find name 'Env'.
+src/entry_hotfix.ts(8,35): error TS2304: Cannot find name 'Env'.
+src/entry_hotfix.ts(8,43): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry_hotfix.ts(19,30): error TS2304: Cannot find name 'ScheduledController'.
+src/entry_hotfix.ts(19,54): error TS2304: Cannot find name 'Env'.
+src/entry_hotfix.ts(19,62): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry_hotfix.ts(22,13): error TS2304: Cannot find name 'ExportedHandler'.
+src/entry_hotfix.ts(22,29): error TS2304: Cannot find name 'Env'.
+src/entry_product.ts(8,60): error TS2304: Cannot find name 'Env'.
+src/entry_product.ts(19,35): error TS2304: Cannot find name 'Env'.
+src/entry_product.ts(19,43): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry_product.ts(27,30): error TS2304: Cannot find name 'ScheduledController'.
+src/entry_product.ts(27,54): error TS2304: Cannot find name 'Env'.
+src/entry_product.ts(27,62): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry_product.ts(28,13): error TS2304: Cannot find name 'ExportedHandler'.
+src/entry_product.ts(28,29): error TS2304: Cannot find name 'Env'.
+src/entry_recovery_hotfix.ts(10,56): error TS2304: Cannot find name 'Env'.
+src/entry_recovery_hotfix.ts(15,51): error TS2304: Cannot find name 'Env'.
+src/entry_recovery_hotfix.ts(23,35): error TS2304: Cannot find name 'Env'.
+src/entry_recovery_hotfix.ts(23,43): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry_recovery_hotfix.ts(35,30): error TS2304: Cannot find name 'ScheduledController'.
+src/entry_recovery_hotfix.ts(35,54): error TS2304: Cannot find name 'Env'.
+src/entry_recovery_hotfix.ts(35,62): error TS2304: Cannot find name 'ExecutionContext'.
+src/entry_recovery_hotfix.ts(36,13): error TS2304: Cannot find name 'ExportedHandler'.
+src/entry_recovery_hotfix.ts(36,29): error TS2304: Cannot find name 'Env'.
+src/import_atomic.ts(14,49): error TS2304: Cannot find name 'Env'.
+src/import_atomic.ts(15,24): error TS2304: Cannot find name 'D1Database'.
+src/import_atomic.ts(18,34): error TS2304: Cannot find name 'D1Database'.
+src/import_atomic.ts(18,97): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_atomic.ts(41,25): error TS2304: Cannot find name 'D1Database'.
+src/import_atomic.ts(41,55): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_atomic.ts(43,26): error TS2304: Cannot find name 'D1Database'.
+src/import_atomic.ts(43,56): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_atomic.ts(45,23): error TS2304: Cannot find name 'D1Database'.
+src/import_atomic.ts(45,95): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_atomic.ts(47,27): error TS2304: Cannot find name 'Env'.
+src/import_atomic.ts(49,62): error TS2304: Cannot find name 'Env'.
+src/import_atomic.ts(51,491): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/import_atomic.ts(51,565): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/import_atomic.ts(55,15): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_atomic.ts(60,64): error TS2304: Cannot find name 'Env'.
+src/import_atomic.ts(61,610): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/import_atomic.ts(64,15): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_engine.ts(21,49): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(25,28): error TS2304: Cannot find name 'D1Database'.
+src/import_engine.ts(26,31): error TS2304: Cannot find name 'D1Database'.
+src/import_engine.ts(28,29): error TS2304: Cannot find name 'D1Database'.
+src/import_engine.ts(30,56): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(31,55): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(32,55): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(33,57): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(33,771): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_engine.ts(36,34): error TS2304: Cannot find name 'D1Database'.
+src/import_engine.ts(36,105): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_engine.ts(38,56): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(38,991): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/import_engine.ts(38,1271): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/import_engine.ts(38,1328): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_engine.ts(40,58): error TS2304: Cannot find name 'Env'.
+src/import_engine.ts(40,798): error TS7006: Parameter 'x' implicitly has an 'any' type.
+src/import_engine.ts(40,1283): error TS2304: Cannot find name 'D1PreparedStatement'.
+src/import_engine.ts(42,57): error TS2304: Cannot find name 'Env'.
+verdict=FAIL

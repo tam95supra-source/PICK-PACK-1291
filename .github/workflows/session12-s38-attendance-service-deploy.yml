@@ -1,0 +1,117 @@
+name: Session12 S38 Attendance Service Deploy
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session12-s38-attendance-service-deploy-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: pick-pack-1291-production-service
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Gate authority and validate S38 source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=GATE
+          trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g0.json
+          node - <<'NODE'
+          const h=require('/tmp/h0.json'),g=require('/tmp/g0.json'),a=h.authority||{},ga=g.authority||{};
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');
+          NODE
+          python3 tools/apply_s38_attendance_service.py
+          grep -q 'S38_ATTENDANCE_RESOURCE_CONTRACT' service/src/core.ts
+          grep -q 'PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST' service/src/core.ts
+          grep -q 'user_picks_reissue' service/src/mobile_hotfix.ts
+          grep -q 'pack_tables_reissue' service/src/mobile_hotfix.ts
+          cd service; npm install --no-audit --no-fund >/dev/null; npm run check >/tmp/npm-check.log 2>&1; cd ..
+          echo gate=PASS >>"$OUT"; echo source_check=PASS >>"$OUT"
+      - name: Resolve production D1 and prepare config
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=RESOLVE_D1; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          cd service
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); [[ -n "$ID" ]]; export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-s38-prod.jsonc',JSON.stringify(c,null,2))"
+          echo "d1_id=$ID" >>"$OUT"
+      - name: Backup D1 before migration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=BACKUP; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          cd service
+          npx wrangler d1 export "$D1_NAME" --remote --config .wrangler-s38-prod.jsonc --output=/tmp/pre-s38-attendance.sql >/tmp/d1-export.log 2>&1
+          test -s /tmp/pre-s38-attendance.sql
+          sha256sum /tmp/pre-s38-attendance.sql | awk '{print "backup_sha256="$1}' >>"$OUT"
+          echo backup=PASS >>"$OUT"
+      - name: Upload D1 safety backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-s38-attendance-d1-backup
+          path: /tmp/pre-s38-attendance.sql
+          retention-days: 14
+          if-no-files-found: error
+      - name: Apply migration 0006 and verify schema
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=MIGRATE; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          cd service
+          npx wrangler d1 migrations apply "$D1_NAME" --remote --config .wrangler-s38-prod.jsonc >/tmp/migrate.log 2>&1
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s38-prod.jsonc --command "PRAGMA table_info(attendance_sessions);" --json >/tmp/schema.json
+          node - <<'NODE'
+          const x=require('/tmp/schema.json');const rows=Array.isArray(x)?(x[0]?.results||[]):(x.results||[]);const names=new Set(rows.map(r=>String(r.name||'')));
+          for(const n of ['pda_enter_status','pda_exit_status','resource_note'])if(!names.has(n))throw Error('SCHEMA_MISSING_'+n);
+          NODE
+          echo migration_0006=PASS >>"$OUT"; echo schema=PASS >>"$OUT"
+      - name: Deploy production Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=DEPLOY; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          cd service
+          npx wrangler deploy --config .wrangler-s38-prod.jsonc --keep-vars --dry-run >/tmp/dry.out 2>/tmp/dry.err
+          npx wrangler deploy --config .wrangler-s38-prod.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err
+          echo deploy=PASS >>"$OUT"
+      - name: Verify production remains fenced and healthy
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/result; PHASE=VERIFY; trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          for i in 1 2 3 4 5 6; do curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json && node -e 'const h=require("/tmp/hf.json"),a=h.authority||{};if(!h.ok||a.mode!=="SERVICE_PRIMARY"||a.scope!=="PRODUCTION"||h.replication?.state!=="HEALTHY"||Number(h.replication?.pending_count)!==0)process.exit(1)' && break;sleep 2;done
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gf.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/hf.json'),g=require('/tmp/gf.json'),a=h.authority||{},ga=g.authority||{};
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('FINAL_GAS_GATE');
+          console.log(`authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('replication=HEALTHY_0');console.log('stable=UNTOUCHED');console.log('merge_pr38=UNTOUCHED');console.log('verdict=PASS');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result || echo result_missing=true >/tmp/result
+          grep -q '^verdict=' /tmp/result || { echo stable=UNTOUCHED >>/tmp/result; echo merge_pr38=UNTOUCHED >>/tmp/result; echo verdict=FAILED_OR_STOPPED >>/tmp/result; }
+          cp /tmp/result /tmp/r;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/r ops/session12-s38-attendance-service-deploy-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session12-s38-attendance-service-deploy-result.txt;git diff --cached --quiet || git commit -m 'ops: record S38 attendance service deploy';git push origin HEAD:agent/service-migration-m2

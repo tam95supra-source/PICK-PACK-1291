@@ -1,0 +1,13 @@
+checked_at=2026-08-19T16:32:31Z
+head_sha=01d3e4953671011b2cde4ae6f6aee3fca04043ee
+source=PASS
+state=PASS
+d1=PASS
+deploy=PASS
+resume=PASS
+gas=PASS
+replication=HEALTHY_0
+failed_phase=FINAL
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:14:00Z
+purpose=Beta36 final local-first build gate retrigger after workflow registration
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

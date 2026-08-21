@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pick-pack-1291-session1-test",
+  "main": "src/entry.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "SERVICE_GENERATION": "session1-test-generation",
+    "GOOGLE_SOURCE_SHEET_ID": "SESSION1_TEST_NO_GOOGLE"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "pick-pack-1291-session1-test",
+    "database_id": "00000000-0000-0000-0000-000000000001",
+    "migrations_dir": "migrations"
+  }],
+  "durable_objects": {"bindings": [{"name": "REALTIME_HUB", "class_name": "RealtimeHub"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["RealtimeHub"]}],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/health", "/v1/*", "/internal/*"]
+  }
+}

@@ -1,0 +1,5 @@
+Session2 production Web deploy V8 path-corrected
+requested_at=2026-08-19T19:12:00+07:00
+scope=service-code-and-web-assets-only
+no_failback=true
+no_stable=true

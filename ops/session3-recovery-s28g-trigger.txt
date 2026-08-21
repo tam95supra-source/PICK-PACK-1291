@@ -1,0 +1,7 @@
+confirmation=OWNER_LOCKED_M2_FAILBACK_RESUME
+expected=RECONCILING|7|0
+target_epoch=8
+source=S30D_PASS
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
+requested_at=2026-08-19T23:43:00+07:00

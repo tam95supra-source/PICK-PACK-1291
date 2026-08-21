@@ -1,0 +1,66 @@
+name: Session11 Beta33 Replication Drain
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session11-beta33-replication-drain-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: pick-pack-1291-production-replication
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+jobs:
+  drain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Canonical replication drain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"; PHASE=GATE
+          trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json
+          curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g0.json
+          node - <<'NODE'
+          const h=require('/tmp/h0.json'),g=require('/tmp/g0.json'),a=h.authority||{},ga=g.authority||{};
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||Number(a.authority_epoch)<8)throw Error('SERVICE_GATE');
+          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');
+          NODE
+          BEFORE=$(jq -r '.replication.pending_count // -1' /tmp/h0.json); echo "pending_before=$BEFORE" >>"$OUT"
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1"|sha256sum|awk '{print $1}'); echo "::add-mask::$ADMIN"
+          PHASE=DRAIN
+          for round in 1 2 3 4 5 6; do
+            HTTP=$(curl -sS -o /tmp/rep.json -w '%{http_code}' -X POST -H "x-m1-admin-token: $ADMIN" "$SERVICE_URL/internal/replicate" || true)
+            OK=$(jq -r '.ok // false' /tmp/rep.json 2>/dev/null || echo false)
+            echo "round=$round|http=$HTTP|ok=$OK" >>"$OUT"
+            sleep 1
+            curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+            P=$(jq -r '.replication.pending_count // -1' /tmp/h.json)
+            [[ "$P" == 0 ]] && break
+          done
+          PHASE=FINAL
+          curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/hf.json'),a=h.authority||{},r=h.replication||{};
+          console.log(`authority=${a.mode}_${a.authority_epoch}_${a.authority_seq}`);
+          console.log(`pending_after=${Number(r.pending_count??-1)}`);
+          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||r.state!=='HEALTHY'||Number(r.pending_count)!==0)throw Error('REPLICATION_NOT_HEALTHY_0');
+          console.log('replication=HEALTHY_0');console.log('stable=UNTOUCHED');console.log('merge_pr38=UNTOUCHED');console.log('verdict=PASS');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r
+          grep -q '^verdict=' /tmp/r || { echo stable=UNTOUCHED >>/tmp/r; echo merge_pr38=UNTOUCHED >>/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session11-beta33-replication-drain-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session11-beta33-replication-drain-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta33 replication drain'; git push origin HEAD:agent/service-migration-m2

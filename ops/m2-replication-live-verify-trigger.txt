@@ -1,0 +1,5 @@
+confirmation=OWNER_LOCKED_M2_REPLICATION_LIVE_VERIFY
+requested_by=owner
+bootstrap_run_a=e23218b1-2cad-4e01-8bf0-d36559b1c009
+bootstrap_run_b=5dd5ca3e-e753-444b-9bfe-797d1dccbad0
+run=2026-08-19T05:36:00+07:00

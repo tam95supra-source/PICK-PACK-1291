@@ -1,0 +1,453 @@
+checked_at=2026-08-20T16:25:40Z
+head_sha=421bc5c7907d2528134a3a0f7ca290ffea6e3428
+generate_rc=0
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Task :app:generateS10Operations
+Generated /home/runner/work/pick-pack-1291/pick-pack-1291/app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt (82803 chars)
+Applied S11 compact/report patch: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+S12 real-PDA patch applied
+S12 compile hotfix applied
+S13 shared history + large scanner UI patch applied
+S14 device cache + scanner sizing patch applied
+S15 local-first UI + report date selector + compact scanner patch applied
+S17 SQLite recovery UI patch applied
+S18 sync-direction + dual-edge navigation + parent-tab reset patch applied
+Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 runtime patches in build workspace: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+Applied S19 M2 production runtime fix; event-driven foreground contract preserved.
+Applied S20 PACK composite identity fix.
+Applied S21 labor shift fix.
+Applied S22 PDA local-first + provider/network/sync observability fixes.
+Applied S23 SUPERADMIN PDA Import entry.
+Applied S24 FCM logout revoke.
+Applied S25 cache-first fallback sync + shared PDA history/session UX + full sync diagnostics
+Applied S27 projection ACK gap fix
+Applied S29 owner local-first warm cache + seven-session readable History
+Applied S30 canonical admin audit across Service replication and Android durable outbox
+Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor
+Applied S31 strict Service-first non-blocking PDA hot path + background-only authority fallback + RTT split
+Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
+Applied S31D compile-safe multiline runtime bridge; Service-primary cannot fall through to GAS
+Applied S32 durable local History + independent immediate outbox flush
+Applied S33 owner UI/history/staff/resources/sync/PDA-exchange/lifecycle/timezone patch
+Applied S33B compile-safe foreground gate, provider helper and history permission guard
+Applied S34 owner six requests: business cards/nav, rich sync, history filters/status/search/date, logout/login, full local history
+Applied S34B compile hotfix: business QR card uses employeeScan
+Applied S34C: Site 1291 manpower/tenure report from canonical entry-day snapshot
+Applied S34D compile fixes: history palette + Site 1291 report grid
+Applied S35: role-gated business menu, pinned staff search, canonical History catch-up and text overflow fixes
+Applied S36: low-allocation selected-date History/Report + Service online telemetry
+Applied S36B compile hotfix: report renderer, history status chip and detail route
+Applied S37: moved Service telemetry from History to Sync only
+Applied S38 attendance UI: scan field, 3-button assignment, PDA autocomplete/status, duplicate-user reissue, safe exit
+S39 wrapper PASS: History-scoped paging regression check is 100 rows/page
+S40 wrapper PASS: cold-cache local-first, S27 ACK-gap, unresolved flush and exact event metrics
+Applied S43: SQLite-first + immediate background Service flush + WorkManager retry, foreground recovery wake, no polling
+Applied S44 Android: single-flight session/outbox, safe rich diagnostics, dedicated login lane
+Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1787243145292.json
+
+BUILD SUCCESSFUL in 18s
+1 actionable task: 1 executed
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.4.1/userguide/configuration_cache_enabling.html
+--- TRANSPORT TAIL ---
+    98	    }
+    99	
+   100	    fun acknowledgeFallback(eventId: String, ok: Boolean, error: String?) {
+   101	        if (eventId.isBlank()) return
+   102	        if (ok) store.markMutationSynced(eventId) else if (!error.isNullOrBlank()) store.markMutationRetry(eventId, error, 5_000L)
+   103	    }
+   104	
+   105	    /** Direct Service read using cached discovery only. A Service failure is handled, never a GAS fall-through. */
+   106	    fun sync(action: String, payload: JSONObject): TransportResult {
+   107	        if (action !in SYNC_ACTIONS) return TransportResult(false, false, 0, null, null)
+   108	        if (!hasNetwork()) return TransportResult(true, false, -1, null, "OFFLINE_LOCAL")
+   109	        val discovery = cachedDiscoverySnapshot() ?: return TransportResult(true, false, 0, null, "DISCOVERY_WARMING")
+   110	        val mode = discovery.optString("authority_mode")
+   111	        if (mode == "GOOGLE_FALLBACK") return TransportResult(false, false, 0, null, "FENCED_GOOGLE_FALLBACK")
+   112	        if (mode != "SERVICE_PRIMARY") return TransportResult(true, false, 0, null, "AUTHORITY_NOT_SERVICE_PRIMARY")
+   113	        if (circuitOpen()) return TransportResult(true, false, -1, null, "SERVICE_CIRCUIT_OPEN")
+   114	        val base = discovery.optString("service_url").trimEnd('/')
+   115	        val token = prefs.getString(KEY_SERVICE_TOKEN, null)
+   116	        if (!validServiceUrl(base) || token.isNullOrBlank()) return TransportResult(true, false, 0, null, "SERVICE_SESSION_UNAVAILABLE")
+   117	        val request = JSONObject(payload.toString()).put("action", action)
+   118	        val started = SystemClock.elapsedRealtime()
+   119	        return try {
+   120	            val r = httpJson("$base/v1/legacy-sync", request, token)
+   121	            val rtt = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+   122	            val body = (r.json?.let { JSONObject(it.toString()) } ?: JSONObject()).put("_service_rtt_ms", rtt)
+   123	            if (r.code >= 500 || r.code == -1) {
+   124	                recordFailure(); M2WorkScheduler.schedule(app); TransportResult(true, false, r.code, body, r.error ?: "SERVICE_UNAVAILABLE")
+   125	            } else {
+   126	                if (r.code == 401) prefs.edit().remove(KEY_SERVICE_TOKEN).apply()
+   127	                if (r.ok) closeCircuit()
+   128	                TransportResult(true, r.ok, r.code, body, r.error)
+   129	            }
+   130	        } catch (t: Throwable) {
+   131	            val rtt = (SystemClock.elapsedRealtime() - started).coerceAtLeast(0L)
+   132	            recordFailure(); M2WorkScheduler.schedule(app)
+   133	            TransportResult(true, false, -1, JSONObject().put("_service_rtt_ms", rtt), t.message ?: "SERVICE_READ_NETWORK_ERROR")
+   134	        }
+   135	    }
+   136	
+   137	    /** Background worker: Service first. GAS may confirm fallback only after 3 consecutive Service failures. */
+   138	    /** S39_EMPLOYEE_SESSION_HISTORY: background-only Service session recovery; UI hot path stays SQLite-first. */
+   139	    // S44_SESSION_SINGLEFLIGHT_OBSERVABILITY: every immediate/WorkManager trigger shares this lock.
+   140	    fun flushOutbox(): Boolean = synchronized(FLUSH_LOCK) {
+   141	        val count=runCatching{store.unresolvedMutations(100).size}.getOrDefault(0)
+   142	        M2TransportDiagnostics.notePumpStart(app,count)
+   143	        val result=runCatching{flushOutboxLocked()}.getOrElse{M2TransportDiagnostics.notePumpEnd(app,false,it.message?:it.javaClass.simpleName);false}
+   144	        M2TransportDiagnostics.notePumpEnd(app,result)
+   145	        result
+   146	    }
+   147	
+   148	    private fun flushOutboxLocked(): Boolean {
+   149	        if (!hasNetwork()) return false
+   150	        var discovery=cachedDiscoverySnapshot();if(discovery==null)discovery=discover(force=true);if(discovery==null)return false
+   151	        if(discovery.optString("authority_mode")=="GOOGLE_FALLBACK")return flushFallbackItems(store.unresolvedMutations(100))
+   152	        if(discovery.optString("authority_mode")!="SERVICE_PRIMARY")return false
+   153	        val items=store.unresolvedMutations(100);if(items.isEmpty())return true
+   154	        if(circuitOpen()){
+   155	            if(failureCount()>=FALLBACK_PROBE_FAILURES&&fallbackProbeDue()){val confirmed=discover(force=true);noteFallbackProbe();if(confirmed?.optString("authority_mode")=="GOOGLE_FALLBACK")return flushFallbackItems(items)}
+   156	            return false
+   157	        }
+   158	        val base=discovery.optString("service_url").trimEnd('/');if(!validServiceUrl(base))return false
+   159	        var token=prefs.getString(KEY_SERVICE_TOKEN,null)
+   160	        if(token.isNullOrBlank()){token=exchangeBackgroundServiceSession(base);if(token.isNullOrBlank()){items.forEach{store.markMutationRetry(it.eventId,"SERVICE_SESSION_REAUTH_REQUIRED",retryDelay(it.attemptCount))};return false}}
+   161	        fun submit(bearer:String):HttpResult{val body=JSONObject().put("events",JSONArray().apply{items.forEach{put(it.body)}});val started=System.currentTimeMillis();return httpJson("$base/v1/legacy-mutations/batch",body,bearer).also{M2TransportDiagnostics.noteBatch(app,it.code,it.ok,it.error,items.size,System.currentTimeMillis()-started)}}
+   162	        return try{
+   163	            var r=submit(token)
+   164	            if(r.code==401){M2ServiceSessionManager.clearIfSame(app,token);val refreshed=exchangeBackgroundServiceSession(base);if(!refreshed.isNullOrBlank())r=submit(refreshed)}
+   165	            if(r.code==401){items.forEach{store.markMutationRetry(it.eventId,"SERVICE_SESSION_REAUTH_REQUIRED",retryDelay(it.attemptCount))};return false}
+   166	            if(!r.ok||r.json==null){if(r.code>=500||r.code==-1)recordFailure();if(failureCount()>=FALLBACK_PROBE_FAILURES&&fallbackProbeDue()){val confirmed=discover(force=true);noteFallbackProbe();if(confirmed?.optString("authority_mode")=="GOOGLE_FALLBACK")return flushFallbackItems(items)};items.forEach{store.markMutationRetry(it.eventId,r.error?:"HTTP_${r.code}",retryDelay(it.attemptCount))};return false}
+   167	            val results=r.json.optJSONArray("results")?:JSONArray();val byId=items.associateBy{it.eventId};var retryNeeded=false
+   168	            for(i in 0 until results.length()){val result=results.optJSONObject(i)?:continue;val eventId=result.optString("local_event_id");val item=byId[eventId]?:continue;val error=result.optString("error_code").ifBlank{result.optJSONObject("conflict")?.toString().orEmpty()};when(result.optString("status")){"CONFIRMED","DUPLICATE"->store.markMutationSynced(eventId);"REVIEW_REQUIRED"->store.markMutationReviewRequired(eventId,error);"REJECTED"->if(result.optBoolean("retryable",false)){store.markMutationRetry(eventId,error.ifBlank{"RETRYABLE_REJECT"},retryDelay(item.attemptCount));retryNeeded=true}else store.markMutationRejected(eventId,error);else->{store.markMutationRetry(eventId,"BATCH_RESULT_INVALID",retryDelay(item.attemptCount));retryNeeded=true}}}
+   169	            val returned=HashSet<String>().apply{for(i in 0 until results.length())add(results.optJSONObject(i)?.optString("local_event_id").orEmpty())};items.filter{it.eventId !in returned}.forEach{store.markMutationRetry(it.eventId,"BATCH_RESULT_MISSING",retryDelay(it.attemptCount));retryNeeded=true};if(!retryNeeded)closeCircuit();!retryNeeded
+   170	        }catch(x:Throwable){recordFailure();items.forEach{store.markMutationRetry(it.eventId,x.message?:"NETWORK",retryDelay(it.attemptCount))};false}
+   171	    }
+   172	
+   173	    private fun exchangeBackgroundServiceSession(base:String):String? = M2ServiceSessionManager.ensure(app,base,force=true)
+   174	
+   175	    fun cachedDiscoverySnapshot(): JSONObject? = prefs.getString(KEY_DISCOVERY_JSON, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+   176	    fun discoverySnapshot(): JSONObject? = cachedDiscoverySnapshot()
+   177	
+   178	    private fun flushFallbackItems(items: List<OperationalDataStore.PendingMutation>): Boolean {
+   179	        if (items.isEmpty()) return true
+   180	        val gasToken = app.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).getString(AUTH_TOKEN, null).orEmpty()
+   181	        if (gasToken.isBlank()) return false
+   182	        var allEligibleDone = true
+   183	        for (item in items) {
+   184	            val action = item.body.optString("action")
+   185	            if (action !in OPERATIONAL) { allEligibleDone = false; continue }
+   186	            val payload = JSONObject((item.body.optJSONObject("payload") ?: JSONObject()).toString()).put("action", action).put("event_id", item.eventId)
+   187	                .put("_app_version", BuildConfig.VERSION_NAME).put("_app_channel", BuildConfig.CHANNEL).put("_device_id", M2DeviceIdentity.id(app))
+   188	                .put("_device_label", "${Build.MANUFACTURER} ${Build.MODEL}").put("_token", gasToken)
+   189	            val r = httpJson(BuildConfig.GSHEET_API_URL, payload, null, requireServiceHost = false)
+   190	            if (r.ok) store.markMutationSynced(item.eventId) else { allEligibleDone = false; store.markMutationRetry(item.eventId, r.error ?: "GOOGLE_FALLBACK_FAILED", retryDelay(item.attemptCount)) }
+   191	        }
+   192	        return allEligibleDone
+   193	    }
+   194	
+   195	    private fun queuedResult(eventId: String, exclusive: Boolean, projection: String): TransportResult = TransportResult(true, true, 202,
+   196	        JSONObject().put("ok", true).put("queued", true).put("reconciliation_state", "LOCAL_PENDING").put("provisional", exclusive)
+   197	            .put("projection", projection).put("result", JSONObject().put("event_id", eventId)), null)
+   198	
+   199	    private fun discover(force: Boolean = false): JSONObject? {
+   200	        val now = System.currentTimeMillis()
+   201	        if (!force) {
+   202	            val cachedAt = prefs.getLong(KEY_DISCOVERY_AT, 0L); val cached = prefs.getString(KEY_DISCOVERY_JSON, null)
+   203	            if (cached != null && now - cachedAt < DISCOVERY_TTL_MS) return runCatching { JSONObject(cached) }.getOrNull()
+   204	        }
+   205	        if (!hasNetwork()) return cachedDiscoverySnapshot()
+   206	        return try {
+   207	            val body = JSONObject().put("action", "service_discovery").put("_device_id", M2DeviceIdentity.id(app)).put("_app_version", BuildConfig.VERSION_NAME).put("_app_channel", BuildConfig.CHANNEL)
+   208	            val r = httpJson(BuildConfig.GSHEET_API_URL, body, null, requireServiceHost = false)
+   209	            if (!r.ok || r.json == null) return cachedDiscoverySnapshot()
+   210	            val j = r.json; val service = j.optString("service_url")
+   211	            if (service.isNotBlank() && !validServiceUrl(service)) return cachedDiscoverySnapshot()
+   212	            prefs.edit().putString(KEY_DISCOVERY_JSON, j.toString()).putLong(KEY_DISCOVERY_AT, now).apply(); j.optJSONObject("authority")?.let(store::saveAuthority); j
+   213	        } catch (_: Throwable) { cachedDiscoverySnapshot() }
+   214	    }
+   215	
+   216	    private fun hasNetwork(): Boolean { val n = connectivity.activeNetwork ?: return false; val c = connectivity.getNetworkCapabilities(n) ?: return false; return c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) }
+   217	    private fun failureCount(): Int = prefs.getInt(KEY_FAILURES, 0)
+   218	    private fun circuitOpen(): Boolean = System.currentTimeMillis() < prefs.getLong(KEY_CIRCUIT_UNTIL, 0L)
+   219	    private fun recordFailure() { val failures = failureCount() + 1; val e = prefs.edit().putInt(KEY_FAILURES, failures); if (failures >= FALLBACK_PROBE_FAILURES) e.putLong(KEY_CIRCUIT_UNTIL, System.currentTimeMillis() + CIRCUIT_MS); e.apply() }
+   220	    private fun closeCircuit() { prefs.edit().putInt(KEY_FAILURES, 0).putLong(KEY_CIRCUIT_UNTIL, 0L).apply() }
+   221	    private fun fallbackProbeDue(): Boolean = System.currentTimeMillis() - prefs.getLong(KEY_LAST_FALLBACK_PROBE_AT, 0L) >= FALLBACK_PROBE_MIN_MS
+   222	    private fun noteFallbackProbe() { prefs.edit().putLong(KEY_LAST_FALLBACK_PROBE_AT, System.currentTimeMillis()).apply() }
+   223	    private fun retryDelay(attempt: Int): Long = min(15 * 60_000L, 5_000L * (1L shl min(attempt, 8)))
+   224	
+   225	    private data class HttpResult(val ok: Boolean, val code: Int, val json: JSONObject?, val error: String?)
+   226	    private fun httpJson(endpoint: String, payload: JSONObject, bearer: String?, requireServiceHost: Boolean = true): HttpResult {
+   227	        if (requireServiceHost && !validServiceUrl(endpoint.substringBefore("/v1/"))) return HttpResult(false, -1, null, "SERVICE_URL_INVALID")
+   228	        var conn: HttpURLConnection? = null
+   229	        return try {
+   230	            conn = (URL(endpoint).openConnection() as HttpURLConnection).apply { requestMethod = "POST"; connectTimeout = if (requireServiceHost) 1_500 else 3_000; readTimeout = if (requireServiceHost) 3_000 else 8_000; doOutput = true; instanceFollowRedirects = true
+   231	                setRequestProperty("Content-Type", "application/json; charset=utf-8"); setRequestProperty("Accept", "application/json"); setRequestProperty("User-Agent", "PickPack1291-M2/${BuildConfig.VERSION_NAME}"); if (!bearer.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $bearer") }
+   232	            conn.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }; val code = conn.responseCode; val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+   233	            val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty(); val j = if (text.isBlank()) JSONObject() else JSONObject(text); val ok = code in 200..299 && j.optBoolean("ok", false)
+   234	            val error = if (ok) null else j.optJSONObject("error")?.optString("code")?.takeIf { it.isNotBlank() } ?: j.optString("error", "HTTP_$code"); HttpResult(ok, code, j, error)
+   235	        } catch (t: Throwable) { HttpResult(false, -1, null, t.message ?: "NETWORK") } finally { conn?.disconnect() }
+   236	    }
+   237	
+   238	    private fun validServiceUrl(raw: String): Boolean = runCatching { val u = URL(raw); u.protocol == "https" && u.host.isNotBlank() && (u.host.endsWith(".workers.dev") || u.host.endsWith(".pages.dev") || u.host == "localhost") }.getOrDefault(false)
+   239	    private fun proofForPassword(password: String, saltB64: String, iterations: Int, challenge: String): String { val key = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(PBEKeySpec(password.toCharArray(), b64uDecode(saltB64), iterations, 256)).encoded; val mac = Mac.getInstance("HmacSHA256"); mac.init(SecretKeySpec(key, "HmacSHA256")); return b64u(mac.doFinal(challenge.toByteArray(Charsets.UTF_8))) }
+   240	    private fun b64u(bytes: ByteArray): String = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+   241	    private fun b64uDecode(v: String): ByteArray = Base64.decode(v, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+   242	
+   243	    companion object {
+   244	        private val FLUSH_LOCK=Any() // S44_SESSION_SINGLEFLIGHT_OBSERVABILITY private const val PREFS = "pp_m2_service_transport"; private const val KEY_SERVICE_TOKEN = "service_token"; private const val KEY_DISCOVERY_JSON = "discovery_json"; private const val KEY_DISCOVERY_AT = "discovery_at"; private const val KEY_FAILURES = "service_failures"; private const val KEY_CIRCUIT_UNTIL = "circuit_until"; private const val KEY_LAST_FALLBACK_PROBE_AT = "fallback_probe_at"; private const val AUTH_PREFS = "pick_pack_auth_session_v2"; private const val AUTH_TOKEN = "token"; private const val DISCOVERY_TTL_MS = 10 * 60_000L; private const val CIRCUIT_MS = 15_000L; private const val FALLBACK_PROBE_FAILURES = 3; private const val FALLBACK_PROBE_MIN_MS = 30_000L; val ADMIN_AUDIT_ACTIONS = setOf("staff_upsert","staff_delete","account_upsert","account_status","change_email","change_password"); val OPERATIONAL = setOf("enter", "exit", "resource_change", "labor_start", "labor_finish"); val SYNC_ACTIONS = setOf("sync_status", "sync_day", "sync_bootstrap") }
+   245	}
+   246	
+   247	object M2DeviceIdentity { fun id(context: Context): String { val p=context.getSharedPreferences("pp_m2_device",Context.MODE_PRIVATE);p.getString("id",null)?.let{return it}; val androidId=android.provider.Settings.Secure.getString(context.contentResolver,android.provider.Settings.Secure.ANDROID_ID).orEmpty(); val raw=if(androidId.isNotBlank()&&androidId!="9774d56d682e549c")"android-$androidId" else "install-${java.util.UUID.randomUUID()}"; val digest=MessageDigest.getInstance("SHA-256").digest("PickPack1291|$raw".toByteArray()).joinToString(""){(it.toInt()and 0xff).toString(16).padStart(2,'0')}; return "m2-$digest".also{p.edit().putString("id",it).apply()} } }
+--- SESSION MANAGER ---
+     1	package vn.pickpack1291.app.beta
+     2	
+     3	import android.content.Context
+     4	import android.os.Build
+     5	import org.json.JSONObject
+     6	import java.net.HttpURLConnection
+     7	import java.net.URL
+     8	import java.security.MessageDigest
+     9	import java.util.concurrent.atomic.AtomicBoolean
+    10	
+    11	/**
+    12	 * S44_SESSION_SINGLEFLIGHT_OBSERVABILITY
+    13	 * One process-wide owner for Service PDA session acquisition/refresh.
+    14	 * Never logs bearer/GAS tokens, verifier material, passwords, cookies or secrets.
+    15	 */
+    16	object M2ServiceSessionManager {
+    17	    private const val PREFS="pp_m2_service_transport"
+    18	    private const val KEY_SERVICE_TOKEN="service_token"
+    19	    private val lock=Any()
+    20	
+    21	    fun ensure(context:Context,base:String,gasTokenHint:String?=null,force:Boolean=false):String?=synchronized(lock){
+    22	        val app=context.applicationContext
+    23	        val prefs=app.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
+    24	        val current=prefs.getString(KEY_SERVICE_TOKEN,null)
+    25	        if(!force&&!current.isNullOrBlank())return@synchronized current
+    26	        val gasToken=gasTokenHint?.takeIf{it.isNotBlank()} ?: BetaApiClient(app).token
+    27	        if(gasToken.isNullOrBlank()){
+    28	            M2TransportDiagnostics.noteSession(app,-1,false,false,"GAS_SESSION_MISSING",null)
+    29	            return@synchronized null
+    30	        }
+    31	        var conn:HttpURLConnection?=null
+    32	        val started=System.currentTimeMillis()
+    33	        try{
+    34	            conn=(URL("${base.trimEnd('/')}/v1/auth/gas-session").openConnection() as HttpURLConnection).apply{
+    35	                requestMethod="POST";connectTimeout=3000;readTimeout=6000;doOutput=true;instanceFollowRedirects=true
+    36	                setRequestProperty("Content-Type","application/json; charset=utf-8")
+    37	                setRequestProperty("Accept","application/json")
+    38	                setRequestProperty("User-Agent","PickPack1291-S44/${BuildConfig.VERSION_NAME}")
+    39	            }
+    40	            val payload=JSONObject().put("gas_token",gasToken).put("device_id",M2DeviceIdentity.id(app)).put("device_label","${Build.MANUFACTURER} ${Build.MODEL}")
+    41	            conn.outputStream.use{it.write(payload.toString().toByteArray(Charsets.UTF_8))}
+    42	            val code=conn.responseCode
+    43	            val stream=if(code in 200..299)conn.inputStream else conn.errorStream
+    44	            val text=stream?.bufferedReader(Charsets.UTF_8)?.use{it.readText()}.orEmpty()
+    45	            val json=runCatching{if(text.isBlank())JSONObject() else JSONObject(text)}.getOrNull()
+    46	            val ok=code in 200..299&&json?.optBoolean("ok",false)==true
+    47	            val token=json?.optString("token").orEmpty()
+    48	            val sessionId=tokenFingerprint(json?.optJSONObject("session")?.optString("session_id").orEmpty().ifBlank{token})
+    49	            val reused=json?.optJSONObject("session")?.optBoolean("reused",false)?:false
+    50	            val error=if(ok)null else json?.optJSONObject("error")?.optString("code")?.ifBlank{null}?:json?.optString("error")?.ifBlank{null}?:"HTTP_$code"
+    51	            if(ok&&token.isNotBlank()){
+    52	                prefs.edit().putString(KEY_SERVICE_TOKEN,token).apply()
+    53	                M2TransportDiagnostics.noteSession(app,code,true,reused,null,sessionId,System.currentTimeMillis()-started)
+    54	                token
+    55	            }else{
+    56	                M2TransportDiagnostics.noteSession(app,code,false,reused,error,sessionId,System.currentTimeMillis()-started)
+    57	                null
+    58	            }
+    59	        }catch(t:Throwable){
+    60	            M2TransportDiagnostics.noteSession(app,-1,false,false,t.javaClass.simpleName+":"+(t.message?:"NETWORK"),null,System.currentTimeMillis()-started)
+    61	            null
+    62	        }finally{conn?.disconnect()}
+    63	    }
+    64	
+    65	    fun current(context:Context):String?=context.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE).getString(KEY_SERVICE_TOKEN,null)
+    66	
+    67	    /** A stale 401 response may only clear the exact bearer it used, never a newer token. */
+    68	    fun clearIfSame(context:Context,used:String?){
+    69	        if(used.isNullOrBlank())return
+    70	        synchronized(lock){
+    71	            val prefs=context.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
+    72	            if(prefs.getString(KEY_SERVICE_TOKEN,null)==used)prefs.edit().remove(KEY_SERVICE_TOKEN).apply()
+    73	        }
+    74	    }
+    75	
+    76	    fun clear(context:Context)=synchronized(lock){context.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE).edit().remove(KEY_SERVICE_TOKEN).apply()}
+    77	
+    78	    private fun tokenFingerprint(value:String):String?{
+    79	        if(value.isBlank())return null
+    80	        val d=MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+    81	        return d.take(6).joinToString(""){(it.toInt()and 0xff).toString(16).padStart(2,'0')}
+    82	    }
+    83	}
+    84	
+    85	/** Safe, bounded diagnostics. No authentication material is stored. */
+    86	object M2TransportDiagnostics {
+    87	    private const val PREFS="pp_m2_transport_diag_s44"
+    88	    private val pumpRunning=AtomicBoolean(false)
+    89	    private fun prefs(c:Context)=c.applicationContext.getSharedPreferences(PREFS,Context.MODE_PRIVATE)
+    90	    private fun edit(c:Context,block:(android.content.SharedPreferences.Editor)->Unit){val e=prefs(c).edit();block(e);e.apply()}
+    91	
+    92	    fun noteWake(c:Context,source:String)=edit(c){it.putString("last_wake",source.take(40)).putLong("last_wake_at",System.currentTimeMillis())}
+    93	    fun notePumpStart(c:Context,count:Int){pumpRunning.set(true);edit(c){it.putLong("pump_start_at",System.currentTimeMillis()).putInt("pump_start_items",count).putString("pump_result","RUNNING")}}
+    94	    fun notePumpEnd(c:Context,ok:Boolean,error:String?=null){pumpRunning.set(false);edit(c){it.putLong("pump_end_at",System.currentTimeMillis()).putString("pump_result",if(ok)"SUCCESS" else "RETRY");if(error.isNullOrBlank())it.remove("pump_error") else it.putString("pump_error",safe(error,300))}}
+    95	    fun noteBatch(c:Context,code:Int,ok:Boolean,error:String?,count:Int,durationMs:Long){edit(c){it.putLong("batch_at",System.currentTimeMillis()).putInt("batch_http",code).putBoolean("batch_ok",ok).putInt("batch_items",count).putLong("batch_ms",durationMs);if(error.isNullOrBlank())it.remove("batch_error") else it.putString("batch_error",safe(error,300))}}
+    96	    fun noteSession(c:Context,code:Int,ok:Boolean,reused:Boolean,error:String?,fingerprint:String?,durationMs:Long=0){edit(c){it.putLong("session_at",System.currentTimeMillis()).putInt("session_http",code).putBoolean("session_ok",ok).putBoolean("session_reused",reused).putLong("session_ms",durationMs);if(fingerprint.isNullOrBlank())it.remove("session_fp") else it.putString("session_fp",fingerprint);if(error.isNullOrBlank())it.remove("session_error") else it.putString("session_error",safe(error,300))}}
+    97	
+    98	    fun snapshotLines(context:Context):List<String>{
+    99	        val app=context.applicationContext;prefs(app).let{p->
+   100	            val serviceTokenPresent=!app.getSharedPreferences("pp_m2_service_transport",Context.MODE_PRIVATE).getString("service_token",null).isNullOrBlank()
+   101	            val transport=app.getSharedPreferences("pp_m2_service_transport",Context.MODE_PRIVATE)
+   102	            return listOf(
+   103	                "diag_schema=S44_V1",
+   104	                "pump_running=${pumpRunning.get()}",
+   105	                "pump_start_at_ms=${p.getLong("pump_start_at",0)}",
+   106	                "pump_end_at_ms=${p.getLong("pump_end_at",0)}",
+   107	                "pump_start_items=${p.getInt("pump_start_items",0)}",
+   108	                "pump_result=${safe(p.getString("pump_result","").orEmpty(),80)}",
+   109	                "pump_error=${safe(p.getString("pump_error","").orEmpty(),300)}",
+   110	                "last_wake=${safe(p.getString("last_wake","").orEmpty(),40)}",
+   111	                "last_wake_at_ms=${p.getLong("last_wake_at",0)}",
+   112	                "batch_at_ms=${p.getLong("batch_at",0)}",
+   113	                "batch_http=${p.getInt("batch_http",0)}",
+   114	                "batch_ok=${p.getBoolean("batch_ok",false)}",
+   115	                "batch_items=${p.getInt("batch_items",0)}",
+   116	                "batch_ms=${p.getLong("batch_ms",0)}",
+   117	                "batch_error=${safe(p.getString("batch_error","").orEmpty(),300)}",
+   118	                "service_token_present=$serviceTokenPresent",
+   119	                "session_at_ms=${p.getLong("session_at",0)}",
+   120	                "session_http=${p.getInt("session_http",0)}",
+   121	                "session_ok=${p.getBoolean("session_ok",false)}",
+   122	                "session_reused=${p.getBoolean("session_reused",false)}",
+   123	                "session_ms=${p.getLong("session_ms",0)}",
+   124	                "session_fp=${safe(p.getString("session_fp","").orEmpty(),40)}",
+   125	                "session_error=${safe(p.getString("session_error","").orEmpty(),300)}",
+   126	                "service_failures=${transport.getInt("service_failures",0)}",
+   127	                "service_circuit_until_ms=${transport.getLong("circuit_until",0)}",
+   128	                "runtime_route=${safe(transport.getString("runtime_last_route","").orEmpty(),80)}",
+   129	                "runtime_error=${safe(transport.getString("runtime_last_error","").orEmpty(),300)}",
+   130	                "authority_mode=${safe(transport.getString("discovery_json","").orEmpty().let{runCatching{JSONObject(it).optString("authority_mode")}.getOrDefault("")},80)}"
+   131	            )
+   132	        }
+   133	    }
+   134	    private fun safe(v:String,n:Int)=v.replace("\n"," ").replace("\r"," ").take(n)
+   135	}
+--- BETA API 120-230 ---
+   120	                    iterations = j.optInt("iterations", 120_000),
+   121	                    challenge = j.getString("challenge"),
+   122	                    algorithm = algorithm
+   123	                )
+   124	                val request = JSONObject().apply {
+   125	                    put("action", "login")
+   126	                    put("login_id", login)
+   127	                    put("challenge_id", j.getString("challenge_id"))
+   128	                    put("proof", proof)
+   129	                    if (algorithm == "reset_sha256") put("upgrade_verifier", makeVerifier(password))
+   130	                }
+   131	                val result = post(request, authenticated = false)
+   132	                if (result.ok) {
+   133	                    val newToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+   134	                    if (newToken != null) persistSession(newToken, result.json.optJSONObject("account"))
+   135	                    m2Transport.loginFromPassword(login, password)
+   136	                }
+   137	                callback(result)
+   138	            } catch (t: Throwable) {
+   139	                callback(failure(t))
+   140	            }
+   141	        }
+   142	    }
+   143	
+   144	    fun call(action: String, payload: JSONObject = JSONObject(), callback: (Result) -> Unit) {
+   145	        if(action in M2ServiceTransport.OPERATIONAL){
+   146	            localExecutor.execute {
+   147	                try {      if (action in setOf("resource_master_list","resource_master_upsert","resource_master_delete","history_correction")) {
+   148	          val result=serviceOwnerCall(action,payload)
+   149	          if(result.code==401) clearSession()
+   150	          if(action in setOf("resource_master_upsert","resource_master_delete","history_correction")) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())
+   151	          callback(result)
+   152	          return@execute
+   153	      }
+   154	
+   155	                    val m2=m2Transport.operational(action,payload)
+   156	                    val result=Result(m2.ok,m2.code,m2.json,m2.error)
+   157	                    AppHistory.record(appContext,action,result.ok,result.error.orEmpty(),payload)
+   158	                    callback(result)
+   159	                } catch(t:Throwable){
+   160	                    val result=failure(t)
+   161	                    AppHistory.record(appContext,action,false,result.error.orEmpty(),payload)
+   162	                    callback(result)
+   163	                }
+   164	            }
+   165	            return
+   166	        }
+   167	        executor.execute {
+   168	        val trackUpload = SyncDirectionTracker.isUploadAction(action)
+   169	        if (trackUpload) SyncDirectionTracker.beginUpload()
+   170	
+   171	            try {
+   172	                val gasSession = token
+   173	      var m2: M2ServiceTransport.TransportResult? = when {
+   174	          action in M2RuntimeBridge.DIRECT_READS -> m2Runtime.directRead(action, payload, gasSession)
+   175	          action in M2ServiceTransport.OPERATIONAL -> m2Transport.operational(action, payload)
+   176	          action in M2ServiceTransport.SYNC_ACTIONS -> {
+   177	              m2Runtime.ensureServiceSession(gasSession)
+   178	              m2Transport.sync(action, payload)
+   179	          }
+   180	          else -> null
+   181	      }
+   182	      if (m2?.handled == true && m2?.code == 401 && !gasSession.isNullOrBlank()) {
+   183	          m2 = when {
+   184	              action in M2RuntimeBridge.DIRECT_READS -> m2Runtime.directRead(action, payload, gasSession)
+   185	              action in M2ServiceTransport.OPERATIONAL -> m2Runtime.recoverAndRetryOperational(action, payload, gasSession)
+   186	              action in M2ServiceTransport.SYNC_ACTIONS -> m2Runtime.recoverAndRetrySync(action, payload, gasSession)
+   187	              else -> m2
+   188	          }
+   189	      }
+   190	      val usedService = m2?.handled == true
+   191	      val result = if (usedService) {
+   192	          Result(m2!!.ok, m2.code, m2.json, m2.error)
+   193	      } else when (action) {
+   194	          "change_password" -> changePassword(payload)
+   195	          "account_upsert" -> accountUpsert(payload)
+   196	          else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
+   197	      }
+   198	      if (!usedService && action in M2ServiceTransport.OPERATIONAL) m2Transport.acknowledgeFallback(payload.optString("event_id"), result.ok, result.error)
+   199	      if (usedService && result.ok && result.code != 202) m2Runtime.recordDirect()
+   200	      else if (!usedService && (action in M2RuntimeBridge.DIRECT_READS || action in M2ServiceTransport.OPERATIONAL || action in M2ServiceTransport.SYNC_ACTIONS)) m2Runtime.recordFallback(m2?.error)
+   201	      if (result.ok) {
+   202	                    val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+   203	                    if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
+   204	                }
+   205	                if (result.ok && action in M2ServiceTransport.ADMIN_AUDIT_ACTIONS) adminAuditTransport.audit(action,payload)
+   206	      if (result.code == 401) clearSession()
+   207	                // S13 shared history is server-authoritative; no local mutation history.
+   208	                callback(result)
+   209	            } catch (t: Throwable) {
+   210	                val result=failure(t)
+   211	                // Failed requests do not create shared business history.
+   212	                callback(result)
+   213	            } finally {
+   214	                if (trackUpload) SyncDirectionTracker.endUpload()
+   215	            }
+   216	        }
+   217	    }
+   218	
+   219	    fun health(callback: (Result) -> Unit) {
+   220	        executor.execute {
+   221	            try { callback(post(JSONObject().put("action", "health"), authenticated = false)) }
+   222	            catch (t: Throwable) { callback(failure(t)) }
+   223	        }
+   224	    }
+   225	
+   226	    fun forgotPassword(loginId: String, callback: (Result) -> Unit) {
+   227	        executor.execute {
+   228	            try {
+   229	                callback(post(JSONObject().apply {
+   230	                    put("action", "forgot_password")
+verdict=PASS

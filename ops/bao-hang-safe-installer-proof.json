@@ -1,7 +1,0 @@
-{
-  "status": "PASS",
-  "installer": "SAFE_NO_RECONCILE",
-  "backend_mutations_on_setup": 0,
-  "gas_version": 76,
-  "verified_at": "2026-08-19T22:38:17.181793+00:00"
-}

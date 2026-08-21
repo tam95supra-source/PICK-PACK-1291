@@ -1,0 +1,53 @@
+name: Session2 D1 Migrations Diagnostic
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-d1-migrations-diagnostic-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Inspect migration tracking read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=/tmp/session2-d1-migrations-diagnostic-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npx wrangler d1 list --json >/tmp/list.json
+          D1_ID=$(node -e "const r=require('/tmp/list.json');const x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/wrangler-prod-diag.jsonc',JSON.stringify(c,null,2))" "$D1_ID"
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-prod-diag.jsonc --command "SELECT id,name,applied_at FROM d1_migrations ORDER BY id" --json >/tmp/applied.json
+          node - <<'NODE'
+          const fs=require('fs');const x=JSON.parse(fs.readFileSync('/tmp/applied.json','utf8'));const rows=x.flatMap(b=>b.results||[]);fs.appendFileSync('/tmp/session2-d1-migrations-diagnostic-result.txt','applied='+rows.map(r=>r.name).join(',')+'\n');
+          NODE
+          set +e
+          npx wrangler d1 migrations list pick-pack-1291-service-prod --remote --config /tmp/wrangler-prod-diag.jsonc >/tmp/pending.txt 2>&1
+          RC=$?
+          set -e
+          echo "migrations_list_rc=$RC" >> "$OUT"
+          grep -Eo '[0-9]{4}_[A-Za-z0-9_.-]+\.sql' /tmp/pending.txt | sort -u | paste -sd, - | sed 's/^/pending=/' >> "$OUT" || echo 'pending=' >> "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-d1-migrations-diagnostic-result.txt || echo 'diagnostic_failed=true' >/tmp/session2-d1-migrations-diagnostic-result.txt
+          cp /tmp/session2-d1-migrations-diagnostic-result.txt ops/session2-d1-migrations-diagnostic-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-d1-migrations-diagnostic-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record sanitized D1 migration diagnostic'
+          git push

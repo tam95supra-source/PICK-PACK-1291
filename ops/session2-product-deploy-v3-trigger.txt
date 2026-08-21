@@ -1,0 +1,1 @@
+Retrigger safe Session2 production Web/Service deploy after confirmed compile PASS and deploy bindings READY.

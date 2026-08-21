@@ -1,0 +1,81 @@
+name: Session14 Beta36 Build Candidate V2
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session14-beta36-build-candidate-v2-trigger.txt]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: session14-beta36-build-candidate-v2
+  cancel-in-progress: false
+env:
+  EXPECTED_VERSION_NAME: 0.4.2-beta.36
+  EXPECTED_VERSION_CODE: '42'
+  EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+  EXPECTED_FIREBASE_PROJECT_ID: pick-pack-1291-fcm-20260819
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANDROID_SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      ANDROID_SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '9.4.1' }
+      - name: Resolve Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]];then echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >>"$GITHUB_ENV";exit 0;fi
+          SDK="$RUNNER_TEMP/android-sdk";ZIP="$RUNNER_TEMP/commandlinetools.zip";curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP";echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP"|sha256sum -c -;mkdir -p "$SDK/cmdline-tools";unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline";mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest";echo "ANDROID_HOME=$SDK" >>"$GITHUB_ENV";echo "ANDROID_SDK_ROOT=$SDK" >>"$GITHUB_ENV";yes|"$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null||true;"$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build and verify S40 Beta36
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT";PHASE=CONFIG;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";tail -260 /tmp/gradle.log >>"$OUT" 2>/dev/null||true;exit $rc' ERR
+          for v in ANDROID_SIGNING_KEY_B64 ANDROID_SIGNING_STORE_PASSWORD ANDROID_SIGNING_KEY_PASSWORD;do [[ -n "${!v:-}" ]];done;test -s app/google-services.json
+          jq -e --arg p "$EXPECTED_PACKAGE" --arg project "$EXPECTED_FIREBASE_PROJECT_ID" '.project_info.project_id==$project and ([.client[]|select(.client_info.android_client_info.package_name==$p)]|length)==1' app/google-services.json >/dev/null
+          FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json);FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json);FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json);FIREBASE_API_KEY=$(jq -r --arg p "$EXPECTED_PACKAGE" '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
+          grep -q 'versionCode = 42' app/build.gradle.kts;grep -q 'versionName = "0.4.2-beta.36"' app/build.gradle.kts;grep -q 'apply_s40_owner_local_first_repair.py' tools/apply_s31b_preserve_admin_audit.py;echo config=PASS >>"$OUT"
+          PHASE=BUILD;gradle --no-daemon --build-cache :app:assembleBetaRelease -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" -PFIREBASE_API_KEY="$FIREBASE_API_KEY" -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID" >/tmp/gradle.log 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          o=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text();s=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt').read_text();p=Path('app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt').read_text();t=Path('app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt').read_text();w=Path('app/src/main/java/vn/pickpack1291/app/beta/M2OutboxWorker.kt').read_text()
+          assert 'S40_OWNER_LOCAL_FIRST_REPAIR' in o
+          assert 'fun unresolvedMutations(' in s
+          assert 'store.unresolvedMutations(500)' in p
+          assert 'store.unresolvedMutations(100)' in t
+          assert 'PdaLocalProjection.employeeContext(this,resolved)' in o
+          assert 'if(localNow!=null) renderEmployee(localNow,localOptions)' in o
+          assert 'Service chưa xác nhận được; thao tác vẫn lưu local' in o
+          assert 'overlay.optString("reconciliation_state")=="LOCAL_PENDING"' in o
+          assert 'val pending=rows.count{statusOf(it)=="PENDING"}' in o
+          assert 'val failed=rows.count{statusOf(it)=="FAILED"}' in o
+          assert 'updateMetric(allBtn,rows.size)' in o
+          assert 'ExistingWorkPolicy.REPLACE' in w
+          hs=o.index('    private fun historyScreen(){');he=o.index('    private fun historyTimeline(',hs);hist=o[hs:he]
+          assert 'val pageSize=100;var pageStart=0' in hist and 'drop(pageStart).take(pageSize)' in hist and 'pageSize+=60' not in hist
+          for x in ['S38_ATTENDANCE_UI','PHÁT LẠI USER ĐANG DÙNG','TRÙNG USER','pda_status_at_enter','pda_exit_status','PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST','Ca HC','Tình trạng:']: assert x in o,x
+          PY
+          APK_UNSIGNED=$(find app/build/outputs/apk/beta/release -maxdepth 1 -type f -name '*.apk'|head -1);[[ -n "$APK_UNSIGNED" && -s "$APK_UNSIGNED" ]];echo build=PASS >>"$OUT";echo s40_local_first_contract=PASS >>"$OUT";echo s40_unresolved_flush_contract=PASS >>"$OUT";echo history_exact_counts_contract=PASS >>"$OUT";echo history_page100_contract=PASS >>"$OUT";echo s38_attendance_contract=PASS >>"$OUT"
+          PHASE=SIGN;printf '%s' "$ANDROID_SIGNING_KEY_B64"|base64 -d >/tmp/release.jks;mapfile -t ALIASES < <(keytool -list -v -keystore /tmp/release.jks -storepass "$ANDROID_SIGNING_STORE_PASSWORD" 2>/dev/null|sed -n 's/^Alias name: //p');[[ ${#ALIASES[@]} -eq 1 ]];BT="$ANDROID_HOME/build-tools/36.0.0";"$BT/zipalign" -f -p 4 "$APK_UNSIGNED" /tmp/beta36-aligned.apk;mkdir -p /tmp/beta36-release;APK=/tmp/beta36-release/pick-pack-1291-public-beta-0.4.2-beta.36.apk;"$BT/apksigner" sign --ks /tmp/release.jks --ks-key-alias "${ALIASES[0]}" --ks-pass "pass:$ANDROID_SIGNING_STORE_PASSWORD" --key-pass "pass:$ANDROID_SIGNING_KEY_PASSWORD" --out "$APK" /tmp/beta36-aligned.apk;"$BT/apksigner" verify --verbose --print-certs "$APK" >/tmp/apksigner.txt;SIGNER=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' /tmp/apksigner.txt|head -1|tr '[:upper:]' '[:lower:]');[[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]];BADGING=$("$BT/aapt" dump badging "$APK"|head -1);[[ "$BADGING" == *"name='$EXPECTED_PACKAGE'"* && "$BADGING" == *"versionCode='$EXPECTED_VERSION_CODE'"* && "$BADGING" == *"versionName='$EXPECTED_VERSION_NAME'"* ]];SHA=$(sha256sum "$APK"|awk '{print $1}');SIZE=$(stat -c%s "$APK");printf '%s  %s\n' "$SHA" 'pick-pack-1291-public-beta-0.4.2-beta.36.apk' >/tmp/beta36-release/SHA256SUMS-beta36.txt;echo sign=PASS >>"$OUT";echo apk_size=$SIZE >>"$OUT";echo apk_sha256=$SHA >>"$OUT";echo signer_sha256=$SIGNER >>"$OUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: beta36-release-candidate, path: /tmp/beta36-release/, retention-days: 14, if-no-files-found: error }
+      - name: Record artifact and result
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail;for i in 1 2 3 4 5;do curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" >/tmp/a.json;ID=$(jq -r '.artifacts[]|select(.name=="beta36-release-candidate")|.id' /tmp/a.json|head -1);[[ -n "$ID" && "$ID" != null ]]&&break;sleep 2;done;[[ -n "$ID" && "$ID" != null ]];echo artifact_id=$ID >>/tmp/r;echo artifact_name=beta36-release-candidate >>/tmp/r;echo stable=UNTOUCHED >>/tmp/r;echo merge_pr38=UNTOUCHED >>/tmp/r;echo verdict=PASS >>/tmp/r
+      - name: Persist result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r||echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r||{ echo stable=UNTOUCHED >>/tmp/r;echo merge_pr38=UNTOUCHED >>/tmp/r;echo verdict=FAILED_OR_STOPPED >>/tmp/r;};cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session14-beta36-build-candidate-v2-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session14-beta36-build-candidate-v2-result.txt;git diff --cached --quiet||git commit -m 'ops: record Beta36 signed candidate v2';git push origin HEAD:agent/service-migration-m2

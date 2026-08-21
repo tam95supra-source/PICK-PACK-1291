@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:00:00Z
+purpose=20-round no-write probe of health/mobile/session/legacy-batch routes after workflow registration
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

@@ -1,0 +1,61 @@
+checked_at=2026-08-20T16:04:30Z
+head_sha=031a0fac41d8f2c3faa05f80af6d93f1f7bd308e
+transform_rc=0
+1146:        "diagnostic_log"->R.drawable.ic_pp_log
+1153:            "staff_upsert"->"Đã lưu thông tin nhân sự.";"staff_delete"->"Đã xóa nhân sự.";"diagnostic_log"->"Đã gửi báo lỗi."
+--- snippets ---
+NEEDLE sync_state= AT -1
+NEEDLE type=MANUAL AT -1
+NEEDLE type=DAILY AT -1
+NEEDLE diagnostic_log AT 131038
+" else it}
+    private fun selectByValue(sp:Spinner,values:List<String>,target:String){val i=values.indexOf(target);if(i>=0)sp.setSelection(i)}
+    private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(DateTimeFormatter.ofPattern("HH:mm:ss dd/MM/yyyy"))}catch(_:Throwable){v}}
+    private fun greeting():String{
+        val hour=java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        return when(hour){in 5..10->"Chào buổi sáng";in 11..12->"Chào buổi trưa";in 13..17->"Chào buổi chiều";else->"Chào buổi tối"}
+    }
+    private fun normalizePhone(v:String):String{
+        val digits=v.filter{it.isDigit()}
+        return if(digits.length==9&&!digits.startsWith("0"))"0$digits" else digits
+    }
+    private fun historyIcon(action:String)=when(action){
+        "enter","exit"->R.drawable.ic_pp_scan
+        "labor_start","labor_finish"->R.drawable.ic_pp_task
+        "resource_change"->R.drawable.ic_pp_resource
+        "staff_upsert","staff_delete"->R.drawable.ic_pp_staff
+        "change_password","change_email","account_upsert","account_status"->R.drawable.ic_pp_account
+        "diagnostic_log"->R.drawable.ic_pp_log
+        else->R.drawable.ic_pp_history
+    }
+    private fun historyFriendlyDetail(action:String,raw:String,ok:Boolean):String{
+        if(ok)return when(action){
+            "enter"->"Đã ghi nhận vào ca.";"exit"->"Đã ghi nhận ra ca.";"resource_change"->"Đã cập nhật tài nguyên."
+            "labor_start"->"Đã bắt đầu công nhật.";"labor_finish"->"Đã hoàn thành công nhật."
+            "staff_upsert"->"Đã lưu thông tin nhân sự.";"staff_delete"->"Đã xóa nhân sự.";"diagnostic_log"->"Đã gửi báo lỗi."
+            "change_password"->"Đã đổi mật khẩu.";"change_email"->"Đã đổi mail.";"account_upsert"->"Đã cập nhật tài khoản.";"account_status"->"Đã đổi trạng thái tài khoản."
+            else->"Đã hoàn tất thao tác."
+        }
+        val e=raw.uppercase()
+        return when{
+            e.contains("RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Hãy chọn tài nguyên khác."
+            e.contains("USER_PICK_USED_TODAY")->"User Pick này đã được sử dụng trong ngày."
+            e.contains("USER_PACK_USED_TODAY")->"User Pack này đã được sử dụng trong ngày."
+            e.contains("LABOR_ALREADY_ACTIVE")->"Nhân sự đang có công nhật chưa hoàn thành."
+            e.contains("UNAUTHORIZED")->"Phiên đăng nhập đã thay đổi. Vui lòng đăng nhập lại."
+            e.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này."
+            e.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy nhân sự."
+            raw.isBlank()->"Thao tác chưa hoàn tất. Vui lòng thử lại."
+            else->"Thao tác chưa hoàn tất. Kiểm tra kết nối hoặc dữ liệu rồi thử lại."
+        }
+    }
+    private fun roleText(v:String)=when(v){"SUPERADMIN"->"Superadmin";"ADMIN"->"Admin";"USER"->"Điều phối";else->v}
+    private fun workText(v:String)=when(v){"PICK"->"Pick";"PACK"->"Pack";else->"Không"}
+    private fun foldLocal(v:String)=java.text.Normalizer.normalize(v,java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"),"").uppercase().trim()
+    private fun dash(v:String)=v.takeIf{it.isNotBlank()&&it!="null"}?:"—"
+    private fun txt(v:String,s:Float,c:Int,b:Boolean)=TextView(this).apply{text=v;textSize=s;setTextColor(c);typeface=if(b)Typeface.DEFAULT_BOLD else Typeface.DEFAULT}
+    private fun column(c:Int)=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setBackgroundColor(c)}
+    private fun row(c:Int)=LinearLayout(this).apply{orientation=LinearLayout.HORIZONTAL;setBackgroundColor(c)}
+    private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(h))}
+    private fun round(c:Int,r:Int)=GradientDrawable().apply{setColor(c);cornerR
+verdict=PASS

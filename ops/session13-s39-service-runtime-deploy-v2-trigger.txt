@@ -1,0 +1,4 @@
+triggered_at=2026-08-20T20:37:00+07:00
+reason=wire_mobile_routes_directly_in_product_entrypoint
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

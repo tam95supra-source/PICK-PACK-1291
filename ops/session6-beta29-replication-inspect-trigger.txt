@@ -1,0 +1,4 @@
+requested_at=2026-08-20T09:18:00+07:00
+mode=READ_ONLY_STUCK_ROW_TYPES
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN

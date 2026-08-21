@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:37:30Z
+purpose=rerun permanent production mobile/session route fix with 401/400 endpoint gates after workflow registration
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

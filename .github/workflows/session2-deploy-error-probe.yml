@@ -1,0 +1,92 @@
+name: Session2 Deploy Error Probe
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-deploy-error-probe-trigger.txt' ]
+
+permissions:
+  contents: write
+concurrency:
+  group: session2-deploy-error-probe
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  SERVICE_GENERATION: m2-prod-20260819-001
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Fresh no-mutation safety gate and deploy attempt
+        shell: bash
+        run: |
+          set +e
+          set -u
+          OUT=/tmp/session2-deploy-error-probe-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [[ -n "${!v:-}" ]] || { echo "binding_missing=$v" >> "$OUT"; exit 10; }; done
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" >/tmp/health.json
+          if ! jq -e --arg g "$SERVICE_GENERATION" '.ok==true and .environment=="production" and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/health.json >/dev/null; then echo 'safety_health=FAIL' >> "$OUT"; exit 11; fi
+          echo 'safety_health=PASS' >> "$OUT"
+          cd service
+          npm install --no-audit --no-fund >/dev/null 2>/tmp/npm.err
+          npx wrangler d1 list --json >/tmp/d1-list.json 2>/tmp/d1-list.err
+          D1_ID=$(node -e "const r=require('/tmp/d1-list.json');const x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          if [[ -z "$D1_ID" ]]; then echo 'd1_resolve=FAIL' >> "$OUT"; exit 12; fi
+          export D1_ID
+          node - <<'NODE'
+          const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;
+          c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};
+          c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.env.D1_ID;delete c.secrets;
+          fs.writeFileSync('/tmp/wrangler-prod-probe.jsonc',JSON.stringify(c,null,2));
+          NODE
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config /tmp/wrangler-prod-probe.jsonc --command "SELECT mode,scope,service_generation FROM authority_state WHERE singleton_id=1; SELECT value AS reconciling FROM system_meta WHERE key='m2_reconciling'; SELECT state,pending_count FROM replication_status WHERE singleton_id=1;" --json >/tmp/d1-safe.json 2>/tmp/d1-safe.err
+          python3 - <<'PY'
+          import json
+          x=json.load(open('/tmp/d1-safe.json'));s=[b.get('results',[]) for b in x if isinstance(b,dict) and isinstance(b.get('results'),list)];assert len(s)>=3;a=s[0][0];assert a['mode']=='SERVICE_PRIMARY' and a['scope']=='PRODUCTION';assert str(s[1][0].get('reconciling') if s[1] else '0')!='1';assert s[2][0]['state']=='HEALTHY' and int(s[2][0].get('pending_count') or 0)==0
+          PY
+          if [[ $? -ne 0 ]]; then echo 'd1_safety=FAIL' >> "$OUT"; exit 13; fi
+          echo 'd1_safety=PASS' >> "$OUT"
+          npx wrangler deploy --config /tmp/wrangler-prod-probe.jsonc --keep-vars >/tmp/deploy.stdout 2>/tmp/deploy.stderr
+          RC=$?
+          echo "deploy_rc=$RC" >> "$OUT"
+          if [[ $RC -eq 0 ]]; then
+            echo 'deploy=PASS' >> "$OUT"
+          else
+            echo 'deploy=FAIL' >> "$OUT"
+            python3 - <<'PY'
+          import re
+          s=open('/tmp/deploy.stderr',errors='replace').read()+"\n"+open('/tmp/deploy.stdout',errors='replace').read()
+          lines=[]
+          for line in s.splitlines():
+              if re.search(r'error|failed|invalid|workers.dev|durable|migration|binding|assets|code',line,re.I):
+                  line=re.sub(r'(?i)(token|secret|authorization|password)\s*[:=]\s*\S+',r'\1=<redacted>',line)
+                  line=re.sub(r'[A-Fa-f0-9]{32,}', '<id-redacted>', line)
+                  lines.append(line[:300])
+          out=' | '.join(lines[-8:])[:1800] or 'NO_MATCHING_ERROR_LINE'
+          with open('/tmp/session2-deploy-error-probe-result.txt','a') as f:f.write('deploy_error='+out.replace('\n',' ')+'\n')
+          PY
+          fi
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-deploy-error-probe-result.txt || echo 'probe_failed_before_output=true' >/tmp/session2-deploy-error-probe-result.txt
+          cp /tmp/session2-deploy-error-probe-result.txt ops/session2-deploy-error-probe-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-deploy-error-probe-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record sanitized deploy error probe'
+          git push

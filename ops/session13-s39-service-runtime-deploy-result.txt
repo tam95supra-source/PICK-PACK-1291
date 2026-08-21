@@ -1,0 +1,17 @@
+checked_at=2026-08-20T13:29:07Z
+head_sha=00c18f34aa3acfbc75bf1b3fd7ff4ff0244fb25d
+authority_gate=SERVICE_PRIMARY_8_18505
+replication_gate=HEALTHY_0
+pr38_gate=OPEN_DRAFT_UNMERGED
+source_check=PASS
+backup_sha256=803a275d39be048c8a5f589ee56d191a46f63340daef54ac533257581639e12d
+d1_id=b619df89-528d-4126-a948-de0425037b11
+backup=PASS
+deploy=PASS
+mobile_unauth_http=404
+session_empty_http=404
+failed_phase=VERIFY
+failed_rc=1
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

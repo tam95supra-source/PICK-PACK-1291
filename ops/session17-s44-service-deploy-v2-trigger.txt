@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:43:00Z
+purpose=correct Service check then persist/deploy S44
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

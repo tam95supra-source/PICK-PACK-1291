@@ -1,8 +1,0 @@
-{
-  "status": "PASS",
-  "mode": "SOURCE_DRIVEN_DELTA_V1",
-  "receiver": "PASS",
-  "sender": "PASS",
-  "receiver_url_sha256": "614bfb38030db412260eefc82479debee6e0a8408b7e1e8aff8e642b89b8fe5a",
-  "verified_at": "2026-08-19T22:34:28.663324+00:00"
-}

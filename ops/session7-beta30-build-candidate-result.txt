@@ -1,0 +1,16 @@
+checked_at=2026-08-20T03:24:28Z
+head_sha=77007d104ad7089117cf661bd7586eff9b1d3bf2
+config=PASS
+build=PASS
+s31_contract=PASS
+s32_history_flush_contract=PASS
+s34_owner_contract=PASS
+site1291_report_contract=PASS
+admin_audit_preserved=PASS
+sign=PASS
+apk_size=12859731
+apk_sha256=142535c861b2f1104cb35f65e1edb1839dd9d9fc436969be8707adaa427ae224
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9392115269
+artifact_name=beta30-release-candidate
+verdict=PASS

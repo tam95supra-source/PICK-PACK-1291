@@ -1,0 +1,12 @@
+checked_at=2026-08-19T17:03:43Z
+head_sha=ff80e4fc0aecbfe5b6dace217e04cb0c5d35cdad
+authority=PASS
+ota_discovery=PASS
+public_download=PASS
+apk_size=12810579
+apk_sha256=947b0cf28fe51a3cc1a4a310b8e35711426336788b3f6885980ac5e3a1d2a19e
+final_authority=SERVICE_PRIMARY_8
+replication=HEALTHY_0
+stable=UNTOUCHED_BY_WORKFLOW
+merge_pr38=UNTOUCHED
+verdict=PASS

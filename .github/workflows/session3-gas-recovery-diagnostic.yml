@@ -1,0 +1,71 @@
+name: Session3 GAS Recovery Diagnostic
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-gas-recovery-diagnostic-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - name: Read-only diagnostic
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/result.txt
+          printf 'checked_at=%s\nmode=READ_ONLY\n' "$(date -u +%FT%TZ)" > "$OUT"
+          missing=''
+          for v in CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID; do [[ -n "${!v:-}" ]] || missing="$missing,$v"; done
+          if [[ -n "$missing" ]]; then echo "secret_gate=FAIL" >> "$OUT"; echo "failed_phase=SECRET_GATE" >> "$OUT"; exit 0; fi
+          echo secret_gate=PASS >> "$OUT"
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}'); echo "::add-mask::$BRIDGE"
+          RESP=$(curl -sS --max-time 25 https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'try{const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")}catch{}' "$RESP")
+          if [[ -z "$TOKEN" ]]; then echo oauth=FAIL >> "$OUT"; echo failed_phase=OAUTH_TOKEN >> "$OUT"; exit 0; fi
+          echo "::add-mask::$TOKEN"; echo oauth=PASS >> "$OUT"
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          HTTP=$(curl -sS --max-time 25 -o /tmp/live.json -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          echo script_get_http=$HTTP >> "$OUT"
+          if [[ "$HTTP" != 200 ]]; then echo failed_phase=SCRIPT_GET >> "$OUT"; exit 0; fi
+          node -e 'const j=require("/tmp/live.json"),n=(j.files||[]).map(x=>x.name); if(!n.includes("SERVICE_MIGRATION_M2")||!n.includes("PICK_PACK_API"))process.exit(2)' || { echo source_files=FAIL >> "$OUT"; echo failed_phase=SOURCE_FILES >> "$OUT"; exit 0; }
+          echo source_files=PASS >> "$OUT"
+          curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/discovery.json
+          node - <<'NODE' >> "$OUT"
+          const j=require('/tmp/discovery.json'),a=j.authority||{};
+          console.log(`discovery=${j.authority_mode||a.mode||''}|${a.authority_epoch||0}|${a.authority_seq||0}`)
+          NODE
+          curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"m2_internal_reconcile_status\",\"_bridge_secret\":\"$BRIDGE\"}" >/tmp/probe.json
+          node - <<'NODE' >> "$OUT"
+          const j=require('/tmp/probe.json');
+          if(j.ok) console.log(`adapter_probe=PASS|${j.authority_mode||''}|${j.authority_epoch||0}|${j.fallback_seq||0}|${j.pending||0}`);
+          else console.log(`adapter_probe=FAIL|${String(j.error||'UNKNOWN').slice(0,80)}`);
+          NODE
+          echo verdict=DIAGNOSTIC_COMPLETE >> "$OUT"
+      - name: Record diagnostic
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nmode=READ_ONLY\nfailed_phase=BOOTSTRAP\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/result.copy
+          git reset --hard HEAD >/dev/null
+          cp /tmp/result.copy ops/session3-gas-recovery-diagnostic-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-gas-recovery-diagnostic-result.txt
+          git diff --cached --quiet || (git commit -m 'ops: record GAS recovery diagnostic' && git push)

@@ -1,0 +1,272 @@
+name: Service M2 Production Cutover V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/m2-live-cutover-v2-trigger.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-production-cutover-v2
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_GENERATION: m2-prod-20260819-001
+  STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
+  GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  BETA_VERSION: 0.4.2-beta.19
+  BETA_VERSION_CODE: '25'
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+
+jobs:
+  beta-ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+    outputs:
+      beta_sha256: ${{ steps.beta.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+      - name: Verify owner cutover trigger and Beta source lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            grep -qx 'confirmation=OWNER_LOCKED_M2_CUTOVER' ops/m2-live-cutover-v2-trigger.txt
+            grep -qx "target_version=$BETA_VERSION" ops/m2-live-cutover-v2-trigger.txt
+          fi
+          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]] || { echo "MISSING_REQUIRED_SECRET:$v" >&2; exit 1; }; done
+          grep -q 'versionCode = 25' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.19"' app/build.gradle.kts
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Build sign and verify Beta19 before authority switch
+        id: beta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_HOME:-}"
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          test -x "$BT/apksigner"; test -x "$BT/aapt"
+          gradle --no-daemon --build-cache :app:assembleBetaRelease
+          UNSIGNED=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          test -s "$UNSIGNED"
+          KS="$RUNNER_TEMP/release.jks"
+          printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
+          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"
+          printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          mkdir -p dist/beta
+          OUT="dist/beta/pick-pack-1291-public-beta-$BETA_VERSION.apk"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" "$UNSIGNED"
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" >/tmp/cert.txt
+          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
+          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          "$BT/aapt" dump badging "$OUT" >/tmp/badge.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/badge.txt
+          grep -q "versionCode='$BETA_VERSION_CODE'" /tmp/badge.txt
+          grep -q "versionName='$BETA_VERSION'" /tmp/badge.txt
+          SHA=$(sha256sum "$OUT" | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          printf '%s  %s\n' "$SHA" "$(basename "$OUT")" > dist/beta/SHA256SUMS.txt
+          rm -f "$KS" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m2-beta19-cutover-candidate-${{ github.run_id }}
+          path: dist/beta/
+          retention-days: 30
+
+  cutover:
+    needs: beta-ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      BETA_SHA256: ${{ needs.beta-ready.outputs.beta_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Precutover live locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID SIGNING_STORE_PASSWORD BETA_SHA256; do [[ -n "${!v:-}" ]] || { echo "MISSING_REQUIRED_SECRET_OR_OUTPUT:$v" >&2; exit 1; }; done
+          H=$(curl -fsS --retry 6 --retry-delay 2 --retry-all-errors "$SERVICE_URL/health")
+          node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||j.environment!=="staging-shadow"||j.authority?.scope!=="STAGING_SHADOW"||j.authority?.mode!=="SERVICE_PRIMARY"||j.generation!==process.env.SERVICE_GENERATION||j.replication?.state!=="HEALTHY"||Number(j.replication?.pending_count||0)!==0)throw new Error(JSON.stringify(j))' "$H"
+          C=$(curl -fsS "$SERVICE_URL/v1/capabilities")
+          node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||j.production_cutover!==false)throw new Error(JSON.stringify(j))' "$C"
+          curl -fsS "$SERVICE_URL/" | grep -qi '<html'
+          curl -fsS "$SERVICE_URL/manifest.webmanifest" | grep -q 'Pick Pack 1291'
+      - name: Derive runtime-only secrets and Google token
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRIDGE=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$GOOGLE_OAUTH_CLIENT_SECRET|pick-pack-1291-m2-bridge-v1" | sha256sum | awk '{print $1}')
+          ADMIN=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID|$SIGNING_STORE_PASSWORD|pick-pack-1291-m2-admin-v1" | sha256sum | awk '{print $1}')
+          echo "::add-mask::$BRIDGE"; echo "::add-mask::$ADMIN"
+          echo "GAS_BRIDGE_SHARED_SECRET=$BRIDGE" >> "$GITHUB_ENV"
+          echo "M2_ADMIN_TOKEN=$ADMIN" >> "$GITHUB_ENV"
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(node -e 'const j=JSON.parse(process.argv[1]);process.stdout.write(j.access_token||"")' "$RESP")
+          test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo "GOOGLE_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      - name: GAS fence promote and activate Service primary
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW"
+          if [[ "$RAW" =~ /s/([^/]+) ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          test -n "$SCRIPT_ID"; test -n "$DEPLOYMENT_ID"
+
+          AUTH=$(curl -fsS "$SERVICE_URL/v1/authority")
+          CURRENT_EPOCH=$(node -e 'const j=JSON.parse(process.argv[1]);if(j.authority.scope!=="STAGING_SHADOW"||j.authority.mode!=="SERVICE_PRIMARY")process.exit(2);process.stdout.write(String(j.authority.authority_epoch))' "$AUTH")
+          TARGET_EPOCH=$((CURRENT_EPOCH+1))
+          export TARGET_EPOCH SERVICE_URL SERVICE_GENERATION GAS_BRIDGE_SHARED_SECRET
+          echo "TARGET_EPOCH=$TARGET_EPOCH" >> "$GITHUB_ENV"
+
+          H=$(curl -sS -o /tmp/gas-deployment-before.json -w '%{http_code}' -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-deployment-before.json; exit 1; }
+          node - <<'NODE'
+          const fs=require('fs'),j=require('/tmp/gas-deployment-before.json');
+          if(!j.deploymentConfig?.versionNumber)throw new Error('PREVIOUS_GAS_DEPLOYMENT_VERSION_MISSING');
+          fs.writeFileSync('/tmp/gas-restore.json',JSON.stringify({deploymentConfig:{scriptId:j.deploymentConfig.scriptId,versionNumber:j.deploymentConfig.versionNumber,manifestFileName:j.deploymentConfig.manifestFileName||'appsscript',description:j.deploymentConfig.description||'Pre-M2 production restore'}}));
+          NODE
+
+          PROMOTED=0
+          FENCED=0
+          restore_if_safe(){
+            rc=$?
+            if [[ $rc -ne 0 && "$FENCED" == 1 && "$PROMOTED" == 0 ]]; then
+              echo 'Cutover failed before Service promotion; restoring previous GAS deployment.' >&2
+              curl -sS -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-restore.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID" >/tmp/gas-restore.out || true
+            fi
+            exit $rc
+          }
+          trap restore_if_safe ERR
+
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          p=Path('google-apps-script/PICK_PACK_API.gs')
+          s=p.read_text(); needle="function doPost(e) {\n  try {"; injection="function doPost(e) {\n  try {\n    ppM2ApplyLiveConfig_();"
+          if injection not in s:
+              if needle not in s: raise SystemExit('doPost anchor missing')
+              s=s.replace(needle,injection,1)
+          p.write_text(s)
+          cfg={'marker':'m2-reconciling-'+os.environ['GITHUB_SHA'],'service_url':os.environ['SERVICE_URL'],'bridge_secret':os.environ['GAS_BRIDGE_SHARED_SECRET'],'mode':'RECONCILING','epoch':int(os.environ['TARGET_EPOCH']),'generation':os.environ['SERVICE_GENERATION'],'scope':'PRODUCTION'}
+          js='const PP_M2_LIVE_CONFIG=Object.freeze('+json.dumps(cfg,separators=(',',':'))+');\n'
+          js+="function ppM2ApplyLiveConfig_(){const p=PropertiesService.getScriptProperties(),c=PP_M2_LIVE_CONFIG;if(p.getProperty('PP_M2_CONFIG_VERSION')===c.marker)return;p.setProperties({PP_M2_CONFIG_VERSION:c.marker,PP_M2_SERVICE_URL:c.service_url,PP_M2_GAS_BRIDGE_SECRET:c.bridge_secret,PP_M2_AUTHORITY_MODE:c.mode,PP_M2_AUTHORITY_EPOCH:String(c.epoch),PP_M2_FALLBACK_SEQ:'0',PP_M2_SERVICE_GENERATION:c.generation,PP_M2_AUTHORITY_SCOPE:c.scope},false);}\n"
+          Path('google-apps-script/M2_LIVE_CONFIG.gs').write_text(js)
+          b=Path('google-apps-script');files=[{'name':x.stem,'type':'SERVER_JS','source':x.read_text()} for x in sorted(b.glob('*.gs'))];files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()});Path('/tmp/gas-content-fence.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/gas-put-fence.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-content-fence.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-put-fence.out; exit 1; }
+          H=$(curl -sS -o /tmp/gas-version-fence.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 M2 RECONCILING fence"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-version-fence.json; exit 1; }
+          V=$(node -e 'const j=require("/tmp/gas-version-fence.json");process.stdout.write(String(j.versionNumber))')
+          node - <<'NODE' "$SCRIPT_ID" "$V"
+          const fs=require('fs');fs.writeFileSync('/tmp/gas-deploy-fence.json',JSON.stringify({deploymentConfig:{scriptId:process.argv[2],versionNumber:Number(process.argv[3]),manifestFileName:'appsscript',description:'Pick Pack 1291 M2 RECONCILING fence'}}));
+          NODE
+          H=$(curl -sS -o /tmp/gas-deploy-fence.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-deploy-fence.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-deploy-fence.out; exit 1; }
+          FENCED=1
+          OK=false
+          for i in $(seq 1 20); do
+            curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/discovery-fence.json || true
+            if node -e 'const j=require("/tmp/discovery-fence.json");process.exit(j.ok&&j.authority_mode==="RECONCILING"&&j.service_url===process.env.SERVICE_URL&&j.authority?.authority_epoch===Number(process.env.TARGET_EPOCH)?0:1)'; then OK=true; break; fi
+            sleep 3
+          done
+          [[ "$OK" == true ]] || { cat /tmp/discovery-fence.json; exit 1; }
+
+          BODY=$(node -e 'process.stdout.write(JSON.stringify({expected_epoch:Number(process.argv[1]),mode:"SERVICE_PRIMARY",scope:"PRODUCTION",service_generation:process.env.SERVICE_GENERATION,increment_epoch:true,reason:"OWNER_APPROVED_M2_CUTOVER",initiated_by:"github-actions-v2",confirmation:"OWNER_LOCKED_M2_CUTOVER"}))' "$CURRENT_EPOCH")
+          curl -fsS -X POST -H "x-m1-admin-token: $M2_ADMIN_TOKEN" -H 'content-type: application/json' "$SERVICE_URL/internal/authority/transition" -d "$BODY" >/tmp/promote.json
+          node -e 'const j=require("/tmp/promote.json");if(!j.ok||j.authority.scope!=="PRODUCTION"||j.authority.mode!=="SERVICE_PRIMARY"||j.authority.authority_epoch!==Number(process.env.TARGET_EPOCH))throw new Error(JSON.stringify(j))'
+          PROMOTED=1
+
+          python3 - <<'PY'
+          import json,os
+          from pathlib import Path
+          cfg={'marker':'m2-primary-'+os.environ['GITHUB_SHA'],'service_url':os.environ['SERVICE_URL'],'bridge_secret':os.environ['GAS_BRIDGE_SHARED_SECRET'],'mode':'SERVICE_PRIMARY','epoch':int(os.environ['TARGET_EPOCH']),'generation':os.environ['SERVICE_GENERATION'],'scope':'PRODUCTION'}
+          p=Path('google-apps-script/M2_LIVE_CONFIG.gs')
+          js='const PP_M2_LIVE_CONFIG=Object.freeze('+json.dumps(cfg,separators=(',',':'))+');\n'
+          js+="function ppM2ApplyLiveConfig_(){const p=PropertiesService.getScriptProperties(),c=PP_M2_LIVE_CONFIG;if(p.getProperty('PP_M2_CONFIG_VERSION')===c.marker)return;p.setProperties({PP_M2_CONFIG_VERSION:c.marker,PP_M2_SERVICE_URL:c.service_url,PP_M2_GAS_BRIDGE_SECRET:c.bridge_secret,PP_M2_AUTHORITY_MODE:c.mode,PP_M2_AUTHORITY_EPOCH:String(c.epoch),PP_M2_FALLBACK_SEQ:'0',PP_M2_SERVICE_GENERATION:c.generation,PP_M2_AUTHORITY_SCOPE:c.scope},false);}\n"
+          p.write_text(js)
+          b=Path('google-apps-script');files=[{'name':x.stem,'type':'SERVER_JS','source':x.read_text()} for x in sorted(b.glob('*.gs'))];files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()});Path('/tmp/gas-content-primary.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/gas-put-primary.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-content-primary.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-put-primary.out; exit 1; }
+          H=$(curl -sS -o /tmp/gas-version-primary.json -w '%{http_code}' -X POST -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 M2 SERVICE PRIMARY"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-version-primary.json; exit 1; }
+          V2=$(node -e 'const j=require("/tmp/gas-version-primary.json");process.stdout.write(String(j.versionNumber))')
+          node - <<'NODE' "$SCRIPT_ID" "$V2"
+          const fs=require('fs');fs.writeFileSync('/tmp/gas-deploy-primary.json',JSON.stringify({deploymentConfig:{scriptId:process.argv[2],versionNumber:Number(process.argv[3]),manifestFileName:'appsscript',description:'Pick Pack 1291 M2 SERVICE PRIMARY'}}));
+          NODE
+          H=$(curl -sS -o /tmp/gas-deploy-primary.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/gas-deploy-primary.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/gas-deploy-primary.out; exit 1; }
+          OK=false
+          for i in $(seq 1 20); do
+            curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/discovery-primary.json || true
+            if node -e 'const j=require("/tmp/discovery-primary.json");process.exit(j.ok&&j.authority_mode==="SERVICE_PRIMARY"&&j.service_url===process.env.SERVICE_URL&&j.authority?.authority_epoch===Number(process.env.TARGET_EPOCH)&&j.cutover_configured===true?0:1)'; then OK=true; break; fi
+            sleep 3
+          done
+          [[ "$OK" == true ]] || { cat /tmp/discovery-primary.json; exit 1; }
+          trap - ERR
+      - name: Verify production authority web and Google replica state
+        shell: bash
+        run: |
+          set -euo pipefail
+          H=$(curl -fsS --retry 5 --retry-delay 2 --retry-all-errors "$SERVICE_URL/health")
+          echo "$H" >/tmp/service-prod-health.json
+          node -e 'const j=JSON.parse(process.argv[1]);if(!j.ok||j.environment!=="production"||j.authority?.scope!=="PRODUCTION"||j.authority?.mode!=="SERVICE_PRIMARY"||j.authority?.authority_epoch!==Number(process.env.TARGET_EPOCH)||j.generation!==process.env.SERVICE_GENERATION)throw new Error(JSON.stringify(j))' "$H"
+          curl -fsS "$SERVICE_URL/" | grep -qi '<html'
+          curl -fsS "$SERVICE_URL/manifest.webmanifest" | grep -q 'Pick Pack 1291'
+          curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"service_discovery"}' >/tmp/discovery-final.json
+          node -e 'const j=require("/tmp/discovery-final.json");if(!j.ok||j.authority_mode!=="SERVICE_PRIMARY"||j.service_url!==process.env.SERVICE_URL||j.authority?.authority_epoch!==Number(process.env.TARGET_EPOCH))throw new Error(JSON.stringify(j))'
+      - name: Emit cutover evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p m2-cutover-evidence
+          cp /tmp/service-prod-health.json m2-cutover-evidence/service-health.json
+          cp /tmp/discovery-final.json m2-cutover-evidence/gas-discovery.json
+          cp /tmp/promote.json m2-cutover-evidence/authority-promotion.json
+          node - <<'NODE'
+          const fs=require('fs');fs.writeFileSync('m2-cutover-evidence/state.json',JSON.stringify({source_commit:process.env.GITHUB_SHA,service_url:process.env.SERVICE_URL,generation:process.env.SERVICE_GENERATION,target_epoch:Number(process.env.TARGET_EPOCH),beta_version:process.env.BETA_VERSION,beta_version_code:Number(process.env.BETA_VERSION_CODE),beta_sha256:process.env.BETA_SHA256,authority_scope:'PRODUCTION',authority_mode:'SERVICE_PRIMARY',ota_published:false,stable_published:false},null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m2-production-cutover-evidence-${{ github.run_id }}
+          path: m2-cutover-evidence/
+          retention-days: 30

@@ -1,0 +1,4 @@
+triggered_at=2026-08-20T10:52:00+07:00
+purpose=Verify Beta30 direct Drive upload OTA discovery/public bytes/stable isolation
+stable=UNTOUCHED
+replication=HEALTHY_0

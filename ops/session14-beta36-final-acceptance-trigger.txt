@@ -1,0 +1,6 @@
+trigger=2026-08-20T14:18:00Z
+expected_version=0.4.2-beta.36
+expected_sha256=ae4cb230a868241def641370aea9eed9e617b1720790d7c240fddddc0dcda660
+beta_drive_apk_id=17Uu0yOGFA4dC3752SZGsGM0WW1a4LBEG
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

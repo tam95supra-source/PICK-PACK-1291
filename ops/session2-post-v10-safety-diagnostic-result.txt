@@ -1,0 +1,8 @@
+checked_at=2026-08-19T13:09:11Z
+service=SERVICE_PRIMARY|6|4|m2-prod-20260819-001
+replication=HEALTHY|0
+reconciling=0
+migration_0005=PASS
+web_sessions=0
+pda_sessions=1
+verdict=PASS

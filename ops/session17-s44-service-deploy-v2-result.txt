@@ -1,0 +1,14 @@
+checked_at=2026-08-20T16:25:11Z
+trigger_head=c193d1b32e21ff55cdbf5c0440c0fd5244ea9223
+service_check=PASS
+source_head=c193d1b32e21ff55cdbf5c0440c0fd5244ea9223
+authority=SERVICE_PRIMARY_8_18505
+replication=HEALTHY_0
+mobile_unauth_http=401
+session_empty_http=400
+legacy_batch_unauth_http=401
+same_device_session_reuse=PASS
+attendance_source_persistence=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

@@ -1,0 +1,4 @@
+triggered_at=2026-08-20T10:48:30+07:00
+purpose=Publish Beta30 after schema fix and replication HEALTHY_0
+stable=UNTOUCHED
+signer=LOCKED

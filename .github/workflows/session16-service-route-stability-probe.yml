@@ -1,0 +1,55 @@
+name: Session16 Service Route Stability Probe
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session16-service-route-stability-probe-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session16-service-route-stability-probe
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Probe 20 rounds
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          : >/tmp/raw
+          for i in $(seq 1 20); do
+            H=$(curl -sS --max-time 8 -o /tmp/h -w '%{http_code},%{time_total}' "$SERVICE_URL/health" || echo 'CURLFAIL')
+            M=$(curl -sS --max-time 8 -o /tmp/m -w '%{http_code},%{time_total}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{}' || echo 'CURLFAIL')
+            S=$(curl -sS --max-time 8 -o /tmp/s -w '%{http_code},%{time_total}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}' || echo 'CURLFAIL')
+            B=$(curl -sS --max-time 8 -o /tmp/b -w '%{http_code},%{time_total}' -H 'content-type: application/json' "$SERVICE_URL/v1/legacy-mutations/batch" -d '{"events":[]}' || echo 'CURLFAIL')
+            echo "$i|$H|$M|$S|$B" >>/tmp/raw
+            sleep 0.35
+          done
+          python3 - <<'PY' >>"$OUT"
+          from collections import Counter
+          rows=[x.strip().split('|') for x in open('/tmp/raw') if x.strip()]
+          names=['health','mobile_unauth','session_empty','legacy_batch_unauth']; expected={'health':'200','mobile_unauth':'401','session_empty':'400','legacy_batch_unauth':'401'}
+          bad=0
+          for j,n in enumerate(names,1):
+              vals=[r[j].split(',')[0] for r in rows]
+              times=[]
+              for r in rows:
+                  try: times.append(float(r[j].split(',')[1])*1000)
+                  except: pass
+              c=Counter(vals); print(f'{n}_codes='+','.join(f'{k}:{v}' for k,v in sorted(c.items())))
+              if times: print(f'{n}_ms_min={min(times):.1f}');print(f'{n}_ms_max={max(times):.1f}');print(f'{n}_ms_avg={sum(times)/len(times):.1f}')
+              bad+=sum(v for k,v in c.items() if k!=expected[n])
+          print(f'unexpected_responses={bad}')
+          print('verdict='+('PASS' if bad==0 else 'UNSTABLE'))
+          PY
+      - name: Persist
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r||echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r||echo verdict=FAILED_OR_STOPPED >>/tmp/r;cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session16-service-route-stability-probe-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session16-service-route-stability-probe-result.txt;git diff --cached --quiet||git commit -m 'ops: record Service route stability probe';git push origin HEAD:agent/service-migration-m2

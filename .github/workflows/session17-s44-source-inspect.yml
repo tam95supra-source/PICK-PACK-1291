@@ -1,0 +1,51 @@
+name: Session17 S44 Source Inspect
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session17-s44-source-inspect-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Generate final Android source and inspect diagnostics anchors
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/r
+          echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"
+          echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          python3 tools/apply_m2_android_transport_patch.py >/tmp/generate.log 2>&1
+          RC=$?
+          echo "transform_rc=$RC" >>"$OUT"
+          if [[ $RC -ne 0 ]]; then cat /tmp/generate.log >>"$OUT"; echo verdict=FAILED >>"$OUT"; exit 0; fi
+          F=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -n -E 'MANUAL|DAILY|sync_state|diagnostic_log|file_name' "$F" | tail -80 >>"$OUT" || true
+          echo '--- snippets ---' >>"$OUT"
+          python3 - <<'PY' >>"$OUT"
+          from pathlib import Path
+          s=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text()
+          for needle in ['sync_state=', 'type=MANUAL', 'type=DAILY', 'diagnostic_log']:
+              i=s.find(needle)
+              print('NEEDLE',needle,'AT',i)
+              if i>=0: print(s[max(0,i-1200):i+2600].replace('\r',''))
+          PY
+          echo 'verdict=PASS' >>"$OUT"
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo verdict=FAILED >/tmp/r
+          cp /tmp/r /tmp/c
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/c ops/session17-s44-source-inspect-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session17-s44-source-inspect-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S44 source inspection'
+          git push origin HEAD:agent/service-migration-m2

@@ -1,0 +1,10 @@
+checked_at=2026-08-20T11:13:02Z
+head_sha=8964c4a44d3507457b544ff3ac1e429805318252
+setup=PASS
+active_before=2
+row_before=44|INFLIGHT|attempt=1|class=|error=
+row_before=45|INFLIGHT|attempt=1|class=|error=
+replicate_round=1|http=200|ok=true|error=|claimed=|acked=|retried=
+active_after=0
+replication=HEALTHY_0
+verdict=PASS

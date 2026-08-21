@@ -1,0 +1,42 @@
+name: Session3 Seq1 Normalized Work Match
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-seq1-normalized-work-match-trigger.txt]
+permissions:
+  contents: write
+env:
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Compare normalized work choice only
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/list.json|head -1); [[ -n "$ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/w.jsonc',JSON.stringify(c,null,2))" "$ID"
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "WITH f AS (SELECT json_extract(event_json,'$.business_date') d,json_extract(json_extract(event_json,'$.payload_json'),'$.mnv') mnv,UPPER(TRIM(COALESCE(json_extract(json_extract(event_json,'$.payload_json'),'$.work_choice'),''))) raw FROM fallback_event_inbox WHERE authority_epoch=7 AND authority_seq=1), x AS (SELECT d,mnv,CASE WHEN raw='PICK' THEN 'PICK' WHEN raw='PACK' THEN 'PACK' ELSE 'KHONG' END expected FROM f) SELECT s.state,s.work_choice,CASE WHEN s.work_choice=x.expected THEN 1 ELSE 0 END normalized_work_match FROM x LEFT JOIN attendance_sessions s ON s.business_date=x.d AND s.mnv=x.mnv" --json >/tmp/m.json
+          cd ..
+          node - <<'NODE'
+          const fs=require('fs'),r=require('/tmp/m.json').flatMap(x=>x.results||[])[0]||{};fs.writeFileSync('/tmp/result.txt',[`checked_at=${new Date().toISOString()}`,`state=${r.state||'NONE'}`,`normalized_work_match=${Number(r.normalized_work_match||0)}`,`semantic_work_match=${Number(r.normalized_work_match||0)===1?'YES':'NO'}`,'payload_logged=NO','verdict=DIAGNOSTIC_COMPLETE',''].join('\n'));
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nverdict=DIAGNOSTIC_FAILED\npayload_logged=NO\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/r; git reset --hard HEAD >/dev/null; cp /tmp/r ops/session3-seq1-normalized-work-match-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-seq1-normalized-work-match-result.txt; git diff --cached --quiet || (git commit -m 'ops: record seq1 normalized work match' && git push)

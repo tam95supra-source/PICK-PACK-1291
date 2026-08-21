@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:45:30Z
+purpose=read-only route/session/event checkpoint after S42 and WorkManager backoff window
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

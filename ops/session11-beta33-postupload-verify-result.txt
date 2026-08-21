@@ -1,0 +1,7 @@
+checked_at=2026-08-20T11:19:10Z
+head_sha=9903869ec87fc8cac90465387c4bfaef29c189ea
+failed_phase=OTA
+failed_rc=1
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

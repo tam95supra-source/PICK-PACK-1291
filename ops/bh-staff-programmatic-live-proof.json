@@ -1,9 +1,0 @@
-{
-  "status": "PASS",
-  "mode": "PROGRAMMATIC_STAFF_BRIDGE_V1",
-  "gas_version": 78,
-  "upsert_bridge": "PASS",
-  "delete_bridge": "PASS",
-  "live_health": "PASS",
-  "verified_at": "2026-08-19T23:46:08.019580+00:00"
-}

@@ -1,0 +1,7 @@
+checked_at=2026-08-19T12:12:48Z
+head_sha=c2c1538bc3b21c1d46eb522b1d988ab7b34b254f
+beta_discovery=PASS
+beta_download_http=206
+beta_download=PASS
+stable_discovery=EMPTY
+verdict=PASS

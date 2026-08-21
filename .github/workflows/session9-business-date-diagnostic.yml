@@ -1,0 +1,38 @@
+name: Session9 Business Date Diagnostic
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session9-business-date-diagnostic-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  read:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      D1_NAME: pick-pack-1291-service-prod
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read business dates only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo checked_at=$(date -u +%FT%TZ) >$OUT; echo head_sha=$GITHUB_SHA >>$OUT
+          cd service; npm install --no-audit --no-fund >/dev/null; npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('.wrangler-s9d.jsonc',JSON.stringify(c,null,2))" "$ID"
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-s9d.jsonc --command "SELECT business_date,sequence_no,source FROM business_dates WHERE business_date BETWEEN '2026-08-07' AND '2026-08-20' ORDER BY business_date; SELECT MAX(sequence_no) max_sequence,MAX(business_date) max_date FROM business_dates;" --json >/tmp/dates.json
+          cd ..
+          node - <<'NODE' >>$OUT
+          const x=require('/tmp/dates.json').flatMap(v=>v.results||[]);const dates=x.filter(r=>r.business_date);for(const r of dates)console.log(`date=${r.business_date}|seq=${r.sequence_no}|source=${r.source}`);const max=x.find(r=>r.max_sequence!==undefined);if(max)console.log(`max=${max.max_date}|seq=${max.max_sequence}`);const want=[];for(let d=new Date('2026-08-07T00:00:00Z');d<=new Date('2026-08-20T00:00:00Z');d=new Date(d.getTime()+86400000))want.push(d.toISOString().slice(0,10));const have=new Set(dates.map(r=>r.business_date));console.log('missing='+want.filter(d=>!have.has(d)).join(','));console.log('verdict=PASS');
+          NODE
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r; cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session9-business-date-diagnostic-result.txt; git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com; git add ops/session9-business-date-diagnostic-result.txt; git diff --cached --quiet || git commit -m 'ops: record business date diagnostic'; git push origin HEAD:agent/service-migration-m2

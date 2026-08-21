@@ -1,0 +1,11 @@
+{
+  "name": "Pick Pack 1291",
+  "short_name": "PickPack1291",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f8ff",
+  "theme_color": "#3156d3",
+  "lang": "vi",
+  "description": "PWA nghiệp vụ Pick Pack 1291 dùng chung Service với Android"
+}

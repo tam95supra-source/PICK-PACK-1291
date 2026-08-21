@@ -1,0 +1,14 @@
+checked_at=2026-08-19T23:52:34Z
+head_sha=b0beb22778df46757d26435132712cb063e24976
+config=PASS
+build=PASS
+s31_contract=PASS
+s32_history_flush_contract=PASS
+admin_audit_preserved=PASS
+sign=PASS
+apk_size=12826963
+apk_sha256=a40a977dcb2c6b77ba549797ca511ee990bf74b4507939c23779e95e1f999a21
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9387781541
+artifact_name=beta28-release-candidate
+verdict=PASS

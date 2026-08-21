@@ -1,0 +1,6 @@
+confirmation=OWNER_REQUEST_SHORTER_WORKERS_DEV_URL
+require_gas_control_route=TRUE
+target_service_url=https://pick-pack-1291-service.pp1291.workers.dev
+authority_change=FORBIDDEN
+stable=LOCKED
+attempt=2

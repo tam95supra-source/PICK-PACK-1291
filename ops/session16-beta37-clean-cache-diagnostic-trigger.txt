@@ -1,0 +1,4 @@
+trigger=2026-08-20T15:53:00Z
+purpose=read-only checkpoint after Beta37 cache clear/login and 2 pending events + legacy batch route gate
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

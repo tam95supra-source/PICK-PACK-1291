@@ -1,0 +1,4 @@
+trigger=2026-08-20T14:29:00Z
+purpose=deploy Service-only S41 background GAS-session to Service-session bridge fix for Beta36 pending outbox retrigger
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

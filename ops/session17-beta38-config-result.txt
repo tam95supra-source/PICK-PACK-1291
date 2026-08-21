@@ -1,0 +1,8 @@
+checked_at=2026-08-20T16:20:39Z
+head=77996307d648ad845ff8bfc6120fc4862d993d79
+beta_version_code=44
+beta_version_name=0.4.2-beta.38
+s44_transform_registered=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

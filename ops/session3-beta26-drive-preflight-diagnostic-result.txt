@@ -1,0 +1,17 @@
+checked_at=2026-08-19T16:59:38Z
+GOOGLE_OAUTH_CLIENT_ID_present=YES
+GOOGLE_OAUTH_CLIENT_SECRET_present=YES
+GOOGLE_OAUTH_REFRESH_TOKEN_present=YES
+oauth_http=200
+oauth_token=YES
+beta_http=403
+beta_count=0
+beta_reason=insufficientPermissions 
+beta_message=Request had insufficient authentication scopes. 
+stable_http=403
+stable_count=0
+stable_reason=insufficientPermissions 
+stable_message=Request had insufficient authentication scopes. 
+stable_empty=UNKNOWN
+beta26_exact_count=UNKNOWN
+verdict=READ_ONLY_COMPLETE

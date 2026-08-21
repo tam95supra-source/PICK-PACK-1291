@@ -1,0 +1,5 @@
+triggered_at=2026-08-20T06:58:00+07:00
+release=0.4.2-beta.28
+purpose=S32_LOCAL_HISTORY_FLUSH_FIX
+stable=UNTOUCHED
+merge_pr38=NO

@@ -1,0 +1,58 @@
+name: Service M2 External Precutover
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/m2-external-precutover-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-external-precutover
+  cancel-in-progress: false
+
+env:
+  D1_NAME: pick-pack-1291-service-prod
+  WORKER_NAME: pick-pack-1291-service
+  SERVICE_GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  STAGING_SHEET_ID: 1naPzyMjjsGvzz1EqWIBk2aS4anYmJqNgEYDCmu5U5aI
+  ROLLBACK_FOLDER_ID: 1P7KM5b5D_P69OkyKdmLx0HbL3wRpg0yG
+
+jobs:
+  external-precutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run authoritative external shadow gate
+        shell: bash
+        run: bash tools/m2_external_precutover.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m2-external-precutover-evidence-${{ github.run_id }}
+          path: m2-external-evidence/
+          if-no-files-found: warn
+          retention-days: 30

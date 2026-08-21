@@ -1,0 +1,37 @@
+name: S26 Apply Web Session UI Fix
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/s26-apply-web-session-ui-fix-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Apply exact web source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_s26_web_session_ui_fix.py
+          node --check service/public/app.js
+          grep -q "client_source:'WEB'" service/public/app.js
+          grep -q '.login-wrap\[hidden\]' service/public/styles.css
+      - name: Commit source result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/public/app.js service/public/styles.css
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(web): isolate web session and hide login overlay'
+          git push

@@ -1,0 +1,38 @@
+name: Session17 S44 GAS Live Verify
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session17-s44-gas-live-verify-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Probe live S44 GAS health marker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          ok=0
+          for i in $(seq 1 15); do
+            curl -sSL --max-time 25 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"health"}' >/tmp/h.json || true
+            if node -e "const j=require('/tmp/h.json');process.exit(j.ok===true&&j.login_session_lock_model==='S44_LOCK_ISOLATED'&&j.auth_session_model==='SINGLE_ACTIVE_DEVICE_V1'?0:1)" 2>/dev/null; then ok=1; break; fi
+            sleep 3
+          done
+          [[ $ok == 1 ]]
+          node - <<'NODE' >>"$OUT"
+          const j=require('/tmp/h.json');console.log(`gas_ok=${j.ok}`);console.log(`auth_session_model=${j.auth_session_model||''}`);console.log(`login_session_lock_model=${j.login_session_lock_model||''}`);console.log(`sheet_read=${j.sheet_read}`);
+          NODE
+          echo stable=UNTOUCHED >>"$OUT"; echo merge_pr38=UNTOUCHED >>"$OUT"; echo verdict=PASS >>"$OUT"
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || { echo "checked_at=$(date -u +%FT%TZ)" >/tmp/r; echo verdict=FAILED_OR_STOPPED >>/tmp/r; }
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session17-s44-gas-live-verify-result.txt; git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com; git add ops/session17-s44-gas-live-verify-result.txt; git diff --cached --quiet || git commit -m 'ops: record S44 GAS live verify'; git push origin HEAD:agent/service-migration-m2

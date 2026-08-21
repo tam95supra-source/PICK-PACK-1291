@@ -1,0 +1,4 @@
+mode=READ_ONLY
+requested_at=2026-08-19T21:33:00+07:00
+authority_change=FORBIDDEN
+stable=FORBIDDEN

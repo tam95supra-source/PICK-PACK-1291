@@ -1,0 +1,25 @@
+BETA26_RELEASE_RECORD
+released_at=2026-08-20T00:04:00+07:00
+channel=BETA
+version_name=0.4.2-beta.26
+version_code=32
+package=vn.pickpack1291.app.beta.publicbeta
+apk_size=12810579
+apk_sha256=947b0cf28fe51a3cc1a4a310b8e35711426336788b3f6885980ac5e3a1d2a19e
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+signed_candidate_artifact_id=9374897197
+beta_drive_apk_id=1qTD3QjThzXRK2FWsMmIM7bTYOYhDmhnx
+beta_drive_checksum_id=1fFsaPuB75sDCLgw_rGRTyn5fG7DoPmK_
+ota_discovery=PASS
+public_download_hash=PASS
+apk_public_permission=ANYONE_READER
+service_authority=SERVICE_PRIMARY|8|0|PRODUCTION|m2-prod-20260819-001
+gas_authority=SERVICE_PRIMARY|8|0|m2-prod-20260819-001
+replication=HEALTHY|0
+stable=EMPTY_UNPUBLISHED_UNTOUCHED
+pr38=OPEN_DRAFT_UNMERGED
+fix_local_first=S29_WARM_CACHE_AND_N_TO_N_MINUS_6_HISTORY
+fix_admin_audit=S30_CANONICAL_D1_EVENTS_WITH_GOOGLE_REPLICA
+web_history=READABLE_LIVE
+note_github_google_refresh_token=INSUFFICIENT_DRIVE_SCOPE; release bytes uploaded through connected Google Drive connector; GAS OTA finalization and public-download verification PASS
+verdict=PASS

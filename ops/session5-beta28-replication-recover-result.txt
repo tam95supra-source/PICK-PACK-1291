@@ -1,0 +1,6 @@
+checked_at=2026-08-19T23:57:47Z
+head_sha=483b2dc2387d19b332ecaa67b87d232c83fef6ee
+service_gate=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

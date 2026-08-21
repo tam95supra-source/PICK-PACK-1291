@@ -1,0 +1,109 @@
+name: Service M2 Chaos Matrix
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-chaos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chaos:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/service-migration-m2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconcile chaos assertions with current Service contract
+        run: python3 tools/patch_m2_chaos_current_contract.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Service development dependencies
+        working-directory: service
+        run: npm install --no-audit --no-fund
+      - name: Prepare isolated local D1 and safe dummy secrets
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('wrangler.jsonc').read_text().replace('__M1_D1_DATABASE_ID__','00000000-0000-0000-0000-000000000001')
+          Path('wrangler.m2.chaos.jsonc').write_text(s)
+          PY
+          cat > .dev.vars <<'EOF'
+          SERVICE_TOKEN_SECRET=m2-local-service-token-secret
+          M1_ADMIN_TOKEN=m2-local-admin-token
+          GAS_BRIDGE_SHARED_SECRET=m2-local-gas-secret
+          GOOGLE_OAUTH_CLIENT_ID=invalid-local-client
+          GOOGLE_OAUTH_CLIENT_SECRET=invalid-local-secret
+          GOOGLE_OAUTH_REFRESH_TOKEN=invalid-local-refresh
+          GOOGLE_STAGING_SHEET_ID=1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+          EOF
+          rm -rf /tmp/pick-pack-m2-chaos
+          npx wrangler d1 migrations apply pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-chaos --config wrangler.m2.chaos.jsonc
+          cat > /tmp/m2-seed.sql <<'SQL'
+          INSERT INTO business_dates(business_date,sequence_no,source) VALUES
+            ('2026-08-16',1,'CHAOS'),('2026-08-17',2,'CHAOS'),('2026-08-18',3,'CHAOS'),('2026-08-19',4,'CHAOS');
+          INSERT INTO employees(mnv,full_name,phone,main_position,supplier,department,site,warehouse,start_date,note,source_row,source_checksum) VALUES
+            ('E001','Employee 1','','Picker','IH','Pick Pack','S1','W1','2026-01-01','',1,'c1'),
+            ('E002','Employee 2','','Picker','NLV','Pick Pack','S1','W1','2026-01-01','',2,'c2'),
+            ('E003','Employee 3','','Picker','VW','Pick Pack','S1','W1','2026-01-01','',3,'c3'),
+            ('E004','Employee 4','','Packer','MP','Pick Pack','S1','W1','2026-01-01','',4,'c4'),
+            ('E005','Employee 5','','5S','MGL','Pick Pack','S1','W1','2026-01-01','',5,'c5'),
+            ('E006','Employee 6','','5S','HGP','Pick Pack','S1','W1','2026-01-01','',6,'c6');
+          INSERT INTO resources(resource_type,resource_id,status_label,available,metadata_json,source_row,source_checksum) VALUES
+            ('PDA','PDA-A','Nguyên vẹn',1,'{}',1,'p1'),
+            ('PDA','PDA-B','Nguyên vẹn',1,'{}',2,'p2'),
+            ('PDA','PDA-X','Hỏng',0,'{}',3,'p3'),
+            ('USER_PICK','UP-A','Khả dụng',1,'{}',1,'u1'),
+            ('PACK_TABLE','TABLE-A','Khả dụng',1,'{}',1,'t1'),
+            ('USER_PACK','PACK-A','Khả dụng',1,'{}',1,'k1');
+          INSERT INTO catalog_values(namespace,ordinal,value,source_checksum) VALUES
+            ('VÀO - RA TRONG CA_Ca',1,'Ca 1','x1'),('VÀO - RA TRONG CA_Ca',2,'Ca 2','x2'),('VÀO - RA TRONG CA_Ca',3,'Ca HC','x3');
+          SQL
+          npx wrangler d1 execute pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-chaos --config wrangler.m2.chaos.jsonc --file /tmp/m2-seed.sql
+      - name: Start isolated local Worker
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev --config wrangler.m2.chaos.jsonc --persist-to /tmp/pick-pack-m2-chaos --port 8787 --ip 127.0.0.1 >/tmp/m2-wrangler.log 2>&1 &
+          echo $! > /tmp/m2-wrangler.pid
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/health >/tmp/m2-health.json 2>/dev/null; then cat /tmp/m2-health.json; exit 0; fi
+            sleep 1
+          done
+          cat /tmp/m2-wrangler.log >&2
+          exit 1
+      - name: Execute M2 50-case chaos matrix
+        working-directory: service
+        env:
+          M2_BASE_URL: http://127.0.0.1:8787
+          M2_ADMIN_TOKEN: m2-local-admin-token
+          M2_GAS_SECRET: m2-local-gas-secret
+        run: node scripts/m2-chaos.mjs
+      - name: Verify D1 recovery and retry evidence
+        if: always()
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f wrangler.m2.chaos.jsonc ]]; then
+            npx wrangler d1 execute pick-pack-1291-m1-staging --local --persist-to /tmp/pick-pack-m2-chaos --config wrangler.m2.chaos.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state; SELECT event_id,authority_epoch,authority_seq,ingest_status FROM fallback_event_inbox ORDER BY authority_epoch,authority_seq; SELECT status,COUNT(*) AS n FROM sheet_replication_outbox GROUP BY status ORDER BY status; SELECT recovery_type,status,validation_json FROM recovery_runs ORDER BY started_at;" --json | tee m2-artifacts/d1-evidence.json || true
+          fi
+          tail -200 /tmp/m2-wrangler.log > m2-artifacts/wrangler-tail.log 2>/dev/null || true
+          rm -f .dev.vars wrangler.m2.chaos.jsonc
+          if [[ -f /tmp/m2-wrangler.pid ]]; then kill "$(cat /tmp/m2-wrangler.pid)" 2>/dev/null || true; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: service-m2-chaos-evidence-${{ github.run_id }}
+          path: service/m2-artifacts/
+          if-no-files-found: warn

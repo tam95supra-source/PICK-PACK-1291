@@ -1,0 +1,13 @@
+checked_at=2026-08-20T01:59:40Z
+head_sha=628f61f645f2166054dfc0435b564b9e9e30672a
+source=PASS
+authority_pre=PASS
+dry_run=PASS
+deploy=PASS
+recovered_stale_ids=36,37,38
+failed_phase=REPLICATION
+failed_rc=1
+--- deploy diagnostic ---
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

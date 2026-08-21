@@ -1,0 +1,5 @@
+triggered_at=2026-08-20T19:50:00+07:00
+scope=S38_ATTENDANCE_SERVICE_V2
+reason=gate_diagnostic_and_coreerror_fix
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

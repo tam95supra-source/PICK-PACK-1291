@@ -1,0 +1,41 @@
+name: Session6 Authority GAS Readonly
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session6-authority-gas-readonly-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  read:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    env:
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Read Service and GAS authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          SH=$(curl -sS --max-time 30 -o /tmp/h.json -w '%{http_code}' "$SERVICE_URL/health" || true)
+          GH=$(curl -sSL --max-time 30 -o /tmp/g.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' || true)
+          node - <<'NODE' >/tmp/r
+          const fs=require('fs'),h=JSON.parse(fs.readFileSync('/tmp/h.json','utf8')||'{}'),g=JSON.parse(fs.readFileSync('/tmp/g.json','utf8')||'{}'),a=h.authority||{},ga=g.authority||{};
+          const clean=x=>String(x??'').replace(/[\r\n|]/g,' ').slice(0,100);
+          console.log('checked_at='+new Date().toISOString());
+          console.log(`service=${clean(h.ok)}|${clean(a.mode)}|${clean(a.authority_epoch)}|${clean(a.authority_seq)}|${clean(a.scope)}|rep:${clean(h.replication?.state)}:${clean(h.replication?.pending_count)}`);
+          console.log(`gas=${clean(g.ok)}|top:${clean(g.authority_mode)}:${clean(g.authority_epoch)}|nested:${clean(ga.mode)}:${clean(ga.authority_epoch)}:${clean(ga.authority_seq)}|error:${clean(g.error?.code||g.error)}`);
+          const se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);
+          console.log('verdict='+(h.ok===true&&a.mode==='SERVICE_PRIMARY'&&a.scope==='PRODUCTION'&&se>=8&&g.ok===true&&g.authority_mode==='SERVICE_PRIMARY'&&ge===se?'PASS':'FAIL'));
+          NODE
+          echo "service_http=$SH" >>/tmp/r; echo "gas_http=$GH" >>/tmp/r
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || printf 'checked_at=%s\nverdict=PROBE_FAILED\n' "$(date -u +%FT%TZ)" >/tmp/r
+          cp /tmp/r /tmp/c; git reset --hard HEAD >/dev/null; git pull --rebase origin agent/service-migration-m2 || true; cp /tmp/c ops/session6-authority-gas-readonly-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session6-authority-gas-readonly-result.txt; git diff --cached --quiet || git commit -m 'ops: record Beta29 authority diagnostic'; git push origin HEAD:agent/service-migration-m2

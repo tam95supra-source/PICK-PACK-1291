@@ -1,0 +1,4 @@
+requested_at=2026-08-20T19:10:30+07:00
+reason=beta33-handover-live-final-acceptance
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN

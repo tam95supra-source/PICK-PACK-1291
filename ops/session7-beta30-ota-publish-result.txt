@@ -1,0 +1,11 @@
+checked_at=2026-08-20T03:48:46Z
+head_sha=8d4c626762f806c408fc222cb6d02ec3eff8bcc1
+lock=PASS
+candidate_artifact_id=9392115269
+candidate_sha256=142535c861b2f1104cb35f65e1edb1839dd9d9fc436969be8707adaa427ae224
+candidate_size=12859731
+failed_phase=DRIVE_PREFLIGHT
+failed_rc=22
+stable=UNTOUCHED_OR_GATE_STOPPED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

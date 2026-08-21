@@ -1,0 +1,14 @@
+checked_at=2026-08-20T12:12:25Z
+head_sha=e30a10c4f885623c7a2823fc45d97beb7bfe7677
+expected_sha=dde653a4e146874df88f90d758156d5393cc6e4b79bf57c4a8614b7ccda09397
+expected_size=12880379
+authority=PASS
+replication_gate=HEALTHY_0
+ota_discovery=PASS
+public_size=12880379
+public_sha=dde653a4e146874df88f90d758156d5393cc6e4b79bf57c4a8614b7ccda09397
+public_download=PASS
+self_update=PASS
+stable_ota_isolation=PASS
+merge_pr38=UNTOUCHED_DRAFT_OPEN
+verdict=PASS

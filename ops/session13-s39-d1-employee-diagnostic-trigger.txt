@@ -1,0 +1,5 @@
+triggered_at=2026-08-20T20:16:00+07:00
+reason=beta34_employee_not_found_and_pending_diagnostic
+mode=READ_ONLY
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

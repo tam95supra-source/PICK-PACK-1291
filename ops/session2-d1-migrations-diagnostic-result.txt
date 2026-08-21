@@ -1,0 +1,5 @@
+checked_at=2026-08-19T11:34:06Z
+applied=0001_m1_foundation.sql,0002_m2_authority_recovery.sql,0003_pack_map_multi_user.sql,0004_session1_foundation.sql
+migrations_list_rc=1
+pending=
+pending=

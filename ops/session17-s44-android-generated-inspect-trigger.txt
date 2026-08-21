@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:44:00Z
+purpose=inspect generated S44 Kotlin after build compile failure
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

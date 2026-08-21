@@ -1,7 +1,0 @@
-{
-  "status": "PASS",
-  "bridge": "SOURCE_DRIVEN_DELTA_V1",
-  "gas_version": 75,
-  "source_commit": "fefc82dcca679fd4ff5c9dad4f03a64aa3b818c6",
-  "verified_at": "2026-08-19T17:32:44.306794+00:00"
-}

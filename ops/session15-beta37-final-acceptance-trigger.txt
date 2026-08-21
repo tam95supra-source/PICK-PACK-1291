@@ -1,0 +1,4 @@
+trigger=beta37-final-acceptance-rerun
+purpose=rerun Beta37 acceptance after workflow registration
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

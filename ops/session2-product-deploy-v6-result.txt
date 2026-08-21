@@ -1,0 +1,9 @@
+checked_at=2026-08-19T11:41:14Z
+head_sha=4fe08abe44dc240e18f279ff2a7d1c69b0522bab
+source_and_credentials=PASS
+d1_resolve=PASS
+authority_gate=PASS
+fallback_gate=PASS
+d1_gate=PASS
+failed_phase=DEPLOY
+failed_rc=1

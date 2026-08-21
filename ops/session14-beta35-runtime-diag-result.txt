@@ -1,0 +1,17 @@
+checked_at=2026-08-20T14:39:04Z
+head_sha=693bba82acafe41da1ceeef55309e76c590a75c7
+service=OK
+authority=SERVICE_PRIMARY_8_18505
+replication=HEALTHY_0
+gas=SERVICE_PRIMARY_8
+account_present=1
+account_role=USER
+account_status=ACTIVE
+account_verifier_present=1
+auth_session_rows=1
+latest_auth_issued_at=2026-08-20T11:08:39.968Z
+latest_auth_device_present=1
+recent_event_rows=0
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

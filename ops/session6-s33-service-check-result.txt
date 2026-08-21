@@ -1,0 +1,86 @@
+checked_at=2026-08-20T02:01:18Z
+head_sha=c50a0d993329e6e039b8d62cad2552f3cccf15de
+service_s33_check=PASS
+timezone_guard=PASS_ASIA_HO_CHI_MINH
+verdict=PASS
+--- diagnostic tail ---
++ python3 tools/apply_s33b_service_permission_guard.py
+Applied S33B correction role guard: USER read-only, ADMIN N/N-1, SUPERADMIN N..N-6
++ code=0
++ [[ 0 -eq 0 ]]
++ python3 tools/apply_s33c_service_timezone_guard.py
+S33C Service timezone guard PASS; Asia/Ho_Chi_Minh canonical; changed=service/src/dr.ts,service/src/mobile_hotfix.ts
++ code=0
++ [[ 0 -eq 0 ]]
++ grep -R Asia/Bangkok service/src '--include=*.ts'
++ code=0
++ [[ 0 -eq 0 ]]
++ cd service
++ npm install --no-audit --no-fund
+
+added 40 packages in 5s
++ code=0
++ [[ 0 -eq 0 ]]
++ npm run check
+
+> check
+> npm run cf:types && npm run typecheck
+
+
+> cf:types
+> wrangler types
+
+
+ ⛅️ wrangler 4.119.0
+────────────────────
+Generating project types...
+
+interface __BaseEnv_Env {
+	DB: D1Database;
+	ASSETS: Fetcher;
+	SERVICE_GENERATION: "m2-precutover-20260819-001";
+	GOOGLE_SOURCE_SHEET_ID: "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78";
+	SERVICE_TOKEN_SECRET: string;
+	M1_ADMIN_TOKEN: string;
+	GAS_BRIDGE_SHARED_SECRET: string;
+	GOOGLE_OAUTH_CLIENT_ID: string;
+	GOOGLE_OAUTH_CLIENT_SECRET: string;
+	GOOGLE_OAUTH_REFRESH_TOKEN: string;
+	GOOGLE_STAGING_SHEET_ID: string;
+	REALTIME_HUB: DurableObjectNamespace<import("./src/entry_product").RealtimeHub>;
+}
+declare namespace Cloudflare {
+	interface GlobalProps {
+		mainModule: typeof import("./src/entry_product");
+		durableNamespaces: "RealtimeHub";
+	}
+	interface Env extends __BaseEnv_Env {}
+}
+interface Env extends __BaseEnv_Env {}
+type StringifyValues<EnvType extends Record<string, unknown>> = {
+	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
+};
+declare namespace NodeJS {
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "SERVICE_GENERATION" | "GOOGLE_SOURCE_SHEET_ID" | "SERVICE_TOKEN_SECRET" | "M1_ADMIN_TOKEN" | "GAS_BRIDGE_SHARED_SECRET" | "GOOGLE_OAUTH_CLIENT_ID" | "GOOGLE_OAUTH_CLIENT_SECRET" | "GOOGLE_OAUTH_REFRESH_TOKEN" | "GOOGLE_STAGING_SHEET_ID">> {}
+}
+
+Generating runtime types...
+
+Runtime types generated.
+
+
+✨ Types written to worker-configuration.d.ts
+
+Action required Install @types/node
+Since you have the `nodejs_compat` flag, you should install Node.js types by running "npm i --save-dev @types/node".
+
+📖 Read about runtime types
+https://developers.cloudflare.com/workers/languages/typescript/#generate-types
+📣 Remember to rerun 'wrangler types' after you change your wrangler.jsonc file.
+
+
+> typecheck
+> tsc --noEmit
+
++ code=0
++ exit 0

@@ -1,0 +1,86 @@
+name: Session2 Beta24 + Web Fix CI
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ 'ops/session2-beta24-webfix-ci-trigger.txt' ]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Validate source and builds
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/session2-beta24-webfix-ci-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"; echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          PHASE=SOURCE; trap 'rc=$?; echo "failed_phase=$PHASE" >> "$OUT"; echo "failed_rc=$rc" >> "$OUT"; exit $rc' ERR
+          grep -q 'versionCode = 30' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.24"' app/build.gradle.kts
+          grep -q 'apply_s25_cache_sync_web_pda_fixes.py' tools/apply_m2_android_transport_patch.py
+          grep -q "client_source:'WEB'" service/public/app.js
+          grep -q '.login-wrap\[hidden\]' service/public/styles.css
+          grep -q 'auth_web_sessions' service/src/auth.ts
+          test -s service/migrations/0005_web_session_isolation.sql
+          node --check service/public/app.js
+          python3 -m py_compile tools/apply_s25_cache_sync_web_pda_fixes.py tools/apply_s26_web_session_ui_fix.py
+          echo source=PASS >> "$OUT"
+
+          PHASE=SERVICE
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npm run check >/dev/null
+          cd ..
+          echo service_typecheck=PASS >> "$OUT"
+
+          PHASE=ANDROID
+          gradle --no-daemon --build-cache :app:assembleBetaDebug >/tmp/gradle-beta24.log
+          grep -q 'S25_CACHE_FIRST_FALLBACK_SYNC' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'S25_FALLBACK_RETENTION_COMPAT' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'server_retention_floor' app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt
+          grep -q 'S25_LOCAL_LABOR_OVERLAY' app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt
+          grep -q 'Hai phiên nóng N / N-1' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          echo android_beta_debug=PASS >> "$OUT"
+          echo verdict=PASS >> "$OUT"
+      - name: Commit sanitized result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/session2-beta24-webfix-ci-result.txt || echo result_missing=true >/tmp/session2-beta24-webfix-ci-result.txt
+          cp /tmp/session2-beta24-webfix-ci-result.txt ops/session2-beta24-webfix-ci-result.txt
+          git restore app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt app/src/main/java/vn/pickpack1291/app/beta/ForegroundSyncCoordinator.kt app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt 2>/dev/null || true
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session2-beta24-webfix-ci-result.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'ops: record Beta24 and Web fix CI result'; git push

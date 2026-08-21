@@ -1,0 +1,46 @@
+name: Session3 Fallback Projection Compare
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-fallback-projection-compare-trigger.txt]
+
+permissions:
+  contents: write
+
+env:
+  D1_NAME: pick-pack-1291-service-prod
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Compare fallback intents with current D1 projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          HTTP=$(curl -sS -o /tmp/list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --get "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database" --data-urlencode "name=$D1_NAME" --data-urlencode 'per_page=100'); [[ "$HTTP" == 200 ]]
+          ID=$(jq -r --arg n "$D1_NAME" '.result[]|select(.name==$n)|(.uuid // .id // empty)' /tmp/list.json|head -1); [[ -n "$ID" ]]
+          cd service; npm install --no-audit --no-fund >/dev/null
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.argv[1];delete c.secrets;fs.writeFileSync('/tmp/w.jsonc',JSON.stringify(c,null,2))" "$ID"
+          npx wrangler d1 execute "$D1_NAME" --remote --config /tmp/w.jsonc --command "WITH f AS (SELECT authority_seq,json_extract(event_json,'$.action') action,json_extract(event_json,'$.business_date') business_date,json_extract(json_extract(event_json,'$.payload_json'),'$.mnv') mnv,json_extract(json_extract(event_json,'$.payload_json'),'$.labor_type') labor_type FROM fallback_event_inbox WHERE authority_epoch=7) SELECT f.authority_seq,f.action,f.mnv,f.business_date,COALESCE(s.state,'NONE') session_state,COALESCE(s.version,0) session_version,COALESCE((SELECT l.state FROM labor_sessions l WHERE l.business_date=f.business_date AND l.mnv=f.mnv AND (f.labor_type IS NULL OR f.labor_type='' OR l.labor_type=f.labor_type) ORDER BY l.start_at DESC LIMIT 1),'NONE') labor_state FROM f LEFT JOIN attendance_sessions s ON s.business_date=f.business_date AND s.mnv=f.mnv ORDER BY f.authority_seq" --json >/tmp/c.json
+          cd ..
+          node - <<'NODE'
+          const fs=require('fs'),r=require('/tmp/c.json').flatMap(x=>x.results||[]);const lines=[`checked_at=${new Date().toISOString()}`];for(const x of r)lines.push(`seq${x.authority_seq}=${x.action}|${x.mnv}|session:${x.session_state}|v${x.session_version}|labor:${x.labor_state}`);lines.push(`rows=${r.length}`,'payload_logged=NO','verdict=DIAGNOSTIC_COMPLETE','');fs.writeFileSync('/tmp/result.txt',lines.join('\n'));
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/result.txt || printf 'checked_at=%s\nverdict=DIAGNOSTIC_FAILED\npayload_logged=NO\n' "$(date -u +%FT%TZ)" >/tmp/result.txt
+          cp /tmp/result.txt /tmp/r; git reset --hard HEAD >/dev/null; cp /tmp/r ops/session3-fallback-projection-compare-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-fallback-projection-compare-result.txt; git diff --cached --quiet || (git commit -m 'ops: record fallback projection comparison' && git push)

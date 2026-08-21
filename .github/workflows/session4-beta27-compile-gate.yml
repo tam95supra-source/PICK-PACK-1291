@@ -1,0 +1,61 @@
+name: Session4 Beta27 S31 Compile Gate
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session4-beta27-compile-gate-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session4-beta27-compile
+  cancel-in-progress: false
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '9.4.1' }
+      - name: Compile Beta27 and validate S31 transformed source
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/session4-beta27-compile-gate-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          echo "head_sha=$GITHUB_SHA" >> "$OUT"
+          FIREBASE_PROJECT_ID=$(jq -r '.project_info.project_id' app/google-services.json)
+          FIREBASE_GCM_SENDER_ID=$(jq -r '.project_info.project_number' app/google-services.json)
+          P='vn.pickpack1291.app.beta.publicbeta'
+          FIREBASE_GOOGLE_APP_ID=$(jq -r --arg p "$P" '.client[]|select(.client_info.android_client_info.package_name==$p)|.client_info.mobilesdk_app_id' app/google-services.json)
+          FIREBASE_API_KEY=$(jq -r --arg p "$P" '.client[]|select(.client_info.android_client_info.package_name==$p)|.api_key[0].current_key' app/google-services.json)
+          gradle --no-daemon :app:compileBetaReleaseKotlin -PFIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID" -PFIREBASE_GOOGLE_APP_ID="$FIREBASE_GOOGLE_APP_ID" -PFIREBASE_API_KEY="$FIREBASE_API_KEY" -PFIREBASE_GCM_SENDER_ID="$FIREBASE_GCM_SENDER_ID" > /tmp/gradle.log 2>&1
+          RC=$?
+          echo "compile_exit=$RC" >> "$OUT"
+          grep -q 'S31_SERVICE_FIRST_HOTPATH' app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt && echo s31_transport=YES >> "$OUT" || echo s31_transport=NO >> "$OUT"
+          grep -q 'S31_SERVICE_FIRST_HOTPATH' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt && echo s31_local_executor=YES >> "$OUT" || echo s31_local_executor=NO >> "$OUT"
+          if grep -q 'SERVICE_D1_VIA_GAS' app/src/main/java/vn/pickpack1291/app/beta/M2RuntimeBridge.kt; then echo forbidden_service_via_gas=PRESENT >> "$OUT"; else echo forbidden_service_via_gas=ABSENT >> "$OUT"; fi
+          python3 - <<'PY' >> "$OUT"
+          from pathlib import Path
+          s=Path('app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt').read_text()
+          b=s.split('fun operational(',1)[1].split('fun acknowledgeFallback',1)[0]
+          print('operational_network_free='+('YES' if all(x not in b for x in ['discover(', 'httpJson(', 'ensureServiceSession']) else 'NO'))
+          print('fallback_threshold_3='+('YES' if 'FALLBACK_PROBE_FAILURES = 3' in s else 'NO'))
+          PY
+          if [[ "$RC" != 0 ]]; then
+            grep -E '(^e:| error: |FAILED|Exception|S31|anchor missing|Traceback)' /tmp/gradle.log | tail -120 >> "$OUT"
+          fi
+          if [[ "$RC" == 0 ]] && grep -q '^s31_transport=YES$' "$OUT" && grep -q '^s31_local_executor=YES$' "$OUT" && grep -q '^forbidden_service_via_gas=ABSENT$' "$OUT" && grep -q '^operational_network_free=YES$' "$OUT" && grep -q '^fallback_threshold_3=YES$' "$OUT"; then echo verdict=PASS >> "$OUT"; else echo verdict=FAIL >> "$OUT"; fi
+          exit 0
+      - name: Record sanitized result
+        shell: bash
+        run: |
+          cp /tmp/session4-beta27-compile-gate-result.txt ops/session4-beta27-compile-gate-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session4-beta27-compile-gate-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record Beta27 S31 compile gate'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2

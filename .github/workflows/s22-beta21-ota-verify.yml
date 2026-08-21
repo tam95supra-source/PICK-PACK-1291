@@ -1,0 +1,101 @@
+name: S22 Beta22 OTA Verify
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      GAS_WEB_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      BETA_FROM: 0.4.2-beta.20
+      BETA_TO: 0.4.2-beta.22
+      EXPECTED_SHA256: da2c1c837102e9e557013971ece9dac961caa6312b579db9c63184acc8daed3b
+      EXPECTED_SIZE: '9790372'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+
+      - name: Verify live Service authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 8); do
+            if H=$(curl -fsS --connect-timeout 5 --max-time 15 "$SERVICE_URL/health"); then
+              echo "$H" > /tmp/service-health.json
+              mode=$(jq -r '.authority.mode // ""' /tmp/service-health.json)
+              epoch=$(jq -r '.authority.authority_epoch // 0' /tmp/service-health.json)
+              scope=$(jq -r '.authority.scope // ""' /tmp/service-health.json)
+              echo "service attempt=$i mode=$mode epoch=$epoch scope=$scope"
+              if [[ "$mode" == "SERVICE_PRIMARY" && "$epoch" -ge 6 ]]; then ok=1; break; fi
+            fi
+            sleep 3
+          done
+          [[ "$ok" == 1 ]]
+
+      - name: Verify GAS discovery convergence
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"action":"service_discovery","_app_channel":"BETA","_app_version":"0.4.2-beta.22"}'
+          ok=0
+          for i in $(seq 1 10); do
+            code=$(curl -sSL --connect-timeout 5 --max-time 20 -o /tmp/discovery.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_WEB_URL" -d "$body" || true)
+            echo "discovery attempt=$i http=$code"
+            cat /tmp/discovery.json || true
+            echo
+            if [[ "$code" == 200 ]] && jq -e '.ok == true and .authority_mode == "SERVICE_PRIMARY" and (.authority.authority_epoch >= 6)' /tmp/discovery.json >/dev/null; then ok=1; break; fi
+            sleep 4
+          done
+          [[ "$ok" == 1 ]]
+
+      - name: Verify Beta22 OTA metadata and roundtrip APK SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          post() {
+            local payload="$1" out="$2"
+            local ok=0 code
+            for i in $(seq 1 10); do
+              code=$(curl -sSL --connect-timeout 5 --max-time 30 -o "$out" -w '%{http_code}' -H 'content-type: application/json' "$GAS_WEB_URL" -d "$payload" || true)
+              echo "ota attempt=$i http=$code"
+              cat "$out" || true
+              echo
+              if [[ "$code" == 200 ]] && jq -e '.ok == true' "$out" >/dev/null; then ok=1; break; fi
+              sleep 4
+            done
+            [[ "$ok" == 1 ]]
+          }
+          post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$BETA_FROM\"}" /tmp/beta-from.json
+          jq -e --arg v "$BETA_TO" --arg sha "$EXPECTED_SHA256" '.source == "GOOGLE_DRIVE" and .channel == "BETA" and .available == true and .version_name == $v and .sha256 == $sha and (.apk_url|length>0)' /tmp/beta-from.json >/dev/null
+          url=$(jq -r '.apk_url' /tmp/beta-from.json)
+          reported_size=$(jq -r '.size|tostring' /tmp/beta-from.json)
+          [[ "$reported_size" == "$EXPECTED_SIZE" ]]
+          curl -fL --retry 4 --retry-delay 2 --connect-timeout 10 --max-time 180 "$url" -o /tmp/beta22.apk
+          actual_size=$(stat -c '%s' /tmp/beta22.apk)
+          actual_sha=$(sha256sum /tmp/beta22.apk | awk '{print $1}')
+          echo "OTA_APK size=$actual_size sha256=$actual_sha"
+          [[ "$actual_size" == "$EXPECTED_SIZE" ]]
+          [[ "$actual_sha" == "$EXPECTED_SHA256" ]]
+          post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$BETA_TO\"}" /tmp/beta-to.json
+          jq -e --arg v "$BETA_TO" '.source == "GOOGLE_DRIVE" and .channel == "BETA" and .available == false and .version_name == $v' /tmp/beta-to.json >/dev/null
+          echo 'BETA22_OTA_ROUNDTRIP=PASS'
+
+      - name: Verify Stable channel remains unpublished
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sSL --connect-timeout 5 --max-time 30 -o /tmp/stable.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_WEB_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' || true)
+          echo "stable http=$code"
+          cat /tmp/stable.json || true
+          echo
+          [[ "$code" == 200 ]]
+          jq -e '.ok == true and .source == "GOOGLE_DRIVE" and .channel == "STABLE" and .available == false' /tmp/stable.json >/dev/null
+          echo 'STABLE_UNPUBLISHED=PASS'

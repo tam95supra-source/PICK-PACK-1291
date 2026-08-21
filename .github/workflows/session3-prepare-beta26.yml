@@ -1,0 +1,38 @@
+name: Session3 Prepare Beta26
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-prepare-beta26-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Prepare Beta26 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/prepare_beta26_source.py
+          grep -q 'versionCode = 32' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.26"' app/build.gradle.kts
+          grep -q 'apply_s30_admin_audit_android.py' tools/apply_m2_android_transport_patch.py
+      - name: Commit source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/build.gradle.kts tools/apply_m2_android_transport_patch.py
+          git diff --cached --quiet || git commit -m 'build: prepare Beta26 compose chain'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          printf 'version_name=0.4.2-beta.26\nversion_code=32\ncompose_s29=PASS\ncompose_s30=PASS\nstable=UNTOUCHED\nmerge_pr38=UNTOUCHED\nverdict=PASS\n' > /tmp/r
+          cp /tmp/r ops/session3-prepare-beta26-result.txt
+          git add ops/session3-prepare-beta26-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record Beta26 source preparation'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2

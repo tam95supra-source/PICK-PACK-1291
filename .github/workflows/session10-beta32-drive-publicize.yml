@@ -1,0 +1,57 @@
+name: Session10 Beta32 Drive Publicize
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session10-beta32-drive-publicize-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session10-beta32-drive-publicize
+  cancel-in-progress: false
+jobs:
+  publicize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      APK_ID: 15ZhyzAIjSQoNrtdJvn_hYl84zznV1WyY
+      EXPECTED_NAME: pick-pack-1291-public-beta-0.4.2-beta.32.apk
+      EXPECTED_SIZE: '12880379'
+      BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Gate release state and exact Drive file
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT";PHASE=GATE
+          trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN;do [[ -n "${!v:-}" ]];done
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g.json
+          node - <<'NODE'
+          const h=require('/tmp/h.json'),g=require('/tmp/g.json'),a=h.authority||{},ga=g.authority||{};if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');
+          NODE
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token');TOKEN=$(jq -r '.access_token // empty' <<<"$RESP");[[ -n "$TOKEN" ]];echo "::add-mask::$TOKEN";echo "TOKEN=$TOKEN" >>"$GITHUB_ENV"
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files/$APK_ID?fields=id,name,size,parents,mimeType&supportsAllDrives=true" >/tmp/file.json
+          jq -e --arg id "$APK_ID" --arg n "$EXPECTED_NAME" --arg z "$EXPECTED_SIZE" --arg f "$BETA_FOLDER_ID" '.id==$id and .name==$n and (.size|tostring)==$z and (.parents|index($f))!=null and .mimeType=="application/vnd.android.package-archive"' /tmp/file.json >/dev/null
+          echo gate=PASS >>"$OUT"
+      - name: Add public reader permission to exact Beta32 APK only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;PHASE=PERMISSION;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          curl -fsSL -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "https://www.googleapis.com/drive/v3/files/$APK_ID/permissions?supportsAllDrives=true&fields=id,type,role" -d '{"type":"anyone","role":"reader"}' >/tmp/p.json
+          jq -e '.type=="anyone" and .role=="reader"' /tmp/p.json >/dev/null
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files/$APK_ID/permissions?fields=permissions(id,type,role,allowFileDiscovery)&supportsAllDrives=true" >/tmp/pl.json
+          jq -e '[.permissions[]|select(.type=="anyone" and .role=="reader")]|length>=1' /tmp/pl.json >/dev/null
+          echo apk_public_reader=PASS >>"$OUT";echo stable=UNTOUCHED >>"$OUT";echo merge_pr38=UNTOUCHED >>"$OUT";echo verdict=PASS >>"$OUT"
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r || { echo stable=UNTOUCHED >>/tmp/r;echo merge_pr38=UNTOUCHED >>/tmp/r;echo verdict=FAILED_OR_STOPPED >>/tmp/r; };cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session10-beta32-drive-publicize-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session10-beta32-drive-publicize-result.txt;git diff --cached --quiet || git commit -m 'ops: record Beta32 Drive public permission';git push origin HEAD:agent/service-migration-m2

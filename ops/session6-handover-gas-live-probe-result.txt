@@ -1,0 +1,14 @@
+checked_at=2026-08-20T02:36:32Z
+head_sha=026c4d4078eeeaeee6b892c09227d75990c1f872
+gas_discovery=true|SERVICE_PRIMARY|8|0
+beta_ota=true|available=true|version=0.4.2-beta.29|sha=c8a601f58f974dc4cffa038b892c5489a69e1160166684d4eb0d7c1e318f6ec4|size=12843347
+beta_self=true|available=false|version=0.4.2-beta.29
+stable_ota=true|available=false|version=
+public_apk_sha256=c8a601f58f974dc4cffa038b892c5489a69e1160166684d4eb0d7c1e318f6ec4
+public_apk_size=12843347
+public_download_gate=PASS
+gas_gate=PASS
+ota_gate=PASS
+self_gate=PASS
+stable_gate=PASS
+verdict=READ_ONLY_GAS_LIVE_SNAPSHOT_COMPLETE

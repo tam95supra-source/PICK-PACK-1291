@@ -1,0 +1,8 @@
+checked_at=2026-08-20T16:18:36Z
+source_head=0599ee6cab8518222a0fa70ac6fd1332ef9320a7
+session_bind_global_lock=REMOVED
+business_mutation_lock=PRESERVED
+syntax=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

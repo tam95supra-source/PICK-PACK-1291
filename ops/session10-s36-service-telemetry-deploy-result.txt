@@ -1,0 +1,10 @@
+checked_at=2026-08-20T10:37:35Z
+head_sha=c07f5312fd9d14ea436e9663bfb5a76050d44d05
+gate=PASS
+source_check=PASS
+deploy=PASS
+authority=SERVICE_PRIMARY_8_18503
+replication=HEALTHY_0
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

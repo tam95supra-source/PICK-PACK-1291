@@ -1,0 +1,4 @@
+requested_at=2026-08-19T23:26:00+07:00
+scope=WEB_HISTORY_SOURCE_ONLY
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN

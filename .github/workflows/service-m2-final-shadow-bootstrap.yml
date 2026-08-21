@@ -1,0 +1,22 @@
+name: Service M2 Final Shadow Bootstrap
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/service-m2-final-shadow-bootstrap.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: service-m2-final-shadow-bootstrap-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap-final:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Retired after final M2 shadow bootstrap passed.'

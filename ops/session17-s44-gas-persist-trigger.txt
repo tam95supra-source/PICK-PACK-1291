@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:22:00Z
+purpose=persist GAS login session lock isolation plus live health marker
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

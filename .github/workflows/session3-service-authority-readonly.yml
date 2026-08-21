@@ -1,0 +1,40 @@
+name: Session3 Service Authority Readonly
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session3-service-authority-readonly-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  read:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - name: Read public Service state
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev'
+          H=$(curl -sS --max-time 25 -o /tmp/h.json -w '%{http_code}' "$URL/health")
+          A=$(curl -sS --max-time 25 -o /tmp/a.json -w '%{http_code}' "$URL/v1/authority")
+          node - <<'NODE' > /tmp/result
+          const h=require('/tmp/h.json'),a=require('/tmp/a.json'),x=a.authority||a,y=h.authority||{};
+          console.log('checked_at='+new Date().toISOString());
+          console.log('health_ok='+Boolean(h.ok));
+          console.log(`health_authority=${y.mode||''}|${y.authority_epoch??''}|${y.authority_seq??''}|${y.scope||''}|${y.service_generation||''}`);
+          console.log('authority_ok='+Boolean(a.ok));
+          console.log(`authority=${x.mode||''}|${x.authority_epoch??''}|${x.authority_seq??''}|${x.scope||''}|${x.service_generation||''}`);
+          console.log('verdict=READ_ONLY_COMPLETE');
+          NODE
+          printf 'health_http=%s\nauthority_http=%s\n' "$H" "$A" >> /tmp/result
+      - name: Record
+        shell: bash
+        run: |
+          cp /tmp/result ops/session3-service-authority-readonly-result.txt
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session3-service-authority-readonly-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record Service authority read-only diagnostic'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2

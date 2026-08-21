@@ -1,0 +1,5 @@
+checked_at=2026-08-19T15:03:33Z
+failed_phase=SERVICE_FAILBACK
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED

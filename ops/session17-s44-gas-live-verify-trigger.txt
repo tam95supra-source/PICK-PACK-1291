@@ -1,0 +1,4 @@
+trigger=2026-08-20T16:45:00Z
+purpose=prove S44 lock-isolated GAS deployment is live
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED

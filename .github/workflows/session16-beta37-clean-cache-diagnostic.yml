@@ -1,0 +1,56 @@
+name: Session16 Beta37 Clean Cache Diagnostic
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session16-beta37-clean-cache-diagnostic-trigger.txt]
+permissions:
+  contents: write
+concurrency:
+  group: session16-beta37-clean-cache-diagnostic
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Read-only live and D1 checkpoint
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r; echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"; echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h.json
+          MHTTP=$(curl -sS -o /tmp/m.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{}')
+          SHTTP=$(curl -sS -o /tmp/s.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}')
+          BHTTP=$(curl -sS -o /tmp/b.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/legacy-mutations/batch" -d '{"events":[]}')
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h.json'),a=h.authority||{};console.log(`service=${h.ok?'OK':'BAD'}`);console.log(`authority=${a.mode||''}_${a.authority_epoch||''}_${a.authority_seq||''}`);console.log(`replication=${h.replication?.state||''}_${Number(h.replication?.pending_count??-1)}`);
+          NODE
+          echo "mobile_unauth_http=$MHTTP" >>"$OUT"; echo "session_empty_http=$SHTTP" >>"$OUT"; echo "legacy_batch_unauth_http=$BHTTP" >>"$OUT"
+          cd service
+          npx wrangler d1 list --json >/tmp/list.json
+          ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))"); export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-diag.jsonc',JSON.stringify(c,null,2))"
+          SQL="SELECT login_id,role,status,verifier_hash FROM accounts WHERE login_id IN ('dpchan','dple') ORDER BY login_id; SELECT login_id,device_id,issued_at,session_id FROM auth_sessions WHERE login_id IN ('dpchan','dple') ORDER BY issued_at DESC; SELECT actor_id,event_type,entity_id,business_date,device_id,occurred_at,committed_at,authority_seq,payload_json FROM events WHERE actor_id IN ('dpchan','dple') AND committed_at >= '2026-08-20T14:30:00Z' ORDER BY authority_seq DESC LIMIT 50; SELECT COUNT(*) AS total_events_after_clean FROM events WHERE committed_at >= '2026-08-20T15:00:00Z';"
+          npx wrangler d1 execute "$D1_NAME" --remote --config .wrangler-diag.jsonc --command "$SQL" --json >/tmp/d1.json
+          node - <<'NODE' >>"$OUT"
+          const x=require('/tmp/d1.json'),r=i=>(Array.isArray(x)?x[i]?.results||[]:[]);const ac=r(0),ss=r(1),ev=r(2),ct=r(3)[0]||{};
+          for(const a of ac) console.log(`account_${a.login_id}=${a.role}_${a.status}`);
+          for(const s of ss) console.log(`session_${s.login_id}=${s.issued_at}|${s.device_id}|${s.session_id}`);
+          console.log(`recent_actor_event_rows=${ev.length}`);for(const e of ev) console.log(`event=${e.authority_seq}|${e.actor_id}|${e.event_type}|${e.entity_id}|${e.committed_at}|${e.device_id}|${String(e.payload_json||'').slice(0,500)}`);
+          console.log(`total_events_after_1500z=${ct.total_events_after_clean??-1}`);console.log('verdict=PASS');
+          NODE
+      - name: Persist
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r||echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r||echo verdict=FAILED_OR_STOPPED >>/tmp/r;cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session16-beta37-clean-cache-diagnostic-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session16-beta37-clean-cache-diagnostic-result.txt;git diff --cached --quiet||git commit -m 'ops: record Beta37 clean-cache diagnostic';git push origin HEAD:agent/service-migration-m2

@@ -1,0 +1,17 @@
+checked_at=2026-08-20T13:34:22Z
+head_sha=0221fe45398c16074e20625f60639157f2d8ec0c
+config=PASS
+build=PASS
+s39_scan_session_contract=PASS
+history_page100_contract=PASS
+background_reauth_contract=PASS
+s38_attendance_contract=PASS
+sign=PASS
+apk_size=12896763
+apk_sha256=e5cc3c58a70cdf44d22a980d1b83fc01846acc6aaac0e059f3eb5ec076c643a9
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+artifact_id=9408717357
+artifact_name=beta35-release-candidate
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

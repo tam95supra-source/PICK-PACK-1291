@@ -1,0 +1,5 @@
+checked_at=2026-08-20T15:49:48Z
+head_sha=9d57e22a35a057480ec26ed4d05413cf5d628065
+query_http=403
+{"success":false,"errors":[{"code":10000,"message":"Authentication error"}],"messages":[]}
+verdict=OBSERVABILITY_QUERY_UNAVAILABLE

@@ -1,0 +1,15 @@
+checked_at=2026-08-19T22:58:25Z
+head_sha=008dcc859caf3e0ffe8b93d43ed37df4be84002e
+service_probe=SERVICE_PRIMARY|8|8|PRODUCTION|rep=HEALTHY:0
+gas_probe=ok:true|top:SERVICE_PRIMARY:|nested:SERVICE_PRIMARY:8|err:
+gas_keys=app_channel,authority,authority_mode,business_date,cutover_configured,discovery_version,gas_fallback,legacy_bridge,ok,service_generation
+authority=PASS
+ota_discovery=PASS
+public_download=PASS
+apk_size=12810579
+apk_sha256=08552cea22cc1f3ab0a0f7fdb8ca5d327d2bfcc3e43c4250b4a583edcf20b3a3
+final_authority=SERVICE_PRIMARY_8
+replication=HEALTHY_0
+stable=UNTOUCHED_BY_WORKFLOW
+merge_pr38=UNTOUCHED
+verdict=PASS

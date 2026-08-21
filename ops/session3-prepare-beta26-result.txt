@@ -1,0 +1,7 @@
+version_name=0.4.2-beta.26
+version_code=32
+compose_s29=PASS
+compose_s30=PASS
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

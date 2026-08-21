@@ -1,37 +1,124 @@
 # PICK PACK 1291 — Architecture Guardrails
 
-## Mô hình được phép
+## 0. OWNER-approved supersession — 2026-08-18
 
-Mô hình dữ liệu/vận hành của dự án là:
+The previous GAS-only architecture lock is **legacy/pre-migration**. The OWNER has explicitly approved the Service-first architecture in `HANDOVER_ARCH_SERVICE_REALTIME_DR_2026-08-18.md` and the two-session migration plan dated 2026-08-18.
 
-`Android App ↔ Google Apps Script ↔ Google Sheets`
+This file therefore supersedes conflicting GAS-only architecture language in older handovers and in the architecture paragraphs of `AGENTS.md`. All non-conflicting business, auth, UI, release, OTA and signing rules remain in force.
 
-- Google Sheets là nguồn dữ liệu vận hành (source of truth) của giai đoạn hiện tại.
-- Google Apps Script chỉ là lớp API/transaction bridge gắn với Google Sheets; không được biến thành một database riêng.
-- GitHub chỉ dùng cho source/CI/phát hành APK; không phải backend dữ liệu vận hành.
+## 1. Approved target architecture
 
-## Phạm vi Google Drive được phép
+Target production architecture after the OWNER-approved migration is:
 
-- Mọi file dữ liệu, log, bản phát hành, bàn giao hoặc gói deploy của Pick Pack 1291 chỉ được thao tác bên trong cây Drive `PICK PACK 1291 - CHÍNH THỨC`.
-- Không tự tạo, chuyển, sao chép hoặc dùng thư mục Pick Pack khác ngoài cây `PICK PACK 1291 - CHÍNH THỨC`.
-- Nếu một giới hạn kỹ thuật thực sự buộc phải phát sinh file/thư mục ngoài cây chính thức, phải dừng phần đó và xin xác nhận chủ dự án trước.
-- Không được tái sử dụng service, thư mục, Apps Script hay tài nguyên của dự án khác cho Pick Pack 1291 chỉ vì chúng đang tồn tại.
+`Android / Web-PWA ↔ Service Core ↔ D1`
 
-## Quy tắc bắt buộc
+with:
 
-1. **Không tự suy diễn kiến trúc.** Không được tự thêm, thay hoặc chuyển authority sang Supabase, Firebase, Neon, Cloudflare, database/server trung gian hay dịch vụ backend khác nếu chủ dự án chưa yêu cầu rõ ràng.
-2. **Không làm trái mục đích/yêu cầu đã chốt.** Khi có nhiều cách triển khai, phải ưu tiên cách nằm trong mô hình và mục đích đã được chủ dự án xác định.
-3. **Không coi trạng thái bàn giao/code cũ là quyền thay đổi yêu cầu.** Nếu code hiện tại lệch với yêu cầu đã chốt, phải sửa code về đúng yêu cầu; không được lấy implementation lệch làm kiến trúc mặc định.
-4. **Mọi thay đổi authority, datastore, auth backend, service trung gian hoặc mô hình đồng bộ đều cần chỉ thị rõ ràng của chủ dự án trước khi triển khai.** Không có chỉ thị thì không được thêm.
-5. **Nếu gặp giới hạn kỹ thuật cần thay đổi kiến trúc**, dừng phần thay đổi kiến trúc đó, nêu đúng giới hạn và các lựa chọn tối thiểu; không tự chọn một dịch vụ mới.
-6. **Không làm mất dữ liệu đã ghi nhận.** Trước khi loại bỏ implementation cũ phải đối soát dữ liệu nghiệp vụ đã phát sinh với Google Sheets.
-7. **Beta phải full-function theo cùng business rules** để test thật; không dùng backend tạm khác mô hình chỉ để làm nhanh.
-8. **Foreground sync:** mở/quay lại app sync ngay; khi app ở background/screen off không khởi tạo polling mới. Request đang chạy được phép drain rồi suspend.
-9. **Mutation phải idempotent** bằng `event_id`; tranh tài nguyên phải fail rõ ràng; đổi tài nguyên phải atomic trong phạm vi transaction/lock của Google Apps Script + Google Sheets.
-10. **Security:** không commit password plaintext, verifier, token, signing key hoặc credential vào repo public. Hidden Sheet không được coi là security boundary.
-11. **Master data phải cache:** danh sách nhân sự/PDA/User Pick/Bàn Pack/User Pack/Danh mục được cache trên thiết bị và có revision riêng. Chỉ refresh khi master revision thay đổi; trạng thái phiên/tài nguyên đang sử dụng vẫn phải kiểm tra động để chống cấp trùng.
-12. **Log phải route đúng loại:** MANUAL → `BÁO LỖI THỦ CÔNG`; CRASH → `BÁO LỖI TỰ ĐỘNG`; DAILY → `NHẬT KÝ ANDROID`, đều nằm dưới `PICK PACK 1291 - CHÍNH THỨC/NHẬT KÝ HỆ THỐNG`.
+- Cloudflare Worker = API/runtime;
+- Cloudflare D1 = normal-mode operational primary datastore;
+- Durable Objects + WebSocket/Hibernation = realtime coordination/fanout;
+- Google Sheets = operational replica/report/fallback/DR source according to authority state;
+- GAS = fallback/bootstrap/discovery compatibility layer where required by the architecture;
+- canonical immutable event ledger + current projections = logical source of truth;
+- provider-neutral Business Core with `StorageAdapter`, `RealtimeAdapter`, `SheetAdapter`, `AuthAdapter`, `RecoveryAdapter` boundaries.
 
-## Quy tắc kiểm tra trước khi phát hành
+Baseline does **not** add Queue, KV, R2, Firebase, Supabase or Neon. Adding paid or new infrastructure requires a new OWNER command.
 
-Một bản Beta/Stable không được tuyên bố đúng mô hình nếu APK còn tham chiếu runtime tới Supabase hoặc backend ngoài mô hình được duyệt. CI phải quét source/workflow để chặn các endpoint/SDK Supabase trong app runtime.
+## 2. Current production state during M1 shadow — hard safety boundary
+
+Until M2 cutover is explicitly completed:
+
+- Android production/Beta18 continues on the existing GAS/Google production path;
+- production authority is unchanged;
+- the production workbook `DỮ LIỆU THEO NGÀY` is bootstrap/read source only for M1;
+- M1 Service/D1 runs only with scope `STAGING_SHADOW`;
+- M1 Google replication may write only to a separate staging/copy workbook or an explicitly safe staging area;
+- production GAS is not disabled, replaced or redeployed merely to make M1 work;
+- Stable is not published without an explicit OWNER command;
+- Android signer/signing identity is never changed;
+- the rollback point `PICK_PACK_1291_PRE_SERVICE_MIGRATION_BACKUP_2026-08-18_2318` must remain intact and accessible.
+
+M1 must not be described as a production migration/cutover.
+
+## 3. Canonical mutation and authority rules
+
+Every mutation uses one canonical versioned contract carrying at least:
+
+- immutable `event_id`;
+- `event_type`, `entity_type`, `entity_id`;
+- `business_date`;
+- `authority_epoch`, `authority_seq`, `service_generation`;
+- `base_version`, `new_version`;
+- actor/account, role, `device_id`;
+- occurred/committed timestamps;
+- payload;
+- `idempotency_key`;
+- schema version/checksum;
+- deterministic mutation/conflict/error result.
+
+Rules:
+
+1. ACK authoritative success only after the current authority has durably committed.
+2. D1 mutation and `sheet_replication_outbox` insertion are one transaction.
+3. Google is not on the normal Service mutation critical path.
+4. Same `event_id`/idempotency key is exactly-once at logical commit level.
+5. Stale base version is a conflict, not last-write-wins.
+6. Exclusive resource ownership must be race-safe.
+7. Canonical committed events are not physically edited/deleted in normal operation; corrections use new events.
+8. At most one write authority is official at any point. Authority epoch/generation protect split brain.
+
+## 4. Existing business/auth invariants preserved
+
+- MNV is the business key; attendance session is `MNV + business_date`.
+- Attendance state remains `NOT_ENTERED → ACTIVE → ENDED`; normal re-enter after ENDED is not silently introduced.
+- PICK requires PDA; User Pick remains optional where currently allowed.
+- PACK keeps the existing Bàn Pack/User Pack mapping and exclusivity rules.
+- Daily User Pick/User Pack consumption semantics remain enforced.
+- OPEN Công nhật blocks EXIT.
+- Công nhật lifecycle and resource `GIỮ/TRẢ` semantics remain compatible with current rules.
+- Roles remain `SUPERADMIN / ADMIN / USER`; backend enforces permissions.
+- `n/n-1` means the two newest **business session sequence** values. USER/ADMIN are restricted to those; SUPERADMIN may bypass only the time window, never integrity/audit/resource rules.
+- Authentication remains compatible with PBKDF2-HMAC-SHA256 challenge/proof and `SINGLE_ACTIVE_DEVICE_V1`.
+- Normal account creation must not create another SUPERADMIN without OWNER approval.
+
+## 5. Retention semantics
+
+- Client operational cache/window may remain 45 business days under current product rules.
+- Service keeps rebuild-capable event/history data; 45 days is **not** a hard Service ledger deletion rule.
+- Do not physically discard canonical events merely because they are older than the current client window.
+
+## 6. Google Sheet integrity
+
+- Existing production Sheet/tab/header/select values are not renamed/reset/regenerated by migration bootstrap.
+- Bootstrap/import must preserve exact source values, detect duplicates/schema drift, and produce count/checksum reconciliation.
+- Direct operational Sheet editing is not the official normal-mode workflow after Service cutover.
+- Divergence does not silently overwrite Service state; default policy is Service/Event Ledger wins unless SUPERADMIN accepts a correction as an official event.
+- Severe schema drift pauses replication rather than writing by ambiguous column positions.
+
+## 7. Realtime/sync/networking
+
+- WebSocket sends small delta/event notifications, not full datasets.
+- Revision/authority sequence delta catch-up is the correctness path after missed socket data or reconnect.
+- Android foreground uses event-driven connectivity and one shared sync engine; no continuous health-poll loop.
+- Background does not force a permanent WebSocket; pending work uses platform scheduling/backoff.
+- Dynamic Service discovery is mandatory so a Service URL/generation can change without a new APK solely for that change.
+
+## 8. Drive/release/security guardrails retained
+
+- Pick Pack files/backups/releases remain inside the official `PICK PACK 1291 - CHÍNH THỨC` Drive tree unless OWNER explicitly changes this.
+- Never commit plaintext password, verifier, OAuth credential, private token, signing material or secret value to the public repository/handover.
+- Hidden Sheet/tab is not a security boundary.
+- Beta remains full-function for real acceptance testing.
+- Stable requires explicit OWNER promotion.
+- Existing OTA/signing identity invariants remain unchanged until an OWNER-approved M2 cutover step says otherwise.
+- The OWNER is not asked to run local CLI; CI/assistant-controlled tooling performs command-line deployment/build work.
+
+## 9. M1 completion gate
+
+M1 is complete only if all of the following are evidenced in staging/shadow:
+
+`Test Client → Service API → D1 → Realtime → Google staging replica`
+
+plus real-source bootstrap reconciliation, auth, idempotency, stale-version handling, exclusive-resource race handling, retry/checkpoint behavior, reconnect/catch-up, empty D1 migration, re-bootstrap safety, retention boundaries and `n/n-1` authorization.
+
+If any gate fails, do not call M1 complete and do not cut production over.

@@ -1,1 +1,7 @@
-deploy=2026-08-20-finalize-staff-bridge-cleanup-r2
+deploy=2026-08-20-S44-login-session-lock-isolation
+reason=remove-global-business-lock-from-pda-login-session-bind
+scope=source-and-existing-deployment-no-authority-transition
+expected_service_authority=SERVICE_PRIMARY
+expected_replication=HEALTHY
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN

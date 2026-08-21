@@ -1,0 +1,5 @@
+confirmation=OWNER_REPORTED_RUNTIME_FAILURES
+expected_safe_shape=SERVICE_PRIMARY_N__GOOGLE_FALLBACK_N_PLUS_1
+reconcile_fallback=TRUE
+shorten_workers_dev_after_convergence=TRUE
+stable=LOCKED

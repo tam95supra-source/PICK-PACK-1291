@@ -41,9 +41,15 @@ jobs:
           SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID" | tr -d '\r\n\t ')
           RAW_DEPLOY=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW_DEPLOY"
-          if [[ "$RAW_DEPLOY" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
-          if [[ -z "$SCRIPT_ID" || -z "$DEPLOYMENT_ID" ]]; then echo 'Script/deployment identifier normalization failed.' >&2; exit 1; fi
-          echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"
+          if [[ "$RAW_DEPLOY" =~ /s/([^/]+)/ ]]; then
+            DEPLOYMENT_ID="${BASH_REMATCH[1]}"
+          fi
+          if [[ -z "$SCRIPT_ID" || -z "$DEPLOYMENT_ID" ]]; then
+            echo 'Script/deployment identifier normalization failed.' >&2
+            exit 1
+          fi
+          echo "::add-mask::$SCRIPT_ID"
+          echo "::add-mask::$DEPLOYMENT_ID"
           echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
           echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
           echo 'Apps Script identifiers normalized.'
@@ -60,8 +66,13 @@ jobs:
             --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
             --data-urlencode 'grant_type=refresh_token')
           TOKEN=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token", ""))' <<<"$RESP")
-          if [[ -z "$TOKEN" ]]; then echo 'OAuth refresh did not return an access token.' >&2; exit 1; fi
-          echo "::add-mask::$TOKEN"; echo "token=$TOKEN" >> "$GITHUB_OUTPUT"; echo "OAuth refresh token exchange: PASS"
+          if [[ -z "$TOKEN" ]]; then
+            echo 'OAuth refresh did not return an access token.' >&2
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "OAuth refresh token exchange: PASS"
 
       - name: Verify Apps Script project access
         shell: bash
@@ -70,8 +81,14 @@ jobs:
           SCRIPT_ID: ${{ steps.ids.outputs.script_id }}
         run: |
           set -euo pipefail
-          HTTP=$(curl -sS -o /tmp/project.json -w '%{http_code}' -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID")
-          if [[ "$HTTP" != "200" ]]; then echo "Apps Script project lookup failed with HTTP $HTTP" >&2; python3 -c "import json; j=json.load(open('/tmp/project.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true; exit 1; fi
+          HTTP=$(curl -sS -o /tmp/project.json -w '%{http_code}' \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://script.googleapis.com/v1/projects/$SCRIPT_ID")
+          if [[ "$HTTP" != "200" ]]; then
+            echo "Apps Script project lookup failed with HTTP $HTTP" >&2
+            python3 -c "import json; j=json.load(open('/tmp/project.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true
+            exit 1
+          fi
           python3 -c "import json; j=json.load(open('/tmp/project.json')); print('Apps Script project access: PASS'); print('Project title:', j.get('title','(unknown)'))"
 
       - name: Verify deployment access
@@ -82,8 +99,14 @@ jobs:
           DEPLOYMENT_ID: ${{ steps.ids.outputs.deployment_id }}
         run: |
           set -euo pipefail
-          HTTP=$(curl -sS -o /tmp/deployment.json -w '%{http_code}' -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
-          if [[ "$HTTP" != "200" ]]; then echo "Apps Script deployment lookup failed with HTTP $HTTP" >&2; python3 -c "import json; j=json.load(open('/tmp/deployment.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true; exit 1; fi
+          HTTP=$(curl -sS -o /tmp/deployment.json -w '%{http_code}' \
+            -H "Authorization: Bearer $ACCESS_TOKEN" \
+            "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          if [[ "$HTTP" != "200" ]]; then
+            echo "Apps Script deployment lookup failed with HTTP $HTTP" >&2
+            python3 -c "import json; j=json.load(open('/tmp/deployment.json')); print(j.get('error',{}).get('status','UNKNOWN')); print(j.get('error',{}).get('message',''))" || true
+            exit 1
+          fi
           python3 -c "import json; j=json.load(open('/tmp/deployment.json')); cfg=j.get('deploymentConfig',{}); print('Deployment access: PASS'); print('Deployment manifest:', cfg.get('manifestFileName','appsscript')); print('Deployment version:', cfg.get('versionNumber','(head/dev)'))"
 
       - name: Verification summary

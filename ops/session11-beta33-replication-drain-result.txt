@@ -1,0 +1,10 @@
+checked_at=2026-08-20T11:14:04Z
+head_sha=2cb3db96794e920b8ff961c5b58434ba4a051a79
+pending_before=0
+round=1|http=200|ok=true
+authority=SERVICE_PRIMARY_8_18505
+pending_after=0
+replication=HEALTHY_0
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=PASS

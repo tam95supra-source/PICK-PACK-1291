@@ -1,0 +1,70 @@
+name: Session13 S39 Service Runtime Deploy V2
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session13-s39-service-runtime-deploy-v2-trigger.txt]
+permissions:
+  contents: write
+  pull-requests: read
+concurrency:
+  group: pick-pack-1291-production-service
+  cancel-in-progress: false
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  GENERATION: m2-prod-20260819-001
+  SOURCE_SHEET_ID: 1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78
+  D1_NAME: pick-pack-1291-service-prod
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Gate and compose direct production routes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;echo "checked_at=$(date -u +%FT%TZ)" >"$OUT";echo "head_sha=$GITHUB_SHA" >>"$OUT";PHASE=GATE
+          trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";test -f /tmp/check.log && tail -50 /tmp/check.log >>"$OUT";exit $rc' ERR
+          curl -fsSL "$SERVICE_URL/health" >/tmp/h0.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/g0.json;curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/p0.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/h0.json'),g=require('/tmp/g0.json'),p=require('/tmp/p0.json'),a=h.authority||{},ga=g.authority||{};if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('SERVICE_GATE');if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS_GATE');if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38_GATE');console.log(`authority_gate=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('replication_gate=HEALTHY_0');console.log('pr38_gate=OPEN_DRAFT_UNMERGED');
+          NODE
+          python3 tools/apply_s38_attendance_service.py;python3 tools/apply_s38b_service_compile_fix.py;python3 tools/apply_s39_service_routes_legacy.py;python3 tools/apply_s39b_product_mobile_routes.py
+          grep -q 'S39B_PRODUCT_MOBILE_ROUTES' service/src/entry_product.ts;grep -q '/v1/mobile/read' service/src/entry_product.ts;grep -q '/v1/auth/gas-session' service/src/entry_product.ts;grep -q 'pda_status_at_enter' service/src/legacy.ts;grep -q 'pda_exit_status' service/src/legacy.ts;grep -q 'duplicate_user' service/src/legacy.ts
+          cd service;npm install --no-audit --no-fund >/dev/null;npm run check >/tmp/check.log 2>&1
+          npx wrangler d1 list --json >/tmp/list.json;ID=$(node -e "const r=require('/tmp/list.json'),x=r.find(v=>v.name===process.env.D1_NAME);if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))");[[ -n "$ID" ]];export ID
+          node -e "const fs=require('fs'),c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;c.vars={SERVICE_GENERATION:process.env.GENERATION,GOOGLE_SOURCE_SHEET_ID:process.env.SOURCE_SHEET_ID};c.d1_databases[0].database_name=process.env.D1_NAME;c.d1_databases[0].database_id=process.env.ID;delete c.secrets;fs.writeFileSync('.wrangler-s39b-prod.jsonc',JSON.stringify(c,null,2))"
+          npx wrangler d1 export "$D1_NAME" --remote --config .wrangler-s39b-prod.jsonc --output=/tmp/pre-s39b.sql >/tmp/export.log 2>&1;test -s /tmp/pre-s39b.sql;sha256sum /tmp/pre-s39b.sql|awk '{print "backup_sha256="$1}' >>"$OUT";echo source_check=PASS >>"$OUT";echo backup=PASS >>"$OUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: pre-s39b-runtime-d1-backup, path: /tmp/pre-s39b.sql, retention-days: 14, if-no-files-found: error }
+      - name: Deploy direct route Worker
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;PHASE=DEPLOY;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          cd service;npx wrangler deploy --config .wrangler-s39b-prod.jsonc --keep-vars --dry-run >/tmp/dry.out 2>/tmp/dry.err;npx wrangler deploy --config .wrangler-s39b-prod.jsonc --keep-vars >/tmp/deploy.out 2>/tmp/deploy.err;echo deploy=PASS >>"$OUT"
+      - name: Verify direct mobile routes live
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/r;PHASE=VERIFY;trap 'rc=$?;echo failed_phase=$PHASE >>"$OUT";echo failed_rc=$rc >>"$OUT";exit $rc' ERR
+          good=0;for i in 1 2 3 4 5 6 7 8 9 10;do MHTTP=$(curl -sS -o /tmp/m.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/mobile/read" -d '{"action":"employee_context","mnv":"30001"}');SHTTP=$(curl -sS -o /tmp/s.json -w '%{http_code}' -H 'content-type: application/json' "$SERVICE_URL/v1/auth/gas-session" -d '{}');if [[ "$MHTTP" == 401 && "$SHTTP" == 400 ]];then good=1;break;fi;sleep 2;done
+          echo mobile_unauth_http=$MHTTP >>"$OUT";echo session_empty_http=$SHTTP >>"$OUT";test "$good" = 1;jq -e '.error.code=="UNAUTHORIZED"' /tmp/m.json >/dev/null;jq -e '.error.code=="SESSION_EXCHANGE_FIELDS_REQUIRED"' /tmp/s.json >/dev/null
+          curl -fsSL "$SERVICE_URL/health" >/tmp/hf.json;curl -fsSL -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' >/tmp/gf.json;curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pf.json
+          node - <<'NODE' >>"$OUT"
+          const h=require('/tmp/hf.json'),g=require('/tmp/gf.json'),p=require('/tmp/pf.json'),a=h.authority||{},ga=g.authority||{};if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION'||h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0)throw Error('HEALTH');if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||Number(ga.authority_epoch)!==Number(a.authority_epoch))throw Error('GAS');if(p.state!=='open'||p.draft!==true||p.merged===true)throw Error('PR38');console.log('mobile_routes=PASS');console.log(`authority=SERVICE_PRIMARY_${a.authority_epoch}_${a.authority_seq}`);console.log('replication=HEALTHY_0');console.log('stable=UNTOUCHED');console.log('merge_pr38=UNTOUCHED_DRAFT_OPEN');console.log('verdict=PASS');
+          NODE
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r||echo result_missing=true >/tmp/r;grep -q '^verdict=' /tmp/r||{ echo stable=UNTOUCHED >>/tmp/r;echo merge_pr38=UNTOUCHED >>/tmp/r;echo verdict=FAILED_OR_STOPPED >>/tmp/r;};cp /tmp/r /tmp/c;git reset --hard HEAD >/dev/null;git pull --rebase origin agent/service-migration-m2 || true;cp /tmp/c ops/session13-s39-service-runtime-deploy-v2-result.txt;git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com;git add ops/session13-s39-service-runtime-deploy-v2-result.txt;git diff --cached --quiet||git commit -m 'ops: record S39 service runtime deploy v2';git push origin HEAD:agent/service-migration-m2

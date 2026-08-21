@@ -1,0 +1,4 @@
+requested_at=2026-08-19T20:03:00+07:00
+channel=BETA
+expected=0.4.2-beta.24
+stable_must_be_empty=true

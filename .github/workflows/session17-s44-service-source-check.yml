@@ -1,0 +1,46 @@
+name: Session17 S44 Service Source Check
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths: [ops/session17-s44-service-source-check-trigger.txt]
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: agent/service-migration-m2, fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Run patch and typecheck with captured diagnostics
+        shell: bash
+        run: |
+          set +e
+          OUT=/tmp/r
+          echo "checked_at=$(date -u +%FT%TZ)" >"$OUT"
+          echo "head_sha=$GITHUB_SHA" >>"$OUT"
+          python3 tools/apply_s44_service_session_attendance.py >/tmp/patch.log 2>&1
+          PRC=$?; echo "patch_rc=$PRC" >>"$OUT"; sed -n '1,120p' /tmp/patch.log >>"$OUT"
+          if [[ $PRC -eq 0 ]]; then
+            cd service
+            npm install --no-audit --no-fund >/tmp/npm.log 2>&1; NRC=$?; echo "npm_install_rc=$NRC" >>"$OUT"
+            if [[ $NRC -eq 0 ]]; then npm run typecheck >/tmp/type.log 2>&1; TRC=$?; echo "typecheck_rc=$TRC" >>"$OUT"; sed -n '1,220p' /tmp/type.log >>"$OUT"; else sed -n '1,160p' /tmp/npm.log >>"$OUT"; fi
+            cd ..
+          fi
+          if [[ $PRC -eq 0 && ${NRC:-1} -eq 0 && ${TRC:-1} -eq 0 ]]; then echo verdict=PASS >>"$OUT"; else echo verdict=FAIL >>"$OUT"; fi
+      - name: Record
+        if: always()
+        shell: bash
+        run: |
+          test -f /tmp/r || echo verdict=FAILED_OR_STOPPED >/tmp/r
+          cp /tmp/r /tmp/c
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2 || true
+          cp /tmp/c ops/session17-s44-service-source-check-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/session17-s44-service-source-check-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record S44 Service source check'
+          git push origin HEAD:agent/service-migration-m2

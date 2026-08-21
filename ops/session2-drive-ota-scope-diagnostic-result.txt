@@ -1,0 +1,7 @@
+checked_at=2026-08-19T11:50:56Z
+drive_read_scope=NO
+drive_write_scope=NO
+drive_file_scope=NO
+drive_full_scope=NO
+beta_http=403
+stable_http=403

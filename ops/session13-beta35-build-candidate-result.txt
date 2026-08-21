@@ -1,0 +1,65 @@
+checked_at=2026-08-20T13:30:08Z
+head_sha=ce8d741098277931bf5a1c4a41c3216d449b7316
+config=PASS
+failed_phase=BUILD
+failed_rc=1
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Task :app:generateS10Operations FAILED
+S39 old cumulative History paging survived
+Generated /home/runner/work/pick-pack-1291/pick-pack-1291/app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt (82803 chars)
+Applied S11 compact/report patch: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+S12 real-PDA patch applied
+S12 compile hotfix applied
+S13 shared history + large scanner UI patch applied
+S14 device cache + scanner sizing patch applied
+S15 local-first UI + report date selector + compact scanner patch applied
+S17 SQLite recovery UI patch applied
+S18 sync-direction + dual-edge navigation + parent-tab reset patch applied
+Applied S10 + S11 + S12 + S13 + S14 + S15 + S17 + S18 runtime patches in build workspace: /home/runner/work/pick-pack-1291/pick-pack-1291/app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+Applied S19 M2 production runtime fix; event-driven foreground contract preserved.
+Applied S20 PACK composite identity fix.
+Applied S21 labor shift fix.
+Applied S22 PDA local-first + provider/network/sync observability fixes.
+Applied S23 SUPERADMIN PDA Import entry.
+Applied S24 FCM logout revoke.
+Applied S25 cache-first fallback sync + shared PDA history/session UX + full sync diagnostics
+Applied S27 projection ACK gap fix
+Applied S29 owner local-first warm cache + seven-session readable History
+Applied S30 canonical admin audit across Service replication and Android durable outbox
+Applied S31A: moved existing pre-executor tracking into network executor and normalized call anchor
+Applied S31 strict Service-first non-blocking PDA hot path + background-only authority fallback + RTT split
+Applied S31B: preserved canonical admin audit after strict Service-first transport rewrite
+Applied S31D compile-safe multiline runtime bridge; Service-primary cannot fall through to GAS
+Applied S32 durable local History + independent immediate outbox flush
+Applied S33 owner UI/history/staff/resources/sync/PDA-exchange/lifecycle/timezone patch
+Applied S33B compile-safe foreground gate, provider helper and history permission guard
+Applied S34 owner six requests: business cards/nav, rich sync, history filters/status/search/date, logout/login, full local history
+Applied S34B compile hotfix: business QR card uses employeeScan
+Applied S34C: Site 1291 manpower/tenure report from canonical entry-day snapshot
+Applied S34D compile fixes: history palette + Site 1291 report grid
+Applied S35: role-gated business menu, pinned staff search, canonical History catch-up and text overflow fixes
+Applied S36: low-allocation selected-date History/Report + Service online telemetry
+Applied S36B compile hotfix: report renderer, history status chip and detail route
+Applied S37: moved Service telemetry from History to Sync only
+Applied S38 attendance UI: scan field, 3-button assignment, PDA autocomplete/status, duplicate-user reissue, safe exit
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1787232613093.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:generateS10Operations'.
+> Process 'command 'python3'' finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 21s
+1 actionable task: 1 executed
+stable=UNTOUCHED
+merge_pr38=UNTOUCHED
+verdict=FAILED_OR_STOPPED
