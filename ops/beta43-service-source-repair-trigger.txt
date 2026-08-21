@@ -1,5 +1,5 @@
-repair=2026-08-21T18:18:00+07:00
+repair=2026-08-21T18:22:00+07:00
 target=service/src/session_hotfix.ts
-issue=malformed nested generic in raSheetId response type
+issue=strict D1 batch optional result typing after generic repair
 production_deploy=NOT_RUN
 stable=UNTOUCHED
