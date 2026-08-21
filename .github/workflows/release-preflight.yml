@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 env:
-  CANDIDATE_SHA: 331b9b8a1cf84131aede63fe3d5588ab58f5fa34
+  CANDIDATE_SHA: 7f67e0069d3474cb71a4b7422e7f8bd73df0fc02
   GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
   SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
 
@@ -31,11 +31,14 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 --retry-delay 2 "$SERVICE_URL/health" > /tmp/service.json
+          echo 'SERVICE_HEALTH:'; cat /tmp/service.json; echo
           jq -e '.ok==true and .environment=="production" and .authority.mode=="SERVICE_PRIMARY"' /tmp/service.json >/dev/null
           curl -fsSL --retry 3 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"health"}' > /tmp/gas.json
+          echo 'GAS_HEALTH:'; cat /tmp/gas.json; echo
           jq -e '.ok==true and .sheet_read==true and .auth_session_model=="SINGLE_ACTIVE_DEVICE_V1"' /tmp/gas.json >/dev/null
           curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"BETA","current_version":"999.999.999"}' > /tmp/beta.json
           curl -fsSL -H 'content-type: application/json' "$GSHEET_API_URL" -d '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
+          echo 'BETA_OTA:'; cat /tmp/beta.json; echo; echo 'STABLE_OTA:'; cat /tmp/stable.json; echo
           jq -e '.ok==true and .source=="GOOGLE_DRIVE" and .channel=="BETA"' /tmp/beta.json >/dev/null
           jq -e '.ok==true and .source=="GOOGLE_DRIVE" and .channel=="STABLE" and .available==false' /tmp/stable.json >/dev/null
 
@@ -61,10 +64,11 @@ jobs:
           grep -q 'versionCode = 1' app/build.gradle.kts
           grep -q 'versionName = "0.1.0-stable"' app/build.gradle.kts
           grep -q 'apply_s47_beta41_owner_fixes.py' app/build.gradle.kts
-          grep -q 'runpy.run_path.*apply_s47_beta41_owner_fixes.py' tools/apply_s44b_compile_hotfix.py
+          grep -q 'apply_s47b_compile_hotfix.py' tools/apply_s44b_compile_hotfix.py
           grep -q 'S47_BETA41_OWNER_FIVE_FIXES' tools/apply_s47_beta41_owner_fixes.py
+          grep -q 'S47B_BETA41_COMPILE_HOTFIX' tools/apply_s47b_compile_hotfix.py
           grep -q 'horizontal swipe anywhere' app/src/main/java/vn/pickpack1291/app/beta/EdgeSwipeBackLayout.kt
-          python3 -m py_compile tools/apply_s47_beta41_owner_fixes.py
+          python3 -m py_compile tools/apply_s47_beta41_owner_fixes.py tools/apply_s47b_compile_hotfix.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -101,6 +105,9 @@ jobs:
           grep -q 'progress.joinToString(" - ")' "$F"
           grep -q 'for(i in v.childCount-1 downTo 0)' "$F"
           grep -q 'navigateTab(previous,false)' "$F"
+          grep -q 'historyTimeline(items)' "$F"
+          ! grep -q 'historyTimelineScreen(mnv,items.toMutableList())' "$F"
+          ! grep -q 'badge(label,' "$F"
       - name: Verify package metadata
         shell: bash
         run: |
