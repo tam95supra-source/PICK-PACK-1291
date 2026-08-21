@@ -1,0 +1,17 @@
+checked_at=2026-08-21T10:48:21Z
+source_sha=916a6c7e3b6a7c53bced4315275eb8d5ee20a621
+run_id=32474185570
+beta_name=0.4.2-beta.43
+beta_code=49
+stable_name=0.1.0-stable
+stable_code=1
+build=failure
+package=skipped
+sign=skipped
+artifact_id=
+apk_file=
+apk_sha256=
+apk_size=
+signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+stable_publish=FORBIDDEN
+verdict=FAIL
