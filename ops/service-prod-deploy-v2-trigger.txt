@@ -1,8 +1,10 @@
-deploy=2026-08-21T21:16:00+07:00
+deploy=2026-08-21T21:38:00+07:00
 target=pick-pack-1291-service
-source=Beta44 source after candidate PASS run 32490283390
+source=Beta44 Service-only stale replication claim recovery
 candidate_source_sha=adbae9c0fd92753fb53896cd6e645944a7129bc4
-scope=Beta44 session/work/resource/admin sync changes
+fix=STALE_INFLIGHT_RECOVERY_V1
+outbox_id=66
+preserve_beta44_artifact=9449525765
 expected_authority=SERVICE_PRIMARY
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
