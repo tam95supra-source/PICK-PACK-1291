@@ -69,6 +69,9 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s47b_compile_hotfix.py"))
     inputs.file(rootProject.file("tools/apply_s48_beta42_shift_work_summary.py"))
     inputs.file(rootProject.file("tools/apply_s49_beta43_session_admin_corrections.py"))
+    inputs.file(rootProject.file("tools/apply_s49b_compile_hotfix.py"))
+    inputs.file(rootProject.file("tools/apply_s49c_kotlin_syntax_hotfix.py"))
+    inputs.file(rootProject.file("tools/apply_s50_beta44_owner_user_projection_admin_bulk_sync_vi.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
@@ -94,8 +97,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 49
-            versionName = "0.4.2-beta.43"
+            versionCode = 50
+            versionName = "0.4.2-beta.44"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -136,4 +139,4 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and OTA path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// The M2 source transform composes S10..S25 + S27 + S29 + S30 + S31 + S32 + S33 + S34 + S35 + S36 + S37 + S38 + S39 + S40 + S43 + S44 + S45 + S47 + S48 + S49 in the ephemeral build workspace.
+// The M2 source transform composes S10..S50 in the ephemeral build workspace; S50 is the Beta44 owner-approved projection/admin/sync layer.
