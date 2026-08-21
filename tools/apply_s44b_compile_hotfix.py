@@ -17,3 +17,4 @@ runpy.run_path(str(ROOT/'tools/apply_s47_beta41_owner_fixes.py'),run_name='__mai
 runpy.run_path(str(ROOT/'tools/apply_s47b_compile_hotfix.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s48_beta42_shift_work_summary.py'),run_name='__main__')
 runpy.run_path(str(ROOT/'tools/apply_s49_beta43_session_admin_corrections.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s49b_compile_hotfix.py'),run_name='__main__')
