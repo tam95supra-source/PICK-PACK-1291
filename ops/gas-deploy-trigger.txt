@@ -1,10 +1,11 @@
-deploy=2026-08-21T22:10:00+07:00
-reason=switch-beta-ota-from-google-drive-to-github-releases
-scope=ota-discovery-only-plus-existing-s46-runtime-transform
+deploy=2026-08-21T22:46:00+07:00
+reason=make-github-release-ota-canonical-and-durable
+scope=gas-source-sync-auth-s46-github-ota
 expected_service_authority=SERVICE_PRIMARY
 expected_replication=HEALTHY_0
 beta_target=0.4.2-beta.44
 beta_release_tag=v0.4.2-beta.44-publicbeta
+beta_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
 beta_retention=10
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
