@@ -1,0 +1,8 @@
+requested_at=2026-08-21T21:40:00+07:00
+candidate_source_sha=adbae9c0fd92753fb53896cd6e645944a7129bc4
+allowed_post_candidate=service/,ops/,.github/workflows/
+apk_artifact=9449525765
+apk_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
+android_change=FORBIDDEN_WITHOUT_REBUILD
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
