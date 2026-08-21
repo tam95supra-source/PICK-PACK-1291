@@ -1,0 +1,109 @@
+name: Beta43 Exact Build Verify
+
+on:
+  push:
+    branches: ['ci/beta43-build-verify']
+
+permissions:
+  contents: read
+
+jobs:
+  exact-build-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Beta43 source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 49' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.43"' app/build.gradle.kts
+          grep -q 'versionCode = 1' app/build.gradle.kts
+          grep -q 'versionName = "0.1.0-stable"' app/build.gradle.kts
+          test -f tools/apply_s49_beta43_session_admin_corrections.py
+          grep -q 'S49_BETA43_SESSION_ADMIN_CORRECTIONS' tools/apply_s49_beta43_session_admin_corrections.py
+          grep -q '/v1/session/work' service/src/entry_product.ts
+          grep -q '/v1/session/exit' service/src/entry_product.ts
+          grep -q '/v1/session/time-correction' service/src/entry_product.ts
+          grep -q '/v1/session/delete-exit' service/src/entry_product.ts
+          grep -q '/v1/admin/resources' service/src/entry_product.ts
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Resolve Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [[ -z "$SDK" || ! -f "$SDK/platforms/android-36/android.jar" || ! -x "$SDK/build-tools/36.0.0/apksigner" ]]; then
+            SDK="$RUNNER_TEMP/android-sdk"
+            ZIP="$RUNNER_TEMP/commandlinetools.zip"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+            echo '4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  '"$ZIP" | sha256sum -c -
+            mkdir -p "$SDK/cmdline-tools"
+            unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"
+            mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+      - name: Build Beta and Stable once
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
+      - name: Verify package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          "$BT/aapt" dump badging "$BETA" > /tmp/beta.txt
+          "$BT/aapt" dump badging "$STABLE" > /tmp/stable.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta.txt
+          grep -q "versionCode='49'" /tmp/beta.txt
+          grep -q "versionName='0.4.2-beta.43'" /tmp/beta.txt
+          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt
+          grep -q "versionCode='1'" /tmp/stable.txt
+          grep -q "versionName='0.1.0-stable'" /tmp/stable.txt
+      - name: Sign exact Beta and verify fixed signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]]; done
+          KS="$RUNNER_TEMP/release.jks"
+          printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
+          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"
+          printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          mkdir -p dist/beta43
+          OUT=dist/beta43/pick-pack-1291-public-beta-0.4.2-beta.43.apk
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" > /tmp/cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+          sha256sum "$OUT" | tee dist/beta43/SHA256SUMS-beta43.txt
+          stat -c '%s' "$OUT" | tee dist/beta43/SIZE-beta43.txt
+          printf 'candidate_source=407a8bbfa2abb97e2bd983b402515c09eb1e7892\nvalidation_commit=%s\nversion=0.4.2-beta.43\nversion_code=49\nsigner_sha256=%s\n' "$GITHUB_SHA" "$EXPECTED_SIGNER_SHA256" > dist/beta43/BUILD-METADATA.txt
+      - name: Upload signed Beta43 validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-0.4.2-beta.43-signed-validation
+          path: dist/beta43/*
+          retention-days: 7
+      - name: Cleanup signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
