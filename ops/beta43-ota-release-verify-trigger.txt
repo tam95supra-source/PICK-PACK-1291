@@ -1,0 +1,8 @@
+verify=2026-08-21T18:26:00+07:00
+channel=BETA
+from_version=0.4.2-beta.42
+target_version=0.4.2-beta.43
+expected_sha256=3f03e81a2ffd9f4b91ca0bbe9c32042b31a84e915e2dd4f10e796d299bd07f7e
+expected_signer_sha256=d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+stable_publish=FORBIDDEN
+merge_pr38=FORBIDDEN
