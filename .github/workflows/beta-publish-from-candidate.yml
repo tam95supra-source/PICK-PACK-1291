@@ -48,12 +48,14 @@ jobs:
           OUT=/tmp/beta-publish-result
           echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$OUT"
           echo "release_sha=$GITHUB_SHA" >> "$OUT"
-          PHASE=LOCK
+          echo "run_id=$GITHUB_RUN_ID" >> "$OUT"
+          PHASE=LOCK_STATIC
           trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
 
           grep -qx 'verdict=PASS' ops/beta-release-candidate-result.txt
           grep -qx 'verdict=PASS' ops/service-prod-deploy-v2-result.txt
           grep -qx 'stable_publish=FORBIDDEN' ops/beta-release-candidate-result.txt
+          echo "receipt_gate=PASS" >> "$OUT"
 
           CANDIDATE_SOURCE_SHA=$(sed -n 's/^source_sha=//p' ops/beta-release-candidate-result.txt | tail -1)
           CANDIDATE_RUN_ID=$(sed -n 's/^run_id=//p' ops/beta-release-candidate-result.txt | tail -1)
@@ -77,24 +79,73 @@ jobs:
           [[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]]
           [[ "$FROM_VERSION" =~ ^0\.4\.2-beta\.[0-9]+$ ]]
           [[ "$FROM_VERSION" != "$TARGET_VERSION" ]]
-
           git cat-file -e "$CANDIDATE_SOURCE_SHA^{commit}"
           git diff --quiet "$CANDIDATE_SOURCE_SHA"..HEAD -- service
-
-          curl -fsSL --retry 4 --retry-delay 2 "$SERVICE_URL/health" > /tmp/health.json
-          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' > /tmp/discovery.json
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38.json
-          node - <<'NODE'
-          const h=require('/tmp/health.json'),g=require('/tmp/discovery.json'),p=require('/tmp/pr38.json');
-          const a=h.authority||{},ga=g.authority||{};
-          const se=Number(a.authority_epoch),ge=Number(g.authority_epoch??ga.authority_epoch);
-          if(!h.ok||a.mode!=='SERVICE_PRIMARY'||a.scope!=='PRODUCTION') throw Error('SERVICE_AUTHORITY_GATE');
-          if(h.replication?.state!=='HEALTHY'||Number(h.replication?.pending_count)!==0) throw Error('REPLICATION_GATE');
-          if(!g.ok||g.authority_mode!=='SERVICE_PRIMARY'||ge!==se) throw Error('GAS_AUTHORITY_GATE');
-          if(p.state!=='open'||p.draft!==true||p.merged===true) throw Error('PR38_SAFETY_GATE');
-          NODE
+          echo "candidate_static_gate=PASS" >> "$OUT"
 
           for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do [[ -n "${!v:-}" ]]; done
+          echo "google_oauth_secrets=PRESENT" >> "$OUT"
+
+          PHASE=LOCK_LIVE_AUTHORITY
+          live_ok=false
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            service_code=$(curl -sSL --connect-timeout 15 --max-time 45 -o /tmp/health.json -w '%{http_code}' "$SERVICE_URL/health" || true)
+            gas_code=$(curl -sSL --connect-timeout 15 --max-time 60 -o /tmp/discovery.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' || true)
+            if [[ "$service_code" == 200 && "$gas_code" == 200 ]] && node - <<'NODE'
+          const fs=require('fs');
+          try {
+            const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8'));
+            const g=JSON.parse(fs.readFileSync('/tmp/discovery.json','utf8'));
+            const a=h.authority||{}, ga=g.authority||{};
+            const se=Number(a.authority_epoch), ge=Number(g.authority_epoch??ga.authority_epoch);
+            const good=h.ok===true && a.mode==='SERVICE_PRIMARY' && a.scope==='PRODUCTION' && h.replication?.state==='HEALTHY' && Number(h.replication?.pending_count)===0 && g.ok===true && g.authority_mode==='SERVICE_PRIMARY' && ge===se;
+            process.exit(good?0:1);
+          } catch(e) { process.exit(1); }
+          NODE
+            then
+              live_ok=true
+              echo "live_gate_attempt=$attempt" >> "$OUT"
+              break
+            fi
+            echo "Live release gate retry $attempt/10 service_http=$service_code gas_http=$gas_code" >&2
+            sleep 3
+          done
+          if [[ "$live_ok" != true ]]; then
+            python3 - <<'PY' >> "$OUT"
+          import json
+          for p,prefix in [('/tmp/health.json','service'),('/tmp/discovery.json','gas')]:
+              try:
+                  j=json.load(open(p))
+              except Exception:
+                  print(prefix+'_json=UNREADABLE'); continue
+              if prefix=='service':
+                  a=j.get('authority') or {}; r=j.get('replication') or {}
+                  print('service_ok='+str(j.get('ok')))
+                  print('service_authority_mode='+str(a.get('mode')))
+                  print('service_authority_scope='+str(a.get('scope')))
+                  print('service_authority_epoch='+str(a.get('authority_epoch')))
+                  print('service_replication_state='+str(r.get('state')))
+                  print('service_replication_pending='+str(r.get('pending_count')))
+              else:
+                  a=j.get('authority') or {}
+                  print('gas_ok='+str(j.get('ok')))
+                  print('gas_authority_mode='+str(j.get('authority_mode')))
+                  print('gas_authority_epoch='+str(j.get('authority_epoch',a.get('authority_epoch'))))
+          PY
+            false
+          fi
+          echo "service_gate=PASS" >> "$OUT"
+          echo "replication_gate=HEALTHY_0" >> "$OUT"
+          echo "gas_authority_gate=PASS" >> "$OUT"
+
+          PHASE=LOCK_PR38
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" > /tmp/pr38.json
+          node - <<'NODE'
+          const p=require('/tmp/pr38.json');
+          if(p.state!=='open'||p.draft!==true||p.merged===true) throw Error('PR38_SAFETY_GATE');
+          NODE
+          echo "pr38_gate=OPEN_DRAFT_UNMERGED" >> "$OUT"
+
           echo "CANDIDATE_SOURCE_SHA=$CANDIDATE_SOURCE_SHA" >> "$GITHUB_ENV"
           echo "CANDIDATE_RUN_ID=$CANDIDATE_RUN_ID" >> "$GITHUB_ENV"
           echo "ARTIFACT_ID=$ARTIFACT_ID" >> "$GITHUB_ENV"
@@ -114,9 +165,6 @@ jobs:
             echo "apk_name=$APK_NAME"
             echo "expected_sha256=$EXPECTED_SHA"
             echo "expected_size=$EXPECTED_SIZE"
-            echo "service_gate=PASS"
-            echo "replication_gate=HEALTHY_0"
-            echo "pr38_gate=OPEN_DRAFT_UNMERGED"
           } >> "$OUT"
 
       - name: Download and verify exact signed candidate artifact
@@ -171,7 +219,13 @@ jobs:
           trap 'rc=$?; echo failed_phase=$PHASE >>"$OUT"; echo failed_rc=$rc >>"$OUT"; exit $rc' ERR
           list_name(){
             local name="$1" out="$2" q
-            q=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote("\"%s\" in parents and trashed=false and name=\"%s\""%(sys.argv[1],sys.argv[2])))' "$BETA_FOLDER_ID" "$name")
+            q=$(python3 - "$BETA_FOLDER_ID" "$name" <<'PY'
+          import sys,urllib.parse
+          folder,name=sys.argv[1],sys.argv[2]
+          name=name.replace("'","\\'")
+          print(urllib.parse.quote("'%s' in parents and trashed=false and name='%s'"%(folder,name)))
+          PY
+          )
             curl -fsSL -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size,mimeType,parents)&pageSize=100" > "$out"
           }
           upload(){
