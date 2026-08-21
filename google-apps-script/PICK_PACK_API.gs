@@ -106,28 +106,19 @@ function ppOtaSha256_(file) {
   const sha=digest.map(function(b){return ('0'+((b+256)%256).toString(16)).slice(-2);}).join('');
   cache.put(key,sha,21600); return sha;
 }
+// PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 function ppUpdateCheck_(body) {
   const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
   const current=String(body.current_version||body._app_version||'').trim();
-  const folderId=channel==='STABLE'?PP.OTA_STABLE_FOLDER_ID:PP.OTA_BETA_FOLDER_ID;
-  const files=DriveApp.getFolderById(folderId).getFiles(); let best=null;
-  while(files.hasNext()){
-    const file=files.next(),name=file.getName(); if(!/\.apk$/i.test(name))continue;
-    const version=ppOtaVersionFromName_(name); if(!version)continue; const updated=file.getLastUpdated();
-    if(!best||ppOtaCompare_(version,best.version)>0||(ppOtaCompare_(version,best.version)===0&&updated.getTime()>best.updated.getTime())) best={file:file,name:name,version:version,updated:updated};
-  }
-  if(!best)return {ok:true,source:'GOOGLE_DRIVE',channel:channel,available:false,reason:'NO_APK'};
-  const available=ppOtaCompare_(best.version,current)>0;
-  const out={ok:true,source:'GOOGLE_DRIVE',channel:channel,available:available,version_name:best.version,size:best.file.getSize(),published_at:best.updated.toISOString(),notes:String(best.file.getDescription()||(channel==='STABLE'?'Phát hành từ BẢN ỔN ĐỊNH':'Phát hành từ BẢN THỬ NGHIỆM')),mandatory:/mandatory/i.test(best.name)};
+  if(channel==='STABLE') return {ok:true,source:'GITHUB_RELEASE',channel:'STABLE',available:false,reason:'NO_RELEASE'};
+  const version="0.4.2-beta.44", available=ppOtaCompare_(version,current)>0;
+  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:50,size:12962299,published_at:"2026-08-21T15:06:29Z",notes:"Pick Pack 1291 Beta 0.4.2-beta.44",mandatory:false};
   if(!available)return out;
-  try{
-    const access=best.file.getSharingAccess();
-    if(access!==DriveApp.Access.ANYONE&&access!==DriveApp.Access.ANYONE_WITH_LINK)best.file.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
-  }catch(err){console.error('OTA sharing: '+String(err));return {ok:false,error:'OTA_SHARE_FAILED',source:'GOOGLE_DRIVE',channel:channel};}
-  out.sha256=ppOtaSha256_(best.file);
-  out.apk_url='https://drive.usercontent.google.com/download?id='+encodeURIComponent(best.file.getId())+'&export=download&confirm=t';
+  out.sha256="aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9";
+  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.44-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.44.apk";
   return out;
 }
+
 
 function ppJson_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
