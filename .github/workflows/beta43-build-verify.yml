@@ -3,6 +3,8 @@ name: Beta43 Exact Build Verify
 on:
   push:
     branches: ['ci/beta43-build-verify']
+  pull_request:
+    branches: ['agent/service-migration-m2']
 
 permissions:
   contents: read
@@ -19,6 +21,8 @@ jobs:
       EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify Beta43 source contract
         shell: bash
         run: |
