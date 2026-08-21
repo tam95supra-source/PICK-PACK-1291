@@ -1,0 +1,104 @@
+name: Replication Outbox Diagnostics Read Only
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/replication-outbox-diagnostics-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: replication-outbox-diagnostics
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read pending production outbox rows only
+        working-directory: service
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-audit --no-fund
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]
+          cat > wrangler.prod.diag.jsonc <<'EOF'
+          {
+            "$schema":"./node_modules/wrangler/config-schema.json",
+            "name":"pick-pack-1291-service",
+            "main":"src/entry_product.ts",
+            "compatibility_date":"2026-08-08",
+            "d1_databases":[{"binding":"DB","database_name":"pick-pack-1291-service-prod","database_id":"b619df89-528d-4126-a948-de0425037b11","migrations_dir":"migrations"}]
+          }
+          EOF
+          SQL="SELECT o.outbox_id,o.event_id,o.status,o.attempt_count,o.next_attempt_at,o.last_error_class,o.last_error,o.created_at,e.event_type,e.entity_type,e.entity_id,e.business_date,e.actor_id,e.authority_epoch,e.authority_seq FROM sheet_replication_outbox o LEFT JOIN events e ON e.event_id=o.event_id WHERE o.status IN ('PENDING','RETRY','INFLIGHT') ORDER BY o.outbox_id;"
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config wrangler.prod.diag.jsonc --command "$SQL" --json > /tmp/outbox.json
+          python3 - <<'PY'
+          import json,re,os
+          raw=json.load(open('/tmp/outbox.json'))
+          rows=[]
+          def walk(v):
+              if isinstance(v,dict):
+                  if isinstance(v.get('results'),list):
+                      rows.extend(x for x in v['results'] if isinstance(x,dict))
+                  for x in v.values(): walk(x)
+              elif isinstance(v,list):
+                  for x in v: walk(x)
+          walk(raw)
+          uniq=[]; seen=set()
+          for r in rows:
+              key=r.get('outbox_id')
+              if key in seen: continue
+              seen.add(key); uniq.append(r)
+          def clean(v,n=700):
+              s='' if v is None else str(v)
+              s=re.sub(r'[\r\n\t]+',' ',s)
+              s=re.sub(r'Bearer\s+[A-Za-z0-9._~+/-]+','Bearer [REDACTED]',s,flags=re.I)
+              return s[:n]
+          out='../ops/replication-outbox-diagnostics-result.txt'
+          with open(out,'w') as f:
+              f.write('checked_at='+__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat().replace('+00:00','Z')+'\n')
+              f.write('source_sha='+os.environ.get('GITHUB_SHA','')+'\n')
+              f.write('run_id='+os.environ.get('GITHUB_RUN_ID','')+'\n')
+              f.write('mode=READ_ONLY_SELECT\n')
+              f.write('pending_rows='+str(len(uniq))+'\n')
+              for i,r in enumerate(uniq,1):
+                  for k in ['outbox_id','event_id','status','attempt_count','next_attempt_at','last_error_class','last_error','created_at','event_type','entity_type','entity_id','business_date','actor_id','authority_epoch','authority_seq']:
+                      f.write(f'row{i}_{k}={clean(r.get(k))}\n')
+              f.write('mutation=NONE\n')
+              f.write('stable=UNTOUCHED\n')
+              f.write('pr38=UNTOUCHED\n')
+              f.write('verdict=PASS\n')
+          PY
+      - name: Persist read-only diagnostic receipt
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f ops/replication-outbox-diagnostics-result.txt ]]; then
+            printf 'checked_at=%s\nsource_sha=%s\nrun_id=%s\nmode=READ_ONLY_SELECT\nmutation=NONE\nstable=UNTOUCHED\npr38=UNTOUCHED\nverdict=FAIL\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_SHA" "$GITHUB_RUN_ID" > ops/replication-outbox-diagnostics-result.txt
+          fi
+          cp ops/replication-outbox-diagnostics-result.txt /tmp/receipt
+          git reset --hard HEAD >/dev/null
+          git pull --rebase origin agent/service-migration-m2
+          cp /tmp/receipt ops/replication-outbox-diagnostics-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- ops/replication-outbox-diagnostics-result.txt
+          git diff --cached --quiet || git commit -m 'ops: record read-only replication outbox diagnostics'
+          git push origin HEAD:agent/service-migration-m2
+          grep -qx 'verdict=PASS' ops/replication-outbox-diagnostics-result.txt
