@@ -16,9 +16,9 @@ export interface AdminAuditInput {
   occurred_at?:string;
 }
 
-const ALLOWED=new Set(["staff_upsert","staff_delete","account_upsert","account_status","change_email","change_password","staff_import","account_login","account_logout","settings_change"]);
+const ALLOWED=new Set(["staff_upsert","staff_delete","account_upsert","account_status","account_delete","change_email","change_password","staff_import","account_login","account_logout","settings_change"]);
 const TYPE:Record<string,string>={
-  staff_upsert:"MASTER_STAFF_UPSERT",staff_delete:"MASTER_STAFF_DELETE",account_upsert:"ACCOUNT_UPSERT",account_status:"ACCOUNT_STATUS",change_email:"ACCOUNT_EMAIL",change_password:"ACCOUNT_PASSWORD",staff_import:"MASTER_STAFF_IMPORT",account_login:"ACCOUNT_LOGIN",account_logout:"ACCOUNT_LOGOUT",settings_change:"SETTINGS_CHANGE"
+  staff_upsert:"MASTER_STAFF_UPSERT",staff_delete:"MASTER_STAFF_DELETE",account_upsert:"ACCOUNT_UPSERT",account_status:"ACCOUNT_STATUS",account_delete:"ACCOUNT_DELETE",change_email:"ACCOUNT_EMAIL",change_password:"ACCOUNT_PASSWORD",staff_import:"MASTER_STAFF_IMPORT",account_login:"ACCOUNT_LOGIN",account_logout:"ACCOUNT_LOGOUT",settings_change:"SETTINGS_CHANGE"
 };
 function text(v:unknown,max=240):string{return String(v??"").trim().slice(0,max);}
 
