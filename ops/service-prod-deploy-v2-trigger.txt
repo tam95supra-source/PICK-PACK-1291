@@ -1,6 +1,6 @@
-deploy=2026-08-21T18:10:00+07:00
+deploy=2026-08-21T18:16:00+07:00
 target=pick-pack-1291-service
-source=Beta43 integrated service branch after Android S49 compile closure
+source=final Beta43 release head with signed candidate PASS
 scope=session and resource correction routes
 expected_authority=SERVICE_PRIMARY
 stable=FORBIDDEN
