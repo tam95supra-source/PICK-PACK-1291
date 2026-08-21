@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Repair malformed Google Sheets response generic
+      - name: Repair Beta43 session hotfix TypeScript
         id: patch
         shell: bash
         run: |
@@ -36,12 +36,20 @@ jobs:
           s=p.read_text()
           old='r.json<{sheets?:Array<{properties?:{sheetId?:number;title?:string}}}>()'
           new='r.json<{sheets?:Array<{properties?:{sheetId?:number;title?:string}}>}>()'
-          if old not in s:
-              raise SystemExit('source generic repair anchor missing')
-          s=s.replace(old,new,1)
+          if old in s:
+              s=s.replace(old,new,1)
+          elif new not in s:
+              raise SystemExit('response generic anchor missing')
+          old_r='(r.results?.[0] as {available?:number}|undefined)?.available'
+          new_r='(r?.results?.[0] as {available?:number}|undefined)?.available'
+          old_l='(l.results?.[0] as {session_id?:string}|undefined)?.session_id'
+          new_l='(l?.results?.[0] as {session_id?:string}|undefined)?.session_id'
+          if old_r in s: s=s.replace(old_r,new_r,1)
+          if old_l in s: s=s.replace(old_l,new_l,1)
+          if new_r not in s or new_l not in s:
+              raise SystemExit('D1 batch optional-result repair anchor missing')
           p.write_text(s)
-          assert new in p.read_text()
-          print('Repaired Array<> and outer response generic boundary')
+          print('Repaired response generic and strict D1 batch optional access')
           PY
       - name: Typecheck repaired Service
         id: check
@@ -75,6 +83,10 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add -- service/src/session_hotfix.ts ops/beta43-service-source-repair-result.txt
-          git commit -m 'fix(service): repair Beta43 session hotfix TypeScript generic'
-          git push origin HEAD:agent/service-migration-m2
+          if git diff --cached --quiet; then
+            echo 'No source or receipt changes to commit.'
+          else
+            git commit -m 'fix(service): complete Beta43 session hotfix TypeScript repairs'
+            git push origin HEAD:agent/service-migration-m2
+          fi
           [[ "$verdict" == PASS ]]
