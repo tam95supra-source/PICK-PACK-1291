@@ -1,6 +1,6 @@
-build=2026-08-21T21:00:00+07:00
+build=2026-08-21T21:07:00+07:00
 target=0.4.2-beta.44
 version_code=50
-source=Beta44 + S30 idempotency fix + S50B Kotlin/PDA compile hotfix
+source=Beta44 + S30 idempotency fix + S50B normalized account manager Kotlin
 stable_publish=FORBIDDEN
 merge_pr38=FORBIDDEN
