@@ -1,0 +1,54 @@
+name: Beta Publish Gate Service Only Fix
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/beta-publish-gate-service-only-fix-trigger.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-publish-gate-service-only-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Allow proven Service-only post-candidate fixes without relaxing APK lock
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/beta-publish-from-candidate.yml')
+          s=p.read_text()
+          old='          git diff --quiet "$CANDIDATE_SOURCE_SHA"..HEAD -- service\n'
+          new='''          # APK candidate remains immutable. After its source SHA, only backend/release-control files may change.\n          # Any application/build/signing input change requires a new candidate build.\n          UNSAFE_POST_CANDIDATE=$(git diff --name-only "$CANDIDATE_SOURCE_SHA"..HEAD | grep -Ev '^(service/|ops/|\\.github/workflows/)' || true)\n          [[ -z "$UNSAFE_POST_CANDIDATE" ]]\n          echo "post_candidate_changes=SERVICE_RELEASE_CONTROL_ONLY" >> "$OUT"\n'''
+          if old in s:
+              s=s.replace(old,new,1)
+              p.write_text(s)
+          elif 'post_candidate_changes=SERVICE_RELEASE_CONTROL_ONLY' in s:
+              print('gate fix already present')
+          else:
+              raise SystemExit('expected service diff gate anchor not found')
+          PY
+          grep -n 'post_candidate_changes=SERVICE_RELEASE_CONTROL_ONLY' .github/workflows/beta-publish-from-candidate.yml
+      - name: Commit gate fix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- .github/workflows/beta-publish-from-candidate.yml
+          git diff --cached --quiet && exit 0
+          git commit -m 'ci: allow proven Service-only fixes with immutable Beta candidate'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
