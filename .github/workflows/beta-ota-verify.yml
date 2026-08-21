@@ -74,7 +74,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          BT="$ANDROID_HOME/build-tools/36.0.0"
           test -x "$BT/aapt"
           test -x "$BT/apksigner"
           "$BT/aapt" dump badging /tmp/ota.apk > /tmp/badge.txt
@@ -82,8 +82,10 @@ jobs:
           grep -q "versionCode='$TARGET_CODE'" /tmp/badge.txt
           grep -q "versionName='$TARGET_VERSION'" /tmp/badge.txt
           "$BT/apksigner" verify --verbose --print-certs /tmp/ota.apk > /tmp/cert.txt
-          CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
-          test "$CERT" = "$EXPECTED_SIGNER_SHA256"
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+          echo "identity_package=$EXPECTED_PACKAGE"
+          echo "identity_version=$TARGET_VERSION/$TARGET_CODE"
+          echo "identity_signer=$EXPECTED_SIGNER_SHA256"
 
       - name: Verify self-update false Stable isolation and retention
         id: isolation
