@@ -1,3 +1,7 @@
-release-preflight=2026-08-19T08:44:00+07:00
-target=0.4.2-beta.20
-purpose=S13 final signed Beta20 artifact after S21 and GAS scope fixes
+release-preflight=2026-08-21T14:10:00+07:00
+target=0.4.2-beta.40
+source_baseline=fbfe2059c989abe323f1b590d25e8b96a4a81b46
+candidate_source=a68f3489fdc1263fa9fdf1de52a3e4c96fc901cc
+purpose=Observable clean Beta40 preflight from synthetic main parent; Beta39 abandoned
+stable_publish=FORBIDDEN
+merge=FORBIDDEN
