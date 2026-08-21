@@ -1,5 +1,6 @@
-release-preflight=2026-08-21T15:03:00+07:00
-candidate=331b9b8a1cf84131aede63fe3d5588ab58f5fa34
+release-preflight=2026-08-21T15:16:00+07:00
+candidate=7f67e0069d3474cb71a4b7422e7f8bd73df0fc02
 version=0.4.2-beta.41
+reason=S47B-final-helper-compile-fix
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
