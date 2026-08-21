@@ -1,5 +1,7 @@
-requested_at=2026-08-21T21:31:00+07:00
-reason=beta44_release_gate_pending_1
+requested_at=2026-08-21T21:44:00+07:00
+attempt=2
+reason=verify_stale_inflight_recovery_after_service_deploy
+outbox_id=66
 mode=READ_ONLY_SELECT
 mutation=FORBIDDEN
 stable=FORBIDDEN
