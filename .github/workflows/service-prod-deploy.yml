@@ -1,0 +1,161 @@
+name: Service Production Deploy
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/service-prod-deploy-trigger.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: service-prod-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install and typecheck Service
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Pre-deploy live health
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --retry 4 --retry-delay 2 --connect-timeout 15 --max-time 45 -o /tmp/pre-health.json -w '%{http_code}' "$SERVICE_URL/health")
+          [[ "$code" == 200 ]]
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/pre-health.json'))
+          assert j.get('ok') is True, j
+          PY
+      - name: Generate locked production Wrangler config
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > wrangler.prod.generated.jsonc <<'EOF'
+          {
+            "$schema": "./node_modules/wrangler/config-schema.json",
+            "name": "pick-pack-1291-service",
+            "main": "src/entry_product.ts",
+            "compatibility_date": "2026-08-08",
+            "compatibility_flags": ["nodejs_compat"],
+            "workers_dev": true,
+            "placement": { "mode": "smart" },
+            "vars": {
+              "SERVICE_GENERATION": "m2-prod-20260819-001",
+              "GOOGLE_SOURCE_SHEET_ID": "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78"
+            },
+            "d1_databases": [
+              {
+                "binding": "DB",
+                "database_name": "pick-pack-1291-service-prod",
+                "database_id": "b619df89-528d-4126-a948-de0425037b11",
+                "migrations_dir": "migrations"
+              }
+            ],
+            "durable_objects": {
+              "bindings": [
+                {"name": "REALTIME_HUB", "class_name": "RealtimeHub"}
+              ]
+            },
+            "migrations": [
+              {"tag": "v1", "new_sqlite_classes": ["RealtimeHub"]}
+            ],
+            "assets": {
+              "directory": "./public",
+              "binding": "ASSETS",
+              "not_found_handling": "single-page-application",
+              "run_worker_first": ["/health", "/v1/*", "/internal/*"]
+            },
+            "triggers": {"crons": ["*/1 * * * *"]},
+            "observability": {"enabled": true, "head_sampling_rate": 1}
+          }
+          EOF
+      - name: Deploy exact Service source to production Worker
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]
+          [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]
+          npx wrangler deploy --config wrangler.prod.generated.jsonc --keep-vars 2>&1 | tee /tmp/deploy.log
+      - name: Post-deploy health and route wiring probes
+        shell: bash
+        run: |
+          set -euo pipefail
+          health=0
+          for n in 1 2 3 4 5; do
+            health=$(curl -sS --connect-timeout 15 --max-time 45 -o /tmp/post-health.json -w '%{http_code}' "$SERVICE_URL/health" || true)
+            if [[ "$health" == 200 ]] && python3 - <<'PY'
+          import json
+          try:
+              j=json.load(open('/tmp/post-health.json'))
+              raise SystemExit(0 if j.get('ok') is True else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then break; fi
+            sleep 2
+          done
+          [[ "$health" == 200 ]]
+          probe_get() { curl -sS -o /tmp/probe.json -w '%{http_code}' "$SERVICE_URL$1"; }
+          probe_post() { curl -sS -o /tmp/probe.json -w '%{http_code}' -H 'content-type: application/json' -d '{}' "$SERVICE_URL$1"; }
+          r1=$(probe_get /v1/admin/resources)
+          r2=$(probe_post /v1/session/work)
+          r3=$(probe_post /v1/session/exit)
+          r4=$(probe_post /v1/session/time-correction)
+          r5=$(probe_post /v1/session/delete-exit)
+          [[ "$r1" == 401 && "$r2" == 401 && "$r3" == 401 && "$r4" == 401 && "$r5" == 401 ]]
+          printf 'resource_route=%s\nsession_work_route=%s\nsession_exit_route=%s\ntime_correction_route=%s\ndelete_exit_route=%s\n' "$r1" "$r2" "$r3" "$r4" "$r5" > /tmp/routes.txt
+      - name: Persist sanitized deploy receipt
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops
+          version_id=$(sed -n 's/.*Version ID: *//p' /tmp/deploy.log | tail -1 | tr -cd 'A-Za-z0-9_-')
+          {
+            echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "source_sha=$GITHUB_SHA"
+            echo "target=pick-pack-1291-service"
+            echo "d1=pick-pack-1291-service-prod"
+            echo "service_check=PASS"
+            echo "deploy=PASS"
+            [[ -n "$version_id" ]] && echo "worker_version_id=$version_id"
+            cat /tmp/routes.txt
+            echo "route_wiring=PASS"
+            echo "stable=UNTOUCHED"
+            echo "pr38_merge=FORBIDDEN"
+            echo "verdict=PASS"
+          } > ops/service-prod-deploy-result.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -- ops/service-prod-deploy-result.txt
+          git commit -m 'ops: record Service production deploy receipt'
+          git push origin HEAD:agent/service-migration-m2
+      - name: Remove generated production config
+        if: always()
+        working-directory: service
+        shell: bash
+        run: rm -f wrangler.prod.generated.jsonc
