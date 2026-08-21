@@ -1,0 +1,6 @@
+requested_at=2026-08-21T21:31:00+07:00
+reason=beta44_release_gate_pending_1
+mode=READ_ONLY_SELECT
+mutation=FORBIDDEN
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
