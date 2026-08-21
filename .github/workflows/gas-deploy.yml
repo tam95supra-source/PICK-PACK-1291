@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   deploy:
@@ -33,6 +33,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Validate source and transform tools
         shell: bash
@@ -144,6 +146,7 @@ jobs:
           echo "url=$(cat /tmp/weburl)" >> "$GITHUB_OUTPUT"
 
       - name: Verify live auth discovery and GitHub OTA
+        id: live
         shell: bash
         env:
           WEB_URL: ${{ steps.webapp.outputs.url }}
@@ -157,3 +160,30 @@ jobs:
           post_until '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.44"}' /tmp/self.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GITHUB_RELEASE"&&j.channel==="BETA"&&j.available===false?0:1)' 10
           post_until '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' /tmp/stable.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GITHUB_RELEASE"&&j.channel==="STABLE"&&j.available===false?0:1)' 10
           echo 'Live GAS canonical GitHub OTA + auth + Stable isolation: PASS'
+
+      - name: Persist production GAS deploy receipt
+        shell: bash
+        env:
+          GAS_VERSION: ${{ steps.deploy.outputs.version }}
+        run: |
+          set -euo pipefail
+          cat > ops/gas-deploy-result.txt <<EOF
+          checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          source_sha=$GITHUB_SHA
+          run_id=$GITHUB_RUN_ID
+          gas_version=$GAS_VERSION
+          ota_source=GITHUB_RELEASE
+          beta_target=$TARGET_BETA
+          beta_sha256=$TARGET_BETA_SHA256
+          beta43_available=true
+          beta44_self_update=false
+          stable=UNTOUCHED
+          pr38_merge=FORBIDDEN
+          verdict=PASS
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/gas-deploy-result.txt
+          git commit -m 'ops: record production GAS GitHub OTA deploy' || true
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
