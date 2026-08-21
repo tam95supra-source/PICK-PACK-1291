@@ -1,0 +1,17 @@
+checked_at=2026-08-21T15:11:26Z
+source_sha=c14a02f14846be0dbb2bc4b8b4acb1812d31ef1e
+run_id=32496228057
+from_version=0.4.2-beta.43
+target_version=0.4.2-beta.44
+target_code=50
+ota_source=GITHUB_RELEASE
+expected_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
+download_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
+download_size=12962299
+discovery=success
+identity=failure
+isolation=skipped
+beta_retention=10
+stable=UNTOUCHED
+pr38_merge=FORBIDDEN
+verdict=FAIL
