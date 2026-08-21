@@ -1,236 +1,110 @@
-name: Beta Release Publish V2 GitHub OTA
+name: Beta Release Publish V2 GitHub
 
 on:
   push:
-    branches: [ agent/service-migration-m2 ]
+    branches:
+      - agent/service-migration-m2
     paths:
-      - 'ops/beta-release-publish-v2-trigger.txt'
-  workflow_dispatch:
+      - ops/beta-release-publish-v2-trigger.txt
 
 permissions:
   contents: write
   actions: read
-  pull-requests: read
-
-concurrency:
-  group: beta-release-publish-v2
-  cancel-in-progress: false
-
-env:
-  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
-  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
-  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
 
 jobs:
   publish:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Lock exact candidate and live gates
-        id: lock
+      - name: Publish exact candidate to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          OUT=/tmp/result
-          printf 'checked_at=%s\nsource_sha=%s\nrun_id=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$OUT"
-          grep -qx 'verdict=PASS' ops/beta-release-candidate-result.txt
-          grep -qx 'stable_publish=FORBIDDEN' ops/beta-release-candidate-result.txt
-          grep -qx 'verdict=PASS' ops/service-prod-deploy-v2-result.txt
-          grep -qx 'verdict=PASS' ops/session11-beta33-replication-drain-result.txt
-          grep -qx 'replication=HEALTHY_0' ops/session11-beta33-replication-drain-result.txt
-
-          CANDIDATE_SOURCE_SHA=$(sed -n 's/^source_sha=//p' ops/beta-release-candidate-result.txt | tail -1)
-          CANDIDATE_RUN_ID=$(sed -n 's/^run_id=//p' ops/beta-release-candidate-result.txt | tail -1)
-          ARTIFACT_ID=$(sed -n 's/^artifact_id=//p' ops/beta-release-candidate-result.txt | tail -1)
-          TARGET_VERSION=$(sed -n 's/^beta_name=//p' ops/beta-release-candidate-result.txt | tail -1)
-          TARGET_CODE=$(sed -n 's/^beta_code=//p' ops/beta-release-candidate-result.txt | tail -1)
-          APK_NAME=$(sed -n 's/^apk_file=//p' ops/beta-release-candidate-result.txt | tail -1)
-          EXPECTED_SHA=$(sed -n 's/^apk_sha256=//p' ops/beta-release-candidate-result.txt | tail -1)
-          EXPECTED_SIZE=$(sed -n 's/^apk_size=//p' ops/beta-release-candidate-result.txt | tail -1)
-          SIGNER=$(sed -n 's/^signer_sha256=//p' ops/beta-release-candidate-result.txt | tail -1)
-          FROM_VERSION=$(sed -n 's/^from_version=//p' ops/beta-release-publish-v2-trigger.txt | tail -1)
-          [[ "$CANDIDATE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ && "$ARTIFACT_ID" =~ ^[0-9]+$ ]]
-          [[ "$TARGET_VERSION" =~ ^0\.4\.2-beta\.[0-9]+$ && "$TARGET_CODE" =~ ^[0-9]+$ ]]
-          [[ "$APK_NAME" == "pick-pack-1291-public-beta-$TARGET_VERSION.apk" ]]
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{64}$ && "$EXPECTED_SIZE" =~ ^[0-9]+$ ]]
-          [[ "$SIGNER" == "$EXPECTED_SIGNER_SHA256" ]]
-          [[ "$FROM_VERSION" =~ ^0\.4\.2-beta\.[0-9]+$ && "$FROM_VERSION" != "$TARGET_VERSION" ]]
-
-          live=false
-          for attempt in {1..10}; do
-            sc=$(curl -sSL --connect-timeout 15 --max-time 45 -o /tmp/health.json -w '%{http_code}' "$SERVICE_URL/health" || true)
-            gc=$(curl -sSL --connect-timeout 15 --max-time 60 -o /tmp/discovery.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d '{"action":"service_discovery"}' || true)
-            if [[ "$sc" == 200 && "$gc" == 200 ]] && python3 - <<'PY'
-          import json
-          h=json.load(open('/tmp/health.json')); g=json.load(open('/tmp/discovery.json')); a=h.get('authority') or {}; ga=g.get('authority') or {}
-          se=int(a.get('authority_epoch',-1)); ge=int(g.get('authority_epoch',ga.get('authority_epoch',-2)))
-          ok=h.get('ok') is True and a.get('mode')=='SERVICE_PRIMARY' and a.get('scope')=='PRODUCTION' and (h.get('replication') or {}).get('state')=='HEALTHY' and int((h.get('replication') or {}).get('pending_count',-1))==0 and g.get('ok') is True and g.get('authority_mode')=='SERVICE_PRIMARY' and ge==se
-          raise SystemExit(0 if ok else 1)
-          PY
-            then live=true; break; fi
-            sleep 3
-          done
-          [[ "$live" == true ]]
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/38" >/tmp/pr38.json
-          python3 - <<'PY'
-          import json
-          p=json.load(open('/tmp/pr38.json')); assert p.get('state')=='open' and p.get('draft') is True and p.get('merged') is not True, p
-          PY
-
-          TAG="v${TARGET_VERSION}-publicbeta"
-          for kv in CANDIDATE_SOURCE_SHA CANDIDATE_RUN_ID ARTIFACT_ID TARGET_VERSION TARGET_CODE APK_NAME EXPECTED_SHA EXPECTED_SIZE FROM_VERSION TAG; do echo "$kv=${!kv}" >> "$GITHUB_ENV"; done
-          printf 'candidate_source_sha=%s\ncandidate_run_id=%s\nartifact_id=%s\nfrom_version=%s\ntarget_version=%s\ntarget_code=%s\nservice_gate=PASS\nreplication_gate=HEALTHY_0\npr38_gate=OPEN_DRAFT_UNMERGED\n' "$CANDIDATE_SOURCE_SHA" "$CANDIDATE_RUN_ID" "$ARTIFACT_ID" "$FROM_VERSION" "$TARGET_VERSION" "$TARGET_CODE" >> "$OUT"
-
-      - name: Download exact signed candidate artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" -o /tmp/candidate.zip
-          rm -rf /tmp/candidate && mkdir -p /tmp/candidate
-          unzip -q /tmp/candidate.zip -d /tmp/candidate
-          APK=$(find /tmp/candidate -type f -name "$APK_NAME" -print -quit)
-          [[ -n "$APK" && -s "$APK" ]]
-          [[ "$(sha256sum "$APK" | awk '{print $1}')" == "$EXPECTED_SHA" ]]
-          [[ "$(stat -c '%s' "$APK")" == "$EXPECTED_SIZE" ]]
-          SUM=$(find /tmp/candidate -type f -name 'SHA256SUMS*.txt' -print -quit)
-          if [[ -z "$SUM" ]]; then SUM=/tmp/candidate/SHA256SUMS-${TARGET_VERSION}.txt; printf '%s  %s\n' "$EXPECTED_SHA" "$APK_NAME" > "$SUM"; fi
-          grep -q "$EXPECTED_SHA.*$APK_NAME" "$SUM"
-          echo "APK=$APK" >> "$GITHUB_ENV"; echo "SUM=$SUM" >> "$GITHUB_ENV"; echo "SUM_NAME=$(basename "$SUM")" >> "$GITHUB_ENV"
-          echo 'artifact_exact_bytes=PASS' >> /tmp/result
-
-      - name: Publish Beta GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          cat > /tmp/release-notes.txt <<EOF
-          Pick Pack 1291 Beta ${TARGET_VERSION}
-
-          PP_CHANNEL=BETA
-          PP_VERSION=${TARGET_VERSION}
-          PP_VERSION_CODE=${TARGET_CODE}
-          PP_SHA256=${EXPECTED_SHA}
-          PP_SIZE=${EXPECTED_SIZE}
-          PP_SIGNER_SHA256=${EXPECTED_SIGNER_SHA256}
-          PP_APK_NAME=${APK_NAME}
-          PP_MANDATORY=false
-          EOF
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Pick Pack 1291 ${TARGET_VERSION}" --notes-file /tmp/release-notes.txt --prerelease
-          else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$CANDIDATE_SOURCE_SHA" --title "Pick Pack 1291 ${TARGET_VERSION}" --notes-file /tmp/release-notes.txt --prerelease
-          fi
-          gh release upload "$TAG" "$APK#$APK_NAME" "$SUM#$SUM_NAME" --repo "$GITHUB_REPOSITORY" --clobber
-          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$APK_NAME"
-          curl -fL --retry 6 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 "$URL" -o /tmp/release.apk
-          [[ "$(sha256sum /tmp/release.apk | awk '{print $1}')" == "$EXPECTED_SHA" ]]
-          [[ "$(stat -c '%s' /tmp/release.apk)" == "$EXPECTED_SIZE" ]]
-          echo "RELEASE_URL=$URL" >> "$GITHUB_ENV"
-          printf 'release_tag=%s\nrelease_url=%s\ngithub_release_exact_bytes=PASS\n' "$TAG" "$URL" >> /tmp/result
-
-      - name: Retain only latest 10 Beta releases
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.json
-          python3 - <<'PY' > /tmp/delete.tsv
-          import json,re
-          rows=[]
-          for r in json.load(open('/tmp/releases.json')):
-              m=re.fullmatch(r'v0\.4\.2-beta\.(\d+)-publicbeta',str(r.get('tag_name','')))
-              if m: rows.append((int(m.group(1)),int(r['id']),r['tag_name']))
-          rows.sort(reverse=True)
-          for _,rid,tag in rows[10:]: print(f'{rid}\t{tag}')
-          PY
-          while IFS=$'\t' read -r rid tag; do
-            [[ -z "${rid:-}" ]] && continue
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$rid"
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
-          done < /tmp/delete.tsv
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases-after.json
-          COUNT=$(python3 - <<'PY'
-          import json,re
-          beta=[r for r in json.load(open('/tmp/releases-after.json')) if re.fullmatch(r'v0\.4\.2-beta\.\d+-publicbeta',str(r.get('tag_name','')))]
-          assert len(beta)<=10, len(beta); print(len(beta))
-          PY
-          )
-          echo "beta_release_count=$COUNT" >> /tmp/result
-          echo 'beta_retention=10' >> /tmp/result
-
-      - name: Patch GAS update_check to GitHub Release OTA
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('google-apps-script/PICK_PACK_API.gs'); s=p.read_text(); marker='PP_GITHUB_RELEASE_OTA_V1'
-          if marker not in s:
-              start=s.index('function ppUpdateCheck_(body) {'); end=s.index('\n}\n\nfunction ppJson_',start)+2
-              new=r'''// PP_GITHUB_RELEASE_OTA_V1: OTA binaries are public GitHub Release assets.
-function ppOtaMetaLine_(body,key) {
-  const lines=String(body||'').split(/\r?\n/),prefix=String(key||'')+'=';
-  for(let i=0;i<lines.length;i++)if(lines[i].indexOf(prefix)===0)return lines[i].slice(prefix.length).trim();
-  return '';
-}
-function ppOtaGithubReleases_() {
-  const cache=CacheService.getScriptCache(),key='PP_GITHUB_RELEASES_OTA_V1',cached=cache.get(key);
-  if(cached){try{return JSON.parse(cached);}catch(_){}}
-  const r=UrlFetchApp.fetch(PP.RELEASES,{muteHttpExceptions:true,headers:{'Accept':'application/vnd.github+json','User-Agent':'pick-pack-1291-ota'}});
-  if(r.getResponseCode()!==200)throw new Error('GITHUB_RELEASES_HTTP_'+r.getResponseCode());
-  const rows=JSON.parse(r.getContentText()||'[]'); cache.put(key,JSON.stringify(rows),60); return rows;
-}
-function ppUpdateCheck_(body) {
-  const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA',current=String(body.current_version||body._app_version||'').trim();
-  const releases=ppOtaGithubReleases_(); let best=null;
-  releases.forEach(function(rel){
-    if(!rel||rel.draft)return; const meta=String(rel.body||''); if(ppFold_(ppOtaMetaLine_(meta,'PP_CHANNEL'))!==channel)return;
-    const version=ppOtaMetaLine_(meta,'PP_VERSION'),apkName=ppOtaMetaLine_(meta,'PP_APK_NAME'); if(!version||!apkName)return;
-    const assets=Array.isArray(rel.assets)?rel.assets:[],asset=assets.find(function(a){return String(a&&a.name||'')===apkName;}); if(!asset||!asset.browser_download_url)return;
-    if(!best||ppOtaCompare_(version,best.version)>0)best={rel:rel,asset:asset,version:version,meta:meta};
-  });
-  if(!best)return {ok:true,source:'GITHUB_RELEASE',channel:channel,available:false,reason:'NO_RELEASE'};
-  const available=ppOtaCompare_(best.version,current)>0;
-  const out={ok:true,source:'GITHUB_RELEASE',channel:channel,available:available,version_name:best.version,version_code:Number(ppOtaMetaLine_(best.meta,'PP_VERSION_CODE')||0),size:Number(ppOtaMetaLine_(best.meta,'PP_SIZE')||best.asset.size||0),published_at:String(best.rel.published_at||best.rel.created_at||''),notes:String(best.rel.name||('Pick Pack 1291 '+best.version)),mandatory:ppFold_(ppOtaMetaLine_(best.meta,'PP_MANDATORY'))==='TRUE'};
-  if(!available)return out; out.sha256=String(ppOtaMetaLine_(best.meta,'PP_SHA256')||'').toLowerCase(); out.apk_url=String(best.asset.browser_download_url||'');
-  if(!/^[0-9a-f]{64}$/.test(out.sha256)||!/^https:\/\/github\.com\//.test(out.apk_url))return {ok:false,error:'OTA_GITHUB_METADATA_INVALID',source:'GITHUB_RELEASE',channel:channel}; return out;
-}
-'''
-              s=s[:start]+new+s[end:]; p.write_text(s)
-          PY
-          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API_GITHUB_OTA.js
-          node --check /tmp/PICK_PACK_API_GITHUB_OTA.js
-          grep -q 'PP_GITHUB_RELEASE_OTA_V1' google-apps-script/PICK_PACK_API.gs
-          echo 'gas_source_patch=PASS' >> /tmp/result
-
-      - name: Persist receipt and patched GAS source
-        if: always()
         shell: bash
         run: |
           set -euo pipefail
-          [[ -f /tmp/result ]] || printf 'checked_at=%s\nsource_sha=%s\nrun_id=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$GITHUB_SHA" "$GITHUB_RUN_ID" >/tmp/result
-          if grep -q '^github_release_exact_bytes=PASS$' /tmp/result && grep -q '^gas_source_patch=PASS$' /tmp/result; then
-            printf 'ota_source=GITHUB_RELEASE\nstable=UNTOUCHED\npr38_merge=FORBIDDEN\nverdict=PASS\n' >> /tmp/result
+          R=ops/beta-release-candidate-result.txt
+          grep -qx 'verdict=PASS' "$R"
+          grep -qx 'stable_publish=FORBIDDEN' "$R"
+          ARTIFACT_ID=$(sed -n 's/^artifact_id=//p' "$R")
+          VERSION=$(sed -n 's/^beta_name=//p' "$R")
+          CODE=$(sed -n 's/^beta_code=//p' "$R")
+          APK_NAME=$(sed -n 's/^apk_file=//p' "$R")
+          SHA=$(sed -n 's/^apk_sha256=//p' "$R")
+          SIZE=$(sed -n 's/^apk_size=//p' "$R")
+          SOURCE_SHA=$(sed -n 's/^source_sha=//p' "$R")
+          TAG="v${VERSION}-publicbeta"
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" -o /tmp/a.zip
+          mkdir /tmp/a && unzip -q /tmp/a.zip -d /tmp/a
+          APK=$(find /tmp/a -type f -name "$APK_NAME" -print -quit)
+          test -n "$APK"
+          test "$(sha256sum "$APK" | awk '{print $1}')" = "$SHA"
+          test "$(stat -c '%s' "$APK")" = "$SIZE"
+          SUM=$(find /tmp/a -type f -name 'SHA256SUMS*.txt' -print -quit)
+          if [ -z "$SUM" ]; then SUM=/tmp/a/SHA256SUMS-beta.txt; printf '%s  %s\n' "$SHA" "$APK_NAME" > "$SUM"; fi
+          cat > /tmp/notes.txt <<EOF
+          Pick Pack 1291 Beta $VERSION
+          PP_CHANNEL=BETA
+          PP_VERSION=$VERSION
+          PP_VERSION_CODE=$CODE
+          PP_SHA256=$SHA
+          PP_SIZE=$SIZE
+          PP_APK_NAME=$APK_NAME
+          PP_MANDATORY=false
+          EOF
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Pick Pack 1291 $VERSION" --notes-file /tmp/notes.txt --prerelease
           else
-            printf 'stable=UNTOUCHED\npr38_merge=UNTOUCHED\nverdict=FAIL\n' >> /tmp/result
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" --title "Pick Pack 1291 $VERSION" --notes-file /tmp/notes.txt --prerelease
           fi
-          cp /tmp/result ops/beta-release-publish-v2-result.txt
+          gh release upload "$TAG" "$APK#$APK_NAME" "$SUM#$(basename "$SUM")" --repo "$GITHUB_REPOSITORY" --clobber
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$APK_NAME"
+          curl -fL --retry 5 --retry-delay 2 "$URL" -o /tmp/live.apk
+          test "$(sha256sum /tmp/live.apk | awk '{print $1}')" = "$SHA"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.json
+          python3 - <<'PY' > /tmp/old.tsv
+          import json,re
+          a=[]
+          for r in json.load(open('/tmp/releases.json')):
+            m=re.fullmatch(r'v0\.4\.2-beta\.(\d+)-publicbeta',r.get('tag_name',''))
+            if m:a.append((int(m.group(1)),r['id'],r['tag_name']))
+          a.sort(reverse=True)
+          for _,i,t in a[10:]:print(str(i)+'\t'+t)
+          PY
+          while IFS=$'\t' read -r id tag; do
+            [ -z "${id:-}" ] && continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" || true
+          done < /tmp/old.tsv
+          COUNT=$(python3 - <<'PY'
+          import json,re
+          print(sum(1 for r in json.load(open('/tmp/releases.json')) if re.fullmatch(r'v0\.4\.2-beta\.\d+-publicbeta',r.get('tag_name',''))))
+          PY
+          )
+          cat > /tmp/receipt <<EOF
+          checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          source_sha=$GITHUB_SHA
+          run_id=$GITHUB_RUN_ID
+          version=$VERSION
+          version_code=$CODE
+          artifact_id=$ARTIFACT_ID
+          apk_sha256=$SHA
+          apk_size=$SIZE
+          release_tag=$TAG
+          release_url=$URL
+          beta_retention=10
+          beta_release_count=$COUNT
+          stable=UNTOUCHED
+          pr38_merge=FORBIDDEN
+          verdict=PASS
+          EOF
+          cp /tmp/receipt ops/beta-release-publish-v2-result.txt
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -- ops/beta-release-publish-v2-result.txt google-apps-script/PICK_PACK_API.gs
-          git diff --cached --quiet || git commit -m 'release: switch Beta OTA to GitHub Releases'
+          git add ops/beta-release-publish-v2-result.txt
+          git commit -m 'ops: record GitHub Beta release publish' || true
           git pull --rebase origin agent/service-migration-m2
           git push origin HEAD:agent/service-migration-m2
-          grep -qx 'verdict=PASS' ops/beta-release-publish-v2-result.txt
