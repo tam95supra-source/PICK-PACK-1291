@@ -13,3 +13,7 @@ assert 'private val FLUSH_LOCK=Any() // S44_SESSION_SINGLEFLIGHT_OBSERVABILITY\n
 assert 'val OPERATIONAL = setOf(' in o and 'val SYNC_ACTIONS = setOf(' in o and 'object M2DeviceIdentity' in o
 print('Applied S44B compile hotfix: companion constants restored after S44 marker')
 runpy.run_path(str(ROOT/'tools/apply_s45_beta40_owner_fixes.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s47_beta41_owner_fixes.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s47b_compile_hotfix.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s48_beta42_shift_work_summary.py'),run_name='__main__')
+runpy.run_path(str(ROOT/'tools/apply_s49_beta43_session_admin_corrections.py'),run_name='__main__')
