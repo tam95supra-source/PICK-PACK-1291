@@ -1,3 +1,7 @@
-from_version=0.4.2-beta.13
-target_version=0.4.2-beta.14
-expected_sha256=9ea9a58bb59ba045a7dc0d9376d9cadaf8f463c4f7ebe43b9f762a9169886428
+requested_at=2026-08-21T22:12:00+07:00
+from_version=0.4.2-beta.43
+target_version=0.4.2-beta.44
+expected_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
+source=GITHUB_RELEASE
+beta_retention=10
+stable=FORBIDDEN
