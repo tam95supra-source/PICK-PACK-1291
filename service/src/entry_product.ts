@@ -3,6 +3,7 @@ import { authenticate } from "./auth";
 import { exchangeGasSession, mobileRead } from "./mobile_hotfix";
 import { resourceAdminList, resourceAdminMutate } from "./resource_admin";
 import { attendanceExitDelete, attendanceTimeCorrect, flushSessionSpecialProjections, sessionExitGuarded, sessionWorkUpdate } from "./session_hotfix";
+import { serviceConnections } from "./beta44_owner";
 import { apiError, json } from "./util";
 
 export { RealtimeHub };
@@ -20,14 +21,12 @@ async function historicalBusinessDates(request:Request,env:Env):Promise<Response
 export default {
   async fetch(request:Request,env:Env,ctx:ExecutionContext):Promise<Response>{
     const u=new URL(request.url),method=request.method.toUpperCase();
-    // S39B_PRODUCT_MOBILE_ROUTES: production entrypoint owns these routes directly; no wrapper indirection.
     if(u.pathname==="/v1/auth/gas-session"&&method==="POST")return exchangeGasSession(request,env);
     if(u.pathname==="/v1/mobile/read"&&method==="POST")return mobileRead(request,env);
     if(u.pathname==="/v1/admin/business-dates"&&method==="GET")return historicalBusinessDates(request,env);
-    // S49_BETA43_SESSION_ADMIN_CORRECTIONS: wire the already-implemented D1 resource admin surface.
+    if(u.pathname==="/v1/service/connections"&&method==="GET")return serviceConnections(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="GET")return resourceAdminList(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="POST")return resourceAdminMutate(request,env);
-    // Session-specific endpoints avoid the old one-position resource_change semantics.
     if(u.pathname==="/v1/session/work"&&method==="POST")return sessionWorkUpdate(request,env);
     if(u.pathname==="/v1/session/exit"&&method==="POST")return sessionExitGuarded(request,env);
     if(u.pathname==="/v1/session/time-correction"&&method==="POST")return attendanceTimeCorrect(request,env);
@@ -36,7 +35,6 @@ export default {
   },
   async scheduled(controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{
     await current.scheduled(controller,env,ctx);
-    // Idempotent safety net for Google operational projection of time corrections / deleted EXIT rows.
     await flushSessionSpecialProjections(env);
   },
 } satisfies ExportedHandler<Env>;
