@@ -1,5 +1,5 @@
-requested_at=2026-08-21T21:23:00+07:00
-attempt=2
+requested_at=2026-08-21T21:27:00+07:00
+attempt=3
 from_version=0.4.2-beta.43
 target_version=0.4.2-beta.44
 candidate_run_id=32490283390
