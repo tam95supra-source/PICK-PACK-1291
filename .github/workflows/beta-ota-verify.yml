@@ -1,246 +1,151 @@
-name: Verify OTA - Beta and Stable
+name: Verify Beta GitHub OTA
 
 on:
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: OTA channel
-        required: true
-        default: BETA
-        type: choice
-        options:
-          - BETA
-          - STABLE
-      from_version:
-        description: Previous version on the selected channel
-        required: true
-        type: string
-      target_version:
-        description: Published target version
-        required: true
-        type: string
-      expected_sha256:
-        description: Published APK SHA-256
-        required: true
-        type: string
   push:
-    branches: [ main ]
+    branches: [ agent/service-migration-m2 ]
     paths:
       - 'ops/beta-ota-verify-trigger.txt'
-      - 'ops/stable-ota-verify-trigger.txt'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'ops/beta-ota-verify-trigger.txt'
-      - 'ops/stable-ota-verify-trigger.txt'
-
-concurrency:
-  group: ota-verify
-  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: beta-github-ota-verify
+  cancel-in-progress: false
+
+env:
+  GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+  EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+  EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    env:
-      GSHEET_API_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
-      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Resolve release target
-        id: target
+      - name: Resolve expected Beta candidate
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            CHANNEL='${{ inputs.channel }}'
-            FROM='${{ inputs.from_version }}'
-            VERSION='${{ inputs.target_version }}'
-            SHA='${{ inputs.expected_sha256 }}'
-          else
-            CHANGED=$(git diff --name-only HEAD^ HEAD || true)
-            BETA_CHANGED=false
-            STABLE_CHANGED=false
-            grep -qx 'ops/beta-ota-verify-trigger.txt' <<<"$CHANGED" && BETA_CHANGED=true || true
-            grep -qx 'ops/stable-ota-verify-trigger.txt' <<<"$CHANGED" && STABLE_CHANGED=true || true
-            if [[ "$BETA_CHANGED" == true && "$STABLE_CHANGED" == true ]]; then
-              echo 'Exactly one OTA trigger file may change per verification commit.' >&2
-              exit 1
-            elif [[ "$STABLE_CHANGED" == true ]]; then
-              CHANNEL=STABLE
-              TRIGGER=ops/stable-ota-verify-trigger.txt
-            else
-              CHANNEL=BETA
-              TRIGGER=ops/beta-ota-verify-trigger.txt
-            fi
-            test -f "$TRIGGER"
-            FROM=$(sed -n 's/^from_version=//p' "$TRIGGER" | tail -1)
-            VERSION=$(sed -n 's/^target_version=//p' "$TRIGGER" | tail -1)
-            SHA=$(sed -n 's/^expected_sha256=//p' "$TRIGGER" | tail -1)
-          fi
-          [[ "$CHANNEL" == BETA || "$CHANNEL" == STABLE ]]
-          [[ -n "$FROM" && -n "$VERSION" && "$SHA" =~ ^[0-9a-fA-F]{64}$ ]]
-          if [[ "$CHANNEL" == BETA ]]; then
-            PACKAGE='vn.pickpack1291.app.beta.publicbeta'
-            OTHER_CHANNEL=STABLE
-          else
-            PACKAGE='vn.pickpack1291.app.stable'
-            OTHER_CHANNEL=BETA
-          fi
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "other_channel=$OTHER_CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
-          echo "from=$FROM" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "sha=$(tr 'A-F' 'a-f' <<<"$SHA")" >> "$GITHUB_OUTPUT"
+          R=ops/beta-release-candidate-result.txt
+          FROM_VERSION=$(sed -n 's/^from_version=//p' ops/beta-ota-verify-trigger.txt | tail -1)
+          TARGET_VERSION=$(sed -n 's/^beta_name=//p' "$R")
+          TARGET_CODE=$(sed -n 's/^beta_code=//p' "$R")
+          EXPECTED_SHA=$(sed -n 's/^apk_sha256=//p' "$R")
+          EXPECTED_SIZE=$(sed -n 's/^apk_size=//p' "$R")
+          APK_NAME=$(sed -n 's/^apk_file=//p' "$R")
+          for kv in FROM_VERSION TARGET_VERSION TARGET_CODE EXPECTED_SHA EXPECTED_SIZE APK_NAME; do echo "$kv=${!kv}" >> "$GITHUB_ENV"; done
 
-      - name: Verify live update discovery and download
+      - name: Verify live discovery points to GitHub Release
+        id: discovery
         shell: bash
-        env:
-          CHANNEL: ${{ steps.target.outputs.channel }}
-          FROM_VERSION: ${{ steps.target.outputs.from }}
-          TARGET_VERSION: ${{ steps.target.outputs.version }}
-          EXPECTED_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
-          post_discovery_contract() {
-            local attempt status
-            for attempt in 1 2 3 4 5; do
-              status=$(curl -sSL --connect-timeout 20 --max-time 90 -o /tmp/from.json -w '%{http_code}' \
-                -H 'content-type: application/json' "$GSHEET_API_URL" \
-                -d "{\"action\":\"update_check\",\"channel\":\"$CHANNEL\",\"current_version\":\"$FROM_VERSION\"}" || true)
-              if [[ "$status" == 200 ]] && python3 - <<'PY'
+          good=false
+          for n in $(seq 1 20); do
+            code=$(curl -sSL --connect-timeout 20 --max-time 90 -o /tmp/update.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$FROM_VERSION\"}" || true)
+            if [ "$code" = 200 ] && python3 - <<'PY'
           import json,os
-          try:
-              j=json.load(open('/tmp/from.json'))
-              available=j.get('available',j.get('update_available'))
-              version=j.get('version_name',j.get('version',''))
-              url=j.get('apk_url') or j.get('download_url') or j.get('url') or ''
-              good=(j.get('ok') is True and available is True and str(version)==os.environ['TARGET_VERSION'] and str(j.get('sha256','')).lower()==os.environ['EXPECTED_SHA'].lower() and str(j.get('source',''))=='GOOGLE_DRIVE' and str(j.get('channel',''))==os.environ['CHANNEL'] and bool(url))
-              raise SystemExit(0 if good else 1)
-          except Exception:
-              raise SystemExit(1)
+          j=json.load(open('/tmp/update.json'))
+          ok=(j.get('ok') is True and j.get('available',j.get('update_available')) is True and j.get('source')=='GITHUB_RELEASE' and str(j.get('channel'))=='BETA' and str(j.get('version_name',j.get('version','')))==os.environ['TARGET_VERSION'] and str(j.get('sha256','')).lower()==os.environ['EXPECTED_SHA'].lower() and str(j.get('apk_url','')).startswith('https://github.com/'))
+          raise SystemExit(0 if ok else 1)
           PY
-              then
-                return 0
-              fi
-              echo "Discovery contract retry $attempt/5 (HTTP $status)" >&2
-              sleep 2
-            done
-            echo 'Did not receive valid Beta OTA discovery contract.' >&2
-            cat /tmp/from.json >&2 || true
-            return 1
-          }
-          post_discovery_contract
+            then good=true; break; fi
+            sleep 3
+          done
+          test "$good" = true
           python3 - <<'PY'
           import json
-          j=json.load(open('/tmp/from.json'))
-          url=j.get('apk_url') or j.get('download_url') or j.get('url') or ''
-          open('/tmp/url.txt','w').write(url)
+          j=json.load(open('/tmp/update.json')); open('/tmp/url','w').write(j['apk_url'])
           PY
-          curl -fL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 "$(cat /tmp/url.txt)" -o /tmp/ota.apk
+          curl -fL --retry 6 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 "$(cat /tmp/url)" -o /tmp/ota.apk
           ACTUAL=$(sha256sum /tmp/ota.apk | awk '{print $1}')
-          [[ "$ACTUAL" == "$EXPECTED_SHA" ]]
+          test "$ACTUAL" = "$EXPECTED_SHA"
+          test "$(stat -c '%s' /tmp/ota.apk)" = "$EXPECTED_SIZE"
+          echo "download_sha=$ACTUAL" >> "$GITHUB_OUTPUT"
+          echo "download_size=$(stat -c '%s' /tmp/ota.apk)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Resolve Android build tools
+      - name: Verify package version and production signer
+        id: identity
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${ANDROID_HOME:-}" \
-             && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
-             && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
-            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          SDK="$RUNNER_TEMP/android-sdk"
-          ZIP="$RUNNER_TEMP/commandlinetools.zip"
-          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
-          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
-          mkdir -p "$SDK/cmdline-tools"
-          unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"
-          mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
-
-      - name: Verify package version and fixed signer
-        shell: bash
-        env:
-          TARGET_VERSION: ${{ steps.target.outputs.version }}
-          EXPECTED_PACKAGE: ${{ steps.target.outputs.package }}
-        run: |
-          set -euo pipefail
-          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          test -x "$BT/aapt"
+          test -x "$BT/apksigner"
           "$BT/aapt" dump badging /tmp/ota.apk > /tmp/badge.txt
           grep -q "package: name='$EXPECTED_PACKAGE'" /tmp/badge.txt
+          grep -q "versionCode='$TARGET_CODE'" /tmp/badge.txt
           grep -q "versionName='$TARGET_VERSION'" /tmp/badge.txt
           "$BT/apksigner" verify --verbose --print-certs /tmp/ota.apk > /tmp/cert.txt
           CERT=$(grep -m1 'Signer #1 certificate SHA-256 digest:' /tmp/cert.txt | sed 's/.*digest: //' | tr 'A-F' 'a-f' | tr -d ':[:space:]')
-          [[ "$CERT" == "$EXPECTED_SIGNER_SHA256" ]]
+          test "$CERT" = "$EXPECTED_SIGNER_SHA256"
 
-      - name: Verify self-update false and opposite-channel isolation
-        shell: bash
+      - name: Verify self-update false Stable isolation and retention
+        id: isolation
         env:
-          CHANNEL: ${{ steps.target.outputs.channel }}
-          OTHER_CHANNEL: ${{ steps.target.outputs.other_channel }}
-          TARGET_VERSION: ${{ steps.target.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          post_ota_contract() {
-            local channel="$1" version="$2" out="$3"
-            local attempt status
-            for attempt in 1 2 3 4 5; do
-              status=$(curl -sSL --connect-timeout 20 --max-time 90 -o "$out" -w '%{http_code}' \
-                -H 'content-type: application/json' "$GSHEET_API_URL" \
-                -d "{\"action\":\"update_check\",\"channel\":\"$channel\",\"current_version\":\"$version\"}" || true)
-              if [[ "$status" == 200 ]] && python3 - "$out" "$channel" <<'PY'
-          import json,sys
-          try:
-              j=json.load(open(sys.argv[1]))
-              good=(j.get('ok') is True and str(j.get('channel',''))==sys.argv[2] and ('available' in j or 'update_available' in j))
-              raise SystemExit(0 if good else 1)
-          except Exception:
-              raise SystemExit(1)
-          PY
-              then
-                return 0
-              fi
-              echo "OTA contract probe retry $attempt/5 for $channel (HTTP $status)" >&2
-              sleep 2
-            done
-            echo "Did not receive OTA contract for $channel" >&2
-            cat "$out" >&2 || true
-            return 1
-          }
-          post_ota_contract "$CHANNEL" "$TARGET_VERSION" /tmp/self.json
-          post_ota_contract "$OTHER_CHANNEL" '999.999.999' /tmp/other.json
+          post(){ curl -sSL --connect-timeout 20 --max-time 90 -H 'content-type: application/json' "$GAS_URL" -d "$1"; }
+          post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_VERSION\"}" > /tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"999.999.999"}' > /tmp/stable.json
           python3 - <<'PY'
           import json,os
-          s=json.load(open('/tmp/self.json')); o=json.load(open('/tmp/other.json'))
-          s_available=s.get('available',s.get('update_available'))
-          o_available=o.get('available',o.get('update_available'))
-          other_version=o.get('version_name',o.get('version',''))
-          assert s.get('ok') is True and s_available is False, s
-          assert str(s.get('channel','')) == os.environ['CHANNEL'], s
-          assert o.get('ok') is True, o
-          assert str(o.get('channel','')) == os.environ['OTHER_CHANNEL'], o
-          assert o_available is False, o
-          assert str(other_version) != os.environ['TARGET_VERSION'], o
+          s=json.load(open('/tmp/self.json')); t=json.load(open('/tmp/stable.json'))
+          assert s.get('ok') is True and s.get('source')=='GITHUB_RELEASE' and s.get('available',s.get('update_available')) is False, s
+          assert t.get('ok') is True and t.get('source')=='GITHUB_RELEASE' and t.get('available',t.get('update_available')) is False, t
+          assert str(t.get('version_name',t.get('version',''))) != os.environ['TARGET_VERSION'], t
+          PY
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.json
+          python3 - <<'PY'
+          import json,re
+          a=[r for r in json.load(open('/tmp/releases.json')) if re.fullmatch(r'v0\.4\.2-beta\.\d+-publicbeta',str(r.get('tag_name','')))]
+          assert len(a)<=10, len(a)
+          print('retained_beta_releases='+str(len(a)))
           PY
 
-      - name: OTA gate result
+      - name: Persist OTA E2E receipt
+        if: always()
+        shell: bash
         env:
-          CHANNEL: ${{ steps.target.outputs.channel }}
+          DISCOVERY_OUTCOME: ${{ steps.discovery.outcome }}
+          IDENTITY_OUTCOME: ${{ steps.identity.outcome }}
+          ISOLATION_OUTCOME: ${{ steps.isolation.outcome }}
+          DOWNLOAD_SHA: ${{ steps.discovery.outputs.download_sha }}
+          DOWNLOAD_SIZE: ${{ steps.discovery.outputs.download_size }}
         run: |
-          echo "PASS - $CHANNEL OTA discovery, live download SHA, package/version, fixed signer, self-update and opposite-channel isolation."
+          set -euo pipefail
+          verdict=FAIL
+          if [ "$DISCOVERY_OUTCOME" = success ] && [ "$IDENTITY_OUTCOME" = success ] && [ "$ISOLATION_OUTCOME" = success ]; then verdict=PASS; fi
+          cat > ops/beta-ota-verify-result.txt <<EOF
+          checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          source_sha=$GITHUB_SHA
+          run_id=$GITHUB_RUN_ID
+          from_version=${FROM_VERSION:-}
+          target_version=${TARGET_VERSION:-}
+          target_code=${TARGET_CODE:-}
+          ota_source=GITHUB_RELEASE
+          expected_sha256=${EXPECTED_SHA:-}
+          download_sha256=${DOWNLOAD_SHA:-}
+          download_size=${DOWNLOAD_SIZE:-}
+          discovery=$DISCOVERY_OUTCOME
+          identity=$IDENTITY_OUTCOME
+          isolation=$ISOLATION_OUTCOME
+          beta_retention=10
+          stable=UNTOUCHED
+          pr38_merge=FORBIDDEN
+          verdict=$verdict
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/beta-ota-verify-result.txt
+          git commit -m 'ops: record GitHub OTA Beta E2E verification' || true
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          test "$verdict" = PASS
