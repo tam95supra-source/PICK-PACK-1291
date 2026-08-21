@@ -1,8 +1,8 @@
-checked_at=2026-08-21T11:16:35Z
-source_sha=fec3755879ee6e7a6da9d970711e81a0d6c897a8
-run_id=32476419843
+checked_at=2026-08-21T11:17:52Z
+source_sha=0f24139927a88cb9949cfc33473c3583f23fdd4a
+run_id=32476538690
 patch=service/src/session_hotfix.ts
-typecheck=failure
+typecheck=success
 production_deploy=NOT_RUN
 stable=UNTOUCHED
-verdict=FAIL
+verdict=PASS
