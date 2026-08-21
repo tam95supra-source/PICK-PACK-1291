@@ -179,12 +179,36 @@ jobs:
           TARGET_VERSION: ${{ steps.target.outputs.version }}
         run: |
           set -euo pipefail
-          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
-            -d "{\"action\":\"update_check\",\"channel\":\"$CHANNEL\",\"current_version\":\"$TARGET_VERSION\"}" > /tmp/self.json
-          # Opposite-channel isolation must not depend on an unpublished channel having an installable artifact.
-          # A high-version sentinel verifies the channel response itself and avoids forcing a lookup for a nonexistent Stable APK.
-          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
-            -d "{\"action\":\"update_check\",\"channel\":\"$OTHER_CHANNEL\",\"current_version\":\"999.999.999\"}" > /tmp/other.json
+          post_ota_contract() {
+            local channel="$1" version="$2" out="$3"
+            local attempt status
+            for attempt in 1 2 3 4 5; do
+              status=$(curl -sSL --connect-timeout 20 --max-time 90 -o "$out" -w '%{http_code}' \
+                -H 'content-type: application/json' "$GSHEET_API_URL" \
+                -d "{\"action\":\"update_check\",\"channel\":\"$channel\",\"current_version\":\"$version\"}" || true)
+              if [[ "$status" == 200 ]] && python3 - "$out" "$channel" <<'PY'
+          import json,sys
+          try:
+              j=json.load(open(sys.argv[1]))
+              good=(j.get('ok') is True and str(j.get('channel',''))==sys.argv[2] and ('available' in j or 'update_available' in j))
+              raise SystemExit(0 if good else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+              then
+                return 0
+              fi
+              echo "OTA contract probe retry $attempt/5 for $channel (HTTP $status)" >&2
+              sleep 2
+            done
+            echo "Did not receive OTA contract for $channel" >&2
+            cat "$out" >&2 || true
+            return 1
+          }
+          post_ota_contract "$CHANNEL" "$TARGET_VERSION" /tmp/self.json
+          # Use a high-version sentinel for the unpublished opposite channel. It proves channel isolation
+          # without requiring a nonexistent Stable APK to be installable.
+          post_ota_contract "$OTHER_CHANNEL" '999.999.999' /tmp/other.json
           python3 - <<'PY'
           import json,os
           s=json.load(open('/tmp/self.json')); o=json.load(open('/tmp/other.json'))
