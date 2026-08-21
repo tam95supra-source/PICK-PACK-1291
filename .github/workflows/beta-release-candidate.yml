@@ -46,11 +46,11 @@ jobs:
           print('stable_code='+one(stable,r'versionCode\s*=\s*(\d+)'))
           print('stable_name='+one(stable,r'versionName\s*=\s*"([^"]+)"'))
           PY
-          grep -q 'versionCode = 49' app/build.gradle.kts
-          grep -q 'versionName = "0.4.2-beta.43"' app/build.gradle.kts
+          grep -q 'versionCode = 50' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.44"' app/build.gradle.kts
           grep -q 'versionCode = 1' app/build.gradle.kts
           grep -q 'versionName = "0.1.0-stable"' app/build.gradle.kts
-          grep -q 'S49_BETA43_SESSION_ADMIN_CORRECTIONS' tools/apply_s49_beta43_session_admin_corrections.py
+          grep -q 'S50_BETA44_OWNER_USER_PROJECTION_ADMIN_BULK_SYNC_VI' tools/apply_s50_beta44_owner_user_projection_admin_bulk_sync_vi.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -114,7 +114,7 @@ jobs:
           "$BT/apksigner" verify --verbose --print-certs "$OUT" > /tmp/cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
           sha=$(sha256sum "$OUT" | awk '{print $1}'); size=$(stat -c '%s' "$OUT"); file=$(basename "$OUT")
-          printf '%s  %s\n' "$sha" "$file" > dist/beta/SHA256SUMS-beta43.txt
+          printf '%s  %s\n' "$sha" "$file" > dist/beta/SHA256SUMS-beta44.txt
           echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "size=$size" >> "$GITHUB_OUTPUT"; echo "file=$file" >> "$GITHUB_OUTPUT"
       - name: Upload signed Beta candidate
         id: upload
