@@ -1,8 +1,9 @@
-requested_at=2026-08-21T22:16:00+07:00
+requested_at=2026-08-21T23:03:00+07:00
 from_version=0.4.2-beta.43
 target_version=0.4.2-beta.44
 expected_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
 source=GITHUB_RELEASE
+canonical_manifest=ops/beta-ota-current.json
 identity_gate=ANDROID_BUILD_TOOLS_36_0_0_PROVEN_CANDIDATE_METHOD
 beta_retention=10
 stable=FORBIDDEN
