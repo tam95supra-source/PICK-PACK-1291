@@ -30,7 +30,10 @@ if MARK not in s and 'S30D_CANONICAL_AUDIT_BATCH' not in s:
     IDX.write_text(s,encoding='utf-8')
 
 s=REP.read_text(encoding='utf-8')
-if MARK not in s:
+# Newer canonical source may already contain the equivalent admin-audit projection
+# without carrying the historical S30 marker. Treat that as already applied so this
+# transform remains idempotent across the consolidated S10..S50 chain.
+if MARK not in s and 'async function replicateAdminAudit(' not in s:
     anchor='async function replicateOperational(db:D1Database,env:Env,token:string,events:EventRow[]):Promise<number>{'
     pos=s.find(anchor)
     if pos<0: raise SystemExit('S30 replication function anchor missing')
