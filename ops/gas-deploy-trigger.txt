@@ -1,7 +1,7 @@
-deploy=2026-08-20-S44-login-session-lock-isolation
-reason=remove-global-business-lock-from-pda-login-session-bind
-scope=source-and-existing-deployment-no-authority-transition
+deploy=2026-08-21T14:15:00+07:00
+reason=restore-production-gas-deployment-for-beta40-ota-after-live-404
+scope=redeploy-existing-deployment-from-beta38-s44-proven-source
 expected_service_authority=SERVICE_PRIMARY
 expected_replication=HEALTHY
 stable=FORBIDDEN
-merge_pr38=FORBIDDEN
+merge=FORBIDDEN
