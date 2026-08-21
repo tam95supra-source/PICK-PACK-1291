@@ -1,5 +1,5 @@
-deploy=2026-08-21T22:46:00+07:00
-reason=make-github-release-ota-canonical-and-durable
+deploy=2026-08-21T22:59:00+07:00
+reason=durable-github-release-ota-with-production-receipt
 scope=gas-source-sync-auth-s46-github-ota
 expected_service_authority=SERVICE_PRIMARY
 expected_replication=HEALTHY_0
