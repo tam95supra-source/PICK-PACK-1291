@@ -1,0 +1,5 @@
+repair=2026-08-21T18:18:00+07:00
+target=service/src/session_hotfix.ts
+issue=malformed nested generic in raSheetId response type
+production_deploy=NOT_RUN
+stable=UNTOUCHED
