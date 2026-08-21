@@ -1,0 +1,10 @@
+requested_at=2026-08-21T21:35:00+07:00
+outbox_id=66
+event_id=cf92a278-130b-4d3e-a056-38d416033da4
+fix=STALE_INFLIGHT_RECOVERY_V1
+stale_after_minutes=15
+preserve_event_id=REQUIRED
+fake_ack=FORBIDDEN
+delete_outbox=FORBIDDEN
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
