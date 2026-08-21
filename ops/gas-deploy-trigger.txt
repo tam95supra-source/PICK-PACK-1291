@@ -1,6 +1,6 @@
-deploy=2026-08-21T14:18:00+07:00
-reason=restore-production-gas-endpoint-for-beta40-ota-after-live-404
-scope=existing-deployment-beta38-s44-source-no-authority-transition
+deploy=2026-08-21T14:26:00+07:00
+reason=fix-login-and-reset-invalid-credentials-from-best-effort-cache-challenge
+scope=auth-challenge-persistence-only-no-account-password-data-change
 expected_service_authority=SERVICE_PRIMARY
 expected_replication=HEALTHY
 stable=FORBIDDEN
