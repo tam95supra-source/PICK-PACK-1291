@@ -1,7 +1,9 @@
-release-preflight=2026-08-21T14:08:00+07:00
-target=0.4.2-beta.40
-source_candidate=a68f3489fdc1263fa9fdf1de52a3e4c96fc901cc
-source_baseline=fbfe2059c989abe323f1b590d25e8b96a4a81b46
-purpose=authoritative clean Beta40 build-sign after five owner fixes; all prior Beta39/Beta40 artifacts rejected
+release-preflight=2026-08-21T17:43:00+07:00
+target=0.4.2-beta.43
+version_code=49
+source_candidate=407a8bbfa2abb97e2bd983b402515c09eb1e7892
+integrated_source=053d37543567ecd297e21add0cfd013cf5b45ede
+purpose=Beta43 owner session corrections exact build-sign preflight
+service_overlay=75aecb8507e68de28266ba024b6f238cbf1cffb0
 stable_publish=FORBIDDEN
 merge_pr38=FORBIDDEN
