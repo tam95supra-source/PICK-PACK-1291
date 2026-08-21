@@ -23,6 +23,7 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s31a_normalize_api_call_anchor.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s31_service_first_hotpath.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
+    runpy.run_path(str(ROOT / "tools/apply_s50b_beta44_compile_hotfix.py"), run_name="__main__")
     raise SystemExit(0)
 
 anchor = "    private val executor = Executors.newSingleThreadExecutor()\n"
@@ -85,4 +86,5 @@ runpy.run_path(str(ROOT / "tools/apply_s30_canonical_admin_audit.py"), run_name=
 runpy.run_path(str(ROOT / "tools/apply_s31a_normalize_api_call_anchor.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s31_service_first_hotpath.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
-print(f"Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B runtime patches: {path}")
+runpy.run_path(str(ROOT / "tools/apply_s50b_beta44_compile_hotfix.py"), run_name="__main__")
+print(f"Applied M2 dynamic Service transport + S19/S20/S21/S22/S23/S24/S25/S27/S29/S30/S31A/S31/S31B/S50B runtime patches: {path}")
