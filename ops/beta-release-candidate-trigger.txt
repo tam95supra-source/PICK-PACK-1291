@@ -1,6 +1,6 @@
-build=2026-08-21T18:04:00+07:00
-target=0.4.2-beta.43
-version_code=49
-source=Beta43 plus complete S49C Kotlin declaration-boundary fixes
+build=2026-08-21T20:52:00+07:00
+target=0.4.2-beta.44
+version_code=50
+source=Beta44 normalized work/resource projections + superadmin authenticated delete + bulk delete + Vietnamese sync/service users
 stable_publish=FORBIDDEN
 merge_pr38=FORBIDDEN
