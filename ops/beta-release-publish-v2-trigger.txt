@@ -1,0 +1,11 @@
+requested_at=2026-08-21T21:50:00+07:00
+from_version=0.4.2-beta.43
+target_version=0.4.2-beta.44
+candidate_run_id=32490283390
+artifact_id=9449525765
+expected_sha256=aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
+mode=EXACT_CANDIDATE_REUSE
+service_fix=STALE_INFLIGHT_RECOVERY_V1
+replication_required=HEALTHY_0
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
