@@ -109,24 +109,42 @@ jobs:
           EXPECTED_SHA: ${{ steps.target.outputs.sha }}
         run: |
           set -euo pipefail
-          curl -fsSL --retry 4 --retry-delay 2 -H 'content-type: application/json' "$GSHEET_API_URL" \
-            -d "{\"action\":\"update_check\",\"channel\":\"$CHANNEL\",\"current_version\":\"$FROM_VERSION\"}" > /tmp/from.json
-          python3 - <<'PY'
+          post_discovery_contract() {
+            local attempt status
+            for attempt in 1 2 3 4 5; do
+              status=$(curl -sSL --connect-timeout 20 --max-time 90 -o /tmp/from.json -w '%{http_code}' \
+                -H 'content-type: application/json' "$GSHEET_API_URL" \
+                -d "{\"action\":\"update_check\",\"channel\":\"$CHANNEL\",\"current_version\":\"$FROM_VERSION\"}" || true)
+              if [[ "$status" == 200 ]] && python3 - <<'PY'
           import json,os
+          try:
+              j=json.load(open('/tmp/from.json'))
+              available=j.get('available',j.get('update_available'))
+              version=j.get('version_name',j.get('version',''))
+              url=j.get('apk_url') or j.get('download_url') or j.get('url') or ''
+              good=(j.get('ok') is True and available is True and str(version)==os.environ['TARGET_VERSION'] and str(j.get('sha256','')).lower()==os.environ['EXPECTED_SHA'].lower() and str(j.get('source',''))=='GOOGLE_DRIVE' and str(j.get('channel',''))==os.environ['CHANNEL'] and bool(url))
+              raise SystemExit(0 if good else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+              then
+                return 0
+              fi
+              echo "Discovery contract retry $attempt/5 (HTTP $status)" >&2
+              sleep 2
+            done
+            echo 'Did not receive valid Beta OTA discovery contract.' >&2
+            cat /tmp/from.json >&2 || true
+            return 1
+          }
+          post_discovery_contract
+          python3 - <<'PY'
+          import json
           j=json.load(open('/tmp/from.json'))
-          available=j.get('available',j.get('update_available'))
-          version=j.get('version_name',j.get('version',''))
           url=j.get('apk_url') or j.get('download_url') or j.get('url') or ''
-          assert j.get('ok') is True, j
-          assert available is True, j
-          assert str(version) == os.environ['TARGET_VERSION'], j
-          assert str(j.get('sha256','')).lower() == os.environ['EXPECTED_SHA'].lower(), j
-          assert str(j.get('source','')) == 'GOOGLE_DRIVE', j
-          assert str(j.get('channel','')) == os.environ['CHANNEL'], j
-          assert url, j
           open('/tmp/url.txt','w').write(url)
           PY
-          curl -fL --retry 4 --retry-delay 2 "$(cat /tmp/url.txt)" -o /tmp/ota.apk
+          curl -fL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 "$(cat /tmp/url.txt)" -o /tmp/ota.apk
           ACTUAL=$(sha256sum /tmp/ota.apk | awk '{print $1}')
           [[ "$ACTUAL" == "$EXPECTED_SHA" ]]
 
@@ -206,8 +224,6 @@ jobs:
             return 1
           }
           post_ota_contract "$CHANNEL" "$TARGET_VERSION" /tmp/self.json
-          # Use a high-version sentinel for the unpublished opposite channel. It proves channel isolation
-          # without requiring a nonexistent Stable APK to be installable.
           post_ota_contract "$OTHER_CHANNEL" '999.999.999' /tmp/other.json
           python3 - <<'PY'
           import json,os
