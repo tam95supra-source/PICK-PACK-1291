@@ -1,0 +1,65 @@
+name: Service Replication Stale Claim Source Fix
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/service-replication-stale-claim-fix-trigger.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: service-replication-stale-claim-fix
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply deterministic stale INFLIGHT recovery source fix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('service/src/replication.ts')
+          s=p.read_text()
+          marker='STALE_INFLIGHT_RECOVERY_V1'
+          if marker in s:
+              print('fix already present')
+          else:
+              anchor='export async function replicatePending(db:D1Database,env:Env,limit=50):Promise<{ok:boolean;processed:number;appended:number;operational:number;pending:number;checkpoint?:string;error?:string}>{\n'
+              if s.count(anchor)!=1:
+                  raise SystemExit(f'anchor count {s.count(anchor)} != 1')
+              insert='''  // STALE_INFLIGHT_RECOVERY_V1: a Worker interruption can leave a claimed row INFLIGHT forever.\n  // Requeue only claims older than 15 minutes; preserve event_id/outbox row and never mark SYNCED here.\n  const staleClaimCutoff=new Date(Date.now()-15*60*1000).toISOString(),requeueAt=nowIso();\n  await db.prepare("UPDATE sheet_replication_outbox SET status='RETRY',claim_token=NULL,claimed_at=NULL,next_attempt_at=?1,last_error_class=COALESCE(last_error_class,'STALE_INFLIGHT_RECOVERED'),last_error=COALESCE(last_error,'Recovered stale INFLIGHT claim for canonical retry') WHERE status='INFLIGHT' AND (claimed_at IS NULL OR claimed_at<=?2)").bind(requeueAt,staleClaimCutoff).run();\n'''
+              s=s.replace(anchor,anchor+insert,1)
+              p.write_text(s)
+          PY
+          grep -n 'STALE_INFLIGHT_RECOVERY_V1' service/src/replication.ts
+      - name: Typecheck Service after fix
+        working-directory: service
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          npm install --no-audit --no-fund
+          npm run check
+      - name: Commit exact source fix
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- service/src/replication.ts
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'fix(service): recover stale replication INFLIGHT claims'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
