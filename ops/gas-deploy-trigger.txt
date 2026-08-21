@@ -1,7 +1,10 @@
-deploy=2026-08-21T14:26:00+07:00
-reason=fix-login-and-reset-invalid-credentials-from-best-effort-cache-challenge
-scope=auth-challenge-persistence-only-no-account-password-data-change
+deploy=2026-08-21T22:10:00+07:00
+reason=switch-beta-ota-from-google-drive-to-github-releases
+scope=ota-discovery-only-plus-existing-s46-runtime-transform
 expected_service_authority=SERVICE_PRIMARY
-expected_replication=HEALTHY
+expected_replication=HEALTHY_0
+beta_target=0.4.2-beta.44
+beta_release_tag=v0.4.2-beta.44-publicbeta
+beta_retention=10
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
