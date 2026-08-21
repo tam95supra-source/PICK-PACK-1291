@@ -1,4 +1,4 @@
 from_version=0.4.2-beta.40
 target_version=0.4.2-beta.41
 expected_sha256=13c6d66f3b7d7323a403c5e420b5b996c7eecbcffcc8f65cf77ce0eeb664ac7c
-verify_nonce=2026-08-21T15:28:00+07:00
+verify_nonce=2026-08-21T15:31:00+07:00
