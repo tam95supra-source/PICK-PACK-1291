@@ -3,7 +3,7 @@ import { authenticate } from "./auth";
 import { exchangeGasSession, mobileRead } from "./mobile_hotfix";
 import { resourceAdminList, resourceAdminMutate } from "./resource_admin";
 import { attendanceExitDelete, attendanceTimeCorrect, flushSessionSpecialProjections, sessionExitGuarded, sessionWorkUpdate } from "./session_hotfix";
-import { serviceConnections } from "./beta44_owner";
+import { serviceConnections, superadminDeleteAccounts } from "./beta44_owner";
 import { apiError, json } from "./util";
 
 export { RealtimeHub };
@@ -25,6 +25,7 @@ export default {
     if(u.pathname==="/v1/mobile/read"&&method==="POST")return mobileRead(request,env);
     if(u.pathname==="/v1/admin/business-dates"&&method==="GET")return historicalBusinessDates(request,env);
     if(u.pathname==="/v1/service/connections"&&method==="GET")return serviceConnections(request,env);
+    if(u.pathname==="/v1/admin/accounts/delete"&&method==="POST")return superadminDeleteAccounts(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="GET")return resourceAdminList(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="POST")return resourceAdminMutate(request,env);
     if(u.pathname==="/v1/session/work"&&method==="POST")return sessionWorkUpdate(request,env);
