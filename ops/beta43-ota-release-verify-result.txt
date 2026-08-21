@@ -1,0 +1,15 @@
+checked_at=2026-08-21T11:20:07Z
+source_sha=5d95076e75edaae021a4bd4aa66267a449957c41
+run_id=32476679598
+from_version=0.4.2-beta.42
+target_version=0.4.2-beta.43
+expected_sha256=3f03e81a2ffd9f4b91ca0bbe9c32042b31a84e915e2dd4f10e796d299bd07f7e
+download_sha256=3f03e81a2ffd9f4b91ca0bbe9c32042b31a84e915e2dd4f10e796d299bd07f7e
+download_size=12945915
+discovery=success
+tools=success
+identity=success
+isolation=success
+stable_publish=FORBIDDEN
+pr38_merge=FORBIDDEN
+verdict=PASS
