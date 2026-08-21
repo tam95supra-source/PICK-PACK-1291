@@ -1,6 +1,6 @@
-checked_at=2026-08-21T14:25:09Z
-release_sha=87d064353d5d2ed77bb2d555efad22b07189b8a4
-run_id=32492018418
+checked_at=2026-08-21T14:27:09Z
+release_sha=980df69e694d15cadf15f1e66305b47939c210c8
+run_id=32492197957
 receipt_gate=PASS
 candidate_static_gate=PASS
 google_oauth_secrets=PRESENT
