@@ -1,1 +1,5 @@
-release-preflight=2026-08-18T16:03:00+07:00
+release-preflight=2026-08-21T15:03:00+07:00
+candidate=331b9b8a1cf84131aede63fe3d5588ab58f5fa34
+version=0.4.2-beta.41
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
