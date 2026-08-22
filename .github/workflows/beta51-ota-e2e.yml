@@ -1,0 +1,90 @@
+name: Beta51 OTA E2E
+on:
+  push:
+    branches: [stabilization/beta48-golden-reset-beta50-20260822]
+    paths: ['.github/workflows/beta51-ota-e2e.yml']
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+concurrency:
+  group: beta51-ota-e2e
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      FROM_VERSION: 0.4.2-beta.50
+      TARGET_VERSION: 0.4.2-beta.51
+      TARGET_CODE: '57'
+      EXPECTED_SHA: 9714b96055a7025be4d2975021d751aeeb00dde36eb50be80ced3f930d209e06
+      EXPECTED_SIZE: '12995123'
+      EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    steps:
+      - name: Start receipt
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_OTA_E2E start run=${GITHUB_RUN_ID} from=${FROM_VERSION} target=${TARGET_VERSION}"
+      - name: Resolve live Beta50 to Beta51 and download exact OTA bytes
+        id: discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          good=false
+          for n in $(seq 1 30); do
+            code=$(curl -sSL --connect-timeout 20 --max-time 90 -o /tmp/update.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$FROM_VERSION\"}" || true)
+            if [[ "$code" == 200 ]] && python3 - <<'PY'
+          import json,os
+          try:j=json.load(open('/tmp/update.json'))
+          except Exception: raise SystemExit(1)
+          ok=(j.get('ok') is True and j.get('available',j.get('update_available')) is True and j.get('source')=='GITHUB_RELEASE' and str(j.get('channel'))=='BETA' and str(j.get('version_name',j.get('version','')))==os.environ['TARGET_VERSION'] and int(j.get('version_code',-1))==int(os.environ['TARGET_CODE']) and int(j.get('size',-1))==int(os.environ['EXPECTED_SIZE']) and str(j.get('sha256','')).lower()==os.environ['EXPECTED_SHA'].lower() and str(j.get('apk_url','')).startswith('https://github.com/'))
+          raise SystemExit(0 if ok else 1)
+          PY
+            then good=true; break; fi
+            sleep 5
+          done
+          [[ "$good" == true ]] || { echo LIVE_GAS_BETA51_NOT_READY; cat /tmp/update.json || true; exit 44; }
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/update.json')); open('/tmp/url','w').write(j['apk_url']); print('ota_source='+str(j.get('source'))); print('ota_version='+str(j.get('version_name',j.get('version')))); print('ota_code='+str(j.get('version_code')))
+          PY
+          curl -fL --retry 6 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 "$(cat /tmp/url)" -o /tmp/ota.apk
+          [[ "$(sha256sum /tmp/ota.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c '%s' /tmp/ota.apk)" == "$EXPECTED_SIZE" ]]
+          echo "sha=$(sha256sum /tmp/ota.apk|awk '{print $1}')" >>"$GITHUB_OUTPUT"; echo "size=$(stat -c '%s' /tmp/ota.apk)" >>"$GITHUB_OUTPUT"
+      - name: Verify package version and locked signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"; if [[ ! -x "$BT/aapt" || ! -x "$BT/apksigner" ]]; then BT=$(dirname "$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -perm -u+x | sort -V | tail -1)"); fi
+          test -x "$BT/aapt"; test -x "$BT/apksigner"
+          "$BT/aapt" dump badging /tmp/ota.apk >/tmp/badge.txt
+          grep -Fq "package: name='$EXPECTED_PACKAGE'" /tmp/badge.txt; grep -Fq "versionCode='$TARGET_CODE'" /tmp/badge.txt; grep -Fq "versionName='$TARGET_VERSION'" /tmp/badge.txt
+          "$BT/apksigner" verify --verbose --print-certs /tmp/ota.apk >/tmp/cert.txt
+          grep -Fiq "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+      - name: Verify target self-update false Stable isolation and Beta49 skip
+        shell: bash
+        run: |
+          set -euo pipefail
+          post(){ curl -sSL --connect-timeout 20 --max-time 90 -H 'content-type: application/json' "$GAS_URL" -d "$1"; }
+          post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_VERSION\"}" >/tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' >/tmp/stable.json
+          post '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.49"}' >/tmp/beta49.json
+          python3 - <<'PY'
+          import json,os
+          s=json.load(open('/tmp/self.json')); t=json.load(open('/tmp/stable.json')); b=json.load(open('/tmp/beta49.json'))
+          assert s.get('ok') is True and s.get('source')=='GITHUB_RELEASE' and s.get('available',s.get('update_available')) is False,s
+          assert t.get('ok') is True and t.get('available',t.get('update_available')) is False,t
+          assert str(t.get('version_name',t.get('version',''))) != os.environ['TARGET_VERSION'],t
+          assert b.get('ok') is True and str(b.get('version_name',b.get('version','')))==os.environ['TARGET_VERSION'],b
+          assert int(b.get('version_code',-1))==int(os.environ['TARGET_CODE']),b
+          PY
+      - name: Finish receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.discovery.outputs.sha }}
+          SIZE: ${{ steps.discovery.outputs.size }}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_OTA_E2E finish run=${GITHUB_RUN_ID} job=${{ job.status }} from=${FROM_VERSION} target=${TARGET_VERSION}/${TARGET_CODE} sha256=${SHA:-NONE} size=${SIZE:-NONE} signer=${EXPECTED_SIGNER_SHA256} stable=UNTOUCHED beta49=SKIPPED_TO_BETA51"
