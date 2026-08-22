@@ -67,7 +67,7 @@ jobs:
           assert (sn,sc)==('0.1.0-stable','1'),(sn,sc)
           print('beta_name='+bn);print('beta_code='+bc)
           PY
-          python3 -m py_compile tools/apply_s54_beta48_owner_10_fixes.py tools/apply_m2_android_transport_patch.py
+          python3 -m py_compile tools/apply_s54_beta48_owner_10_fixes.py tools/apply_s54b_beta48_settings_log_fix.py tools/apply_m2_android_transport_patch.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -91,12 +91,22 @@ jobs:
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Materialize Beta48 chain including S54B
+        id: materialize
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:generateS10Operations
+          python3 tools/apply_s54b_beta48_settings_log_fix.py
+          grep -q 'S54B_BETA48_SETTINGS_LOG_FIX' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'LocalLogManager.summary(this)' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'body.addView(section("Thiết bị"))' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
       - name: Build Beta and Stable validation APKs
         id: build
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
+          gradle --no-daemon --build-cache --parallel -x :app:generateS10Operations :app:assembleBetaRelease :app:assembleStableRelease
       - name: Verify named Beta48 contracts and package identity
         id: package
         shell: bash
@@ -115,11 +125,12 @@ jobs:
           }
           required={
             's54_materialized':('OPS','S54_BETA48_OWNER_10_FIXES'),
+            's54b_materialized':('OPS','S54B_BETA48_SETTINGS_LOG_FIX'),
             'pick_label':('OPS','Không dùng User hy1.outbound'),
             'selected_pda_panel':('OPS','SERI PDA ĐÃ CHỌN'),
             'cache_size_ui':('OPS','Dung lượng cache'),
             'device_name_app':('OPS','Tên thiết bị'),
-            'log_summary_ui':('OPS','LocalLogManager.summary'),
+            'log_summary_ui':('OPS','LocalLogManager.summary(this)'),
             'history_rolling_ui':('OPS','historyWindowDates'),
             'connections_route':('TR','/v1/service/connections'),
             'date_recovery':('ST','BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW'),
@@ -132,6 +143,7 @@ jobs:
             'owner_explainer':('OPS','Quản trị cao nhất có thể chọn nhiều lịch sử'),
             'pack_shift_filter_1':('OPS','optString("shift")!=selectedShift'),
             'pack_shift_filter_2':('OPS','optString("shift")!=s.optString("shift")'),
+            'settings_device_duplicate':('OPS','body.addView(section("Thiết bị"))'),
           }
           bad=[]
           for name,(f,v) in required.items():
@@ -189,6 +201,7 @@ jobs:
         env:
           META: ${{ steps.meta.outcome }}
           SDK: ${{ steps.sdk.outcome }}
+          MATERIALIZE: ${{ steps.materialize.outcome }}
           BUILD: ${{ steps.build.outcome }}
           PACKAGE: ${{ steps.package.outcome }}
           SIGN: ${{ steps.sign.outcome }}
@@ -200,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           verdict=FAIL
-          [[ "$META" == success && "$SDK" == success && "$BUILD" == success && "$PACKAGE" == success && "$SIGN" == success && "$UPLOAD" == success && -n "${ARTIFACT_ID:-}" ]] && verdict=PASS
+          [[ "$META" == success && "$SDK" == success && "$MATERIALIZE" == success && "$BUILD" == success && "$PACKAGE" == success && "$SIGN" == success && "$UPLOAD" == success && -n "${ARTIFACT_ID:-}" ]] && verdict=PASS
           git reset --hard "$GITHUB_SHA"
           mkdir -p ops
           cat > ops/beta-release-candidate-result.txt <<EOF
@@ -213,6 +226,7 @@ jobs:
           stable_code=1
           metadata=$META
           sdk=$SDK
+          materialize=$MATERIALIZE
           build=$BUILD
           package=$PACKAGE
           sign=$SIGN
