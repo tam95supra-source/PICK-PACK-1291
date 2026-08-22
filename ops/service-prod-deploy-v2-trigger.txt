@@ -1,10 +1,8 @@
-deploy=2026-08-21T21:38:00+07:00
+deploy=2026-08-22T08:20:00+07:00
 target=pick-pack-1291-service
-source=Beta44 Service-only stale replication claim recovery
-candidate_source_sha=adbae9c0fd92753fb53896cd6e645944a7129bc4
-fix=STALE_INFLIGHT_RECOVERY_V1
-outbox_id=66
-preserve_beta44_artifact=9449525765
+source=Beta46 SUPERADMIN logical history deletion
+feature=HISTORY_DELETE_TOMBSTONE_V1
+expected_route=/v1/history/delete
 expected_authority=SERVICE_PRIMARY
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
