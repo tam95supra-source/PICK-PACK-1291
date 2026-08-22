@@ -108,15 +108,16 @@ function ppOtaSha256_(file) {
 }
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
+// PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 function ppUpdateCheck_(body) {
   const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
   const current=String(body.current_version||body._app_version||'').trim();
   if(channel==='STABLE') return {ok:true,source:'GITHUB_RELEASE',channel:'STABLE',available:false,reason:'NO_RELEASE'};
-  const version="0.4.2-beta.47", available=ppOtaCompare_(version,current)>0;
-  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:53,size:12978683,published_at:"2026-08-22T02:39:56Z",notes:"Đồng bộ logic Google Sheet mới. Lịch sử nghiệp vụ ghi các thao tác thay đổi dữ liệu từ App/Web, gồm nhật ký xóa. RA - VÀO tổng hợp toàn bộ PDA/User Pick/Bàn Pack/User Pack phát sinh trong phiên. THÔNG TIN USER CỦA NLĐ lưu mỗi User Pick/Pack một dòng. Danh mục lấy một chiều từ Google Sheet vào Service. Đồng bộ hiển thị kết nối App + Web và bỏ các mục xử lý/phạm vi cũ. SUPERADMIN được xóa lịch sử chưa đồng bộ mà không hủy event nghiệp vụ. Cập nhật phiên bản hiển thị gọn và changelog khi có bản mới.",mandatory:false};
+  const version="0.4.2-beta.48", available=ppOtaCompare_(version,current)>0;
+  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:54,size:12995067,published_at:"2026-08-22T05:12:20Z",notes:"User Pack theo bàn hiển thị mapping cả hai ca trong ngày, vẫn ẩn tài nguyên đang được giữ và cho phép phát lại sau khi phiên kết thúc. Lịch sử dùng cửa sổ 7 ngày trượt theo ngày hiện tại, kể cả ngày mới chưa có dữ liệu. Sửa triệt để lỗi đồng bộ BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW và tự gửi lại đúng event cũ. Người dùng đang kết nối lấy đúng phiên App/PDA và Web. Loại bỏ text giải thích nội bộ không cần thiết, thu gọn khoảng cách giao diện khoảng 10%, chuyển tên thiết bị vào mục Ứng dụng, bổ sung thông tin dung lượng nhật ký và cache trên thiết bị, làm nổi bật seri PDA đã chọn, và đổi nhãn thành Không dùng User hy1.outbound.",mandatory:false};
   if(!available)return out;
-  out.sha256="6884b295d0c55ab030a86c74f52ffda33443cead4b0de4c1885dfe84c12aadb6";
-  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.47-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.47.apk";
+  out.sha256="cfca4a83b3a69c554afabecae83ff150e9f0b66639360ea013e24bf4b08d996f";
+  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.48-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.48.apk";
   return out;
 }
 
