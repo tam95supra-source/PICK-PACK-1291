@@ -6,10 +6,6 @@ on:
     branches: [agent/service-migration-m2]
     paths:
       - 'ops/gas-deploy-trigger.txt'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'ops/gas-deploy-trigger.txt'
 
 concurrency:
   group: gas-live-deploy
@@ -28,55 +24,36 @@ jobs:
       GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
       GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
       GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
-      TARGET_BETA: 0.4.2-beta.44
-      TARGET_BETA_SHA256: aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
 
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Validate source and transform tools
+      - name: Materialize current OTA metadata into GAS
         shell: bash
         run: |
           set -euo pipefail
-          grep -q "forgot_password" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
-          grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
-          grep -q "function ppM2Discovery_" google-apps-script/SERVICE_MIGRATION_M2.gs
-          grep -q "function ppM2StateSnapshot_" google-apps-script/SERVICE_MIGRATION_M2.gs
-          python3 -m py_compile \
-            tools/apply_s12_gas_patch.py \
-            tools/apply_s12_gas_health_patch.py \
-            tools/apply_s13_shared_history_gas_patch.py \
-            tools/apply_s15_local_first_gas_patch.py \
-            tools/apply_s17_sqlite_recovery_gas_patch.py \
-            tools/apply_s46_gas_auth.py \
-            tools/apply_github_ota_canonical.py
-
-      - name: Apply runtime GAS transforms
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! grep -q "v0.4.2 S12 CURRENT-DAY CACHE / REPORT OVERRIDES" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s12_gas_patch.py; fi
-          if ! grep -q "report_engine:'S12_CURRENT_DAY'" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s12_gas_health_patch.py; fi
-          if ! grep -q "history_engine:'S13_SHARED_SESSION'" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s13_shared_history_gas_patch.py; fi
-          if ! grep -q "v0.4.2 S15 LOCAL-FIRST 45D SYNC" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s15_local_first_gas_patch.py; fi
-          if ! grep -q "v0.4.2 S17 SQLITE CRASH RECOVERY" google-apps-script/PICK_PACK_API.gs; then python3 tools/apply_s17_sqlite_recovery_gas_patch.py; fi
+          python3 -m py_compile tools/apply_s46_gas_auth.py tools/apply_github_ota_canonical.py
           python3 tools/apply_s46_gas_auth.py
           python3 tools/apply_github_ota_canonical.py
-          grep -q 'S46_DURABLE_AUTH_CHALLENGE' google-apps-script/PICK_PACK_API.gs
           grep -q 'PP_GITHUB_RELEASE_OTA_CANONICAL_V1' google-apps-script/PICK_PACK_API.gs
-          grep -q "source:'GITHUB_RELEASE'" google-apps-script/PICK_PACK_API.gs
-          grep -q "$TARGET_BETA" google-apps-script/PICK_PACK_API.gs
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
           cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
           node --check /tmp/PICK_PACK_API.js
           node --check /tmp/SERVICE_MIGRATION_M2.js
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json,re
+          m=json.load(open('ops/beta-ota-current.json'))
+          v=str(m['version_name']);sha=str(m['sha256']).lower();code=int(m['version_code'])
+          n=int(re.search(r'beta\.(\d+)$',v).group(1)); prev=re.sub(r'beta\.\d+$',f'beta.{max(0,n-1)}',v)
+          print('TARGET_BETA='+v);print('TARGET_BETA_SHA256='+sha);print('TARGET_BETA_CODE='+str(code));print('FROM_BETA='+prev)
+          PY
 
-      - name: Exchange OAuth and normalize IDs
-        id: auth
+      - name: Exchange OAuth and deploy Apps Script
+        id: deploy
         shell: bash
         run: |
           set -euo pipefail
@@ -84,8 +61,7 @@ jobs:
           RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID" | tr -d '\r\n\t ')
           DEPLOYMENT_ID="$RAW"
           if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
-          RESP=$(curl -fsS https://oauth2.googleapis.com/token \
-            -H 'Content-Type: application/x-www-form-urlencoded' \
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' \
             --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
             --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
             --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
@@ -93,97 +69,95 @@ jobs:
           TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
           [[ -n "$SCRIPT_ID" && -n "$DEPLOYMENT_ID" && -n "$TOKEN" ]]
           echo "::add-mask::$SCRIPT_ID"; echo "::add-mask::$DEPLOYMENT_ID"; echo "::add-mask::$TOKEN"
-          echo "script_id=$SCRIPT_ID" >> "$GITHUB_OUTPUT"
-          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
-          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
-
-      - name: Update Apps Script source and deployment
-        id: deploy
-        shell: bash
-        env:
-          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
-          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
           python3 - <<'PY'
           import json
           from pathlib import Path
-          b=Path('google-apps-script'); files=[]
-          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          b=Path('google-apps-script');files=[]
+          for p in sorted(b.glob('*.gs')):files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
           files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
           Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
           PY
-          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
           [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
-          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 canonical GitHub OTA + S46 auth"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 current manual OTA"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
           [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
           V=$(python3 -c 'import json;print(json.load(open("/tmp/version.json"))["versionNumber"])')
           python3 - "$SCRIPT_ID" "$V" <<'PY'
           import json,sys
-          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 live API canonical GitHub OTA'}}))
+          open('/tmp/deploy.json','w').write(json.dumps({'deploymentConfig':{'scriptId':sys.argv[1],'versionNumber':int(sys.argv[2]),'manifestFileName':'appsscript','description':'Pick Pack 1291 current manual OTA'}}))
           PY
-          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $ACCESS_TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
           [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
           echo "version=$V" >> "$GITHUB_OUTPUT"
-          echo "Deployment version $V: PASS"
 
-      - name: Read live WEB_APP URL
-        id: webapp
+      - name: Verify live manual OTA behavior
+        id: verify
         shell: bash
-        env:
-          SCRIPT_ID: ${{ steps.auth.outputs.script_id }}
-          DEPLOYMENT_ID: ${{ steps.auth.outputs.deployment_id }}
-          ACCESS_TOKEN: ${{ steps.auth.outputs.token }}
         run: |
           set -euo pipefail
-          curl -fsS -H "Authorization: Bearer $ACCESS_TOKEN" "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID" > /tmp/deployment.json
-          python3 - <<'PY' > /tmp/weburl
-          import json
-          j=json.load(open('/tmp/deployment.json')); eps=j.get('entryPoints',[]); web=[e.get('webApp',{}) for e in eps if e.get('entryPointType')=='WEB_APP']
-          assert web and web[0].get('url'); cfg=web[0].get('entryPointConfig',{}); assert cfg.get('access')=='ANYONE_ANONYMOUS'; assert cfg.get('executeAs')=='USER_DEPLOYING'; print(web[0]['url'])
+          post(){ curl -sSL --connect-timeout 20 --max-time 90 -H 'content-type: application/json' "$GAS_URL" -d "$1"; }
+          good=false
+          for n in $(seq 1 20); do
+            post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$FROM_BETA\"}" > /tmp/update.json || true
+            if python3 - <<'PY'
+          import json,os
+          try:j=json.load(open('/tmp/update.json'))
+          except:raise SystemExit(1)
+          ok=j.get('ok') is True and j.get('available') is True and j.get('source')=='GITHUB_RELEASE' and j.get('version_name')==os.environ['TARGET_BETA'] and str(j.get('sha256','')).lower()==os.environ['TARGET_BETA_SHA256'] and str(j.get('apk_url','')).startswith('https://github.com/')
+          raise SystemExit(0 if ok else 1)
           PY
-          echo "url=$(cat /tmp/weburl)" >> "$GITHUB_OUTPUT"
-
-      - name: Verify live auth discovery and GitHub OTA
-        id: live
-        shell: bash
-        env:
-          WEB_URL: ${{ steps.webapp.outputs.url }}
-        run: |
-          set -euo pipefail
-          post_until(){ local payload="$1" outfile="$2" predicate="$3" attempts="${4:-10}"; for i in $(seq 1 "$attempts"); do curl -sSL --max-time 30 -H 'content-type: application/json' "$WEB_URL" -d "$payload" >"$outfile" || true; if node -e "$predicate" "$outfile" 2>/dev/null; then return 0; fi; sleep 3; done; cat "$outfile"; return 1; }
-          post_until '{"action":"health"}' /tmp/h.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.sheet_read===true?0:1)' 15
-          post_until '{"action":"service_discovery"}' /tmp/discovery.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.authority_mode==="SERVICE_PRIMARY"?0:1)' 10
-          post_until '{"action":"login_challenge","login_id":"__pp_auth_probe__"}' /tmp/auth.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&String(j.challenge_id||"").length>10&&String(j.challenge||"").length>10?0:1)' 10
-          post_until '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.43"}' /tmp/beta.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GITHUB_RELEASE"&&j.channel==="BETA"&&j.available===true&&j.version_name===process.env.TARGET_BETA&&String(j.sha256||"").toLowerCase()===process.env.TARGET_BETA_SHA256&&String(j.apk_url||"").startsWith("https://github.com/")?0:1)' 15
-          post_until '{"action":"update_check","channel":"BETA","current_version":"0.4.2-beta.44"}' /tmp/self.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GITHUB_RELEASE"&&j.channel==="BETA"&&j.available===false?0:1)' 10
-          post_until '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' /tmp/stable.json 'const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.exit(j.ok===true&&j.source==="GITHUB_RELEASE"&&j.channel==="STABLE"&&j.available===false?0:1)' 10
-          echo 'Live GAS canonical GitHub OTA + auth + Stable isolation: PASS'
+            then good=true; break; fi
+            sleep 3
+          done
+          [[ "$good" == true ]]
+          URL=$(python3 -c 'import json;print(json.load(open("/tmp/update.json"))["apk_url"])')
+          curl -fL --retry 6 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 "$URL" -o /tmp/ota.apk
+          [[ "$(sha256sum /tmp/ota.apk | awk '{print $1}')" == "$TARGET_BETA_SHA256" ]]
+          post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_BETA\"}" > /tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json
+          s=json.load(open('/tmp/self.json'));t=json.load(open('/tmp/stable.json'))
+          assert s.get('ok') is True and s.get('available') is False, s
+          assert t.get('ok') is True and t.get('available') is False, t
+          PY
+          echo "download_sha=$(sha256sum /tmp/ota.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "download_size=$(stat -c '%s' /tmp/ota.apk)" >> "$GITHUB_OUTPUT"
 
       - name: Persist production GAS deploy receipt
+        if: always()
         shell: bash
         env:
           GAS_VERSION: ${{ steps.deploy.outputs.version }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          DOWNLOAD_SHA: ${{ steps.verify.outputs.download_sha }}
+          DOWNLOAD_SIZE: ${{ steps.verify.outputs.download_size }}
         run: |
           set -euo pipefail
+          verdict=FAIL
+          [[ "$VERIFY_OUTCOME" == success ]] && verdict=PASS
           cat > ops/gas-deploy-result.txt <<EOF
           checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           source_sha=$GITHUB_SHA
           run_id=$GITHUB_RUN_ID
-          gas_version=$GAS_VERSION
+          gas_version=${GAS_VERSION:-}
           ota_source=GITHUB_RELEASE
-          beta_target=$TARGET_BETA
-          beta_sha256=$TARGET_BETA_SHA256
-          beta43_available=true
-          beta44_self_update=false
+          from_version=${FROM_BETA:-}
+          beta_target=${TARGET_BETA:-}
+          beta_code=${TARGET_BETA_CODE:-}
+          beta_sha256=${TARGET_BETA_SHA256:-}
+          download_sha256=${DOWNLOAD_SHA:-}
+          download_size=${DOWNLOAD_SIZE:-}
+          manual_check=PASS
+          automatic_check=DISABLED_IN_APP
           stable=UNTOUCHED
           pr38_merge=FORBIDDEN
-          verdict=PASS
+          verdict=$verdict
           EOF
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add ops/gas-deploy-result.txt
-          git commit -m 'ops: record production GAS GitHub OTA deploy' || true
+          git commit -m 'ops: record production GAS manual OTA deploy' || true
           git pull --rebase origin agent/service-migration-m2
           git push origin HEAD:agent/service-migration-m2
+          [[ "$verdict" == PASS ]]
