@@ -40,7 +40,9 @@ export async function historyDelete(request:Request,env:Env):Promise<Response>{
   let seq=authority.authority_seq;
   for(const date of dates){
     const rows=byDate.get(date)??[];seq+=1;
-    const payload={logical_delete:true,target_event_ids:rows.map(x=>x.event_id),target_summaries:rows.map(x=>({event_id:x.event_id,event_type:x.event_type,entity_type:x.entity_type,entity_id:x.entity_id})),deleted_count:rows.length,reason,source:clientSource,actor_login_id:auth.login_id,actor_role:auth.role,original_events_immutable:true};
+    const summaries=rows.map(x=>({event_id:x.event_id,event_type:x.event_type,entity_type:x.entity_type,entity_id:x.entity_id}));
+    const detail=`Đã xóa ${rows.length} mục: ${rows.map(x=>`${x.event_type} • ${x.entity_type}:${x.entity_id}`).join(", ")}`.slice(0,900);
+    const payload={logical_delete:true,target_event_ids:rows.map(x=>x.event_id),target_summaries:summaries,deleted_count:rows.length,detail,reason,source:clientSource,actor_login_id:auth.login_id,actor_role:auth.role,original_events_immutable:true};
     const base={event_id:crypto.randomUUID(),event_type:"HISTORY_DELETE",entity_type:"HISTORY",entity_id:`history-delete:${date}:${crypto.randomUUID()}`,business_date:date,authority_epoch:authority.authority_epoch,authority_seq:seq,service_generation:authority.service_generation,base_version:0,new_version:1,actor_id:auth.login_id,actor_role:auth.role,device_id:auth.device_id,occurred_at:committed,committed_at:committed,payload_json:JSON.stringify(payload),idempotency_key:`history-delete:${idem}:${date}`,origin:clientSource==="WEB"?"WEB_HISTORY_DELETE":"PDA_HISTORY_DELETE",schema_version:1};
     tombstones.push({...base,checksum:await sha256Hex(JSON.stringify(base))});
   }
