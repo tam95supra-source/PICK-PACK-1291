@@ -31,6 +31,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class OperationsActivity : Activity() {
+    // S56_BETA53_OWNER_UI_STATUS_FIX
     // S55_BETA51_OWNER_REFRESH_HISTORY_FIX
     // S54_BETA48_OWNER_10_FIXES
     // S31_SERVICE_FIRST_HOTPATH
@@ -97,6 +98,7 @@ class OperationsActivity : Activity() {
         }
     }
     private var lastPingMs: Long? = null
+    private var lastStatusUpdateAt: Long = 0L
     private var contentHost: FrameLayout? = null
     private var navHost: FrameLayout? = null
     private data class NavRefs(val cell:LinearLayout,val icon:ImageView,val label:TextView)
@@ -114,6 +116,7 @@ class OperationsActivity : Activity() {
                 lastSyncE2eMs = status.syncE2eMs
                 serviceProviderCache = serviceProviderFromRuntime()
                 lastPingMs = status.latencyMs
+                lastStatusUpdateAt = System.currentTimeMillis()
                 refreshHeaderConnection()
                 if(status.connected && status.businessDate.isNotBlank()) {
                     val localFloor=status.retentionFloor.ifBlank{
@@ -220,7 +223,7 @@ class OperationsActivity : Activity() {
         val mnv=mnvInput("Scan / Nhập mã nhân viên để ghi nhận ra ca / vào ca")
         body.addView(mnv,matchWrap());body.addView(gap(4))
         var busy=false
-        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét Mã nhân viên.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;loadEmployee(v);mnv.postDelayed({busy=false},600)}
+        fun submit(){val v=mnv.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét Mã nhân viên.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;hideSoftKeyboard(mnv);loadEmployee(v);mnv.postDelayed({busy=false},600)}
         bindScannerEnter(mnv){submit()}
         root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);mnv.requestFocus()
     }
@@ -285,7 +288,7 @@ class OperationsActivity : Activity() {
         val root=column(bg);root.addView(appBar("QUÉT QR NHÂN SỰ"));val body=column(bg).apply{setPadding(dp(16),dp(12),dp(16),dp(58))}
         val scan=mnvInput("Quét QR hoặc nhập mã nhân viên").apply{setText("")};body.addView(labelled("Mã nhân viên",scan));body.addView(gap(9));body.addView(employeeCard(e));body.addView(gap(9));body.addView(status("ĐANG XÁC NHẬN TRẠNG THÁI PHIÊN...",blue,Color.rgb(237,244,255)))
         var busy=false;fun submit(){val v=scan.text.toString();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét mã nhân viên.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;loadEmployee(v);scan.postDelayed({busy=false},500)};bindScannerEnter(scan){submit()}
-        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);scan.requestFocus()
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);hideKeyboardForResult(root,scan)
         liveEmployeeMnv=cachedMnv
     }
 
@@ -296,7 +299,7 @@ class OperationsActivity : Activity() {
         body.addView(status("CHƯA XÁC NHẬN ĐƯỢC PHIÊN",orange,Color.rgb(255,251,235)));body.addView(gap(6));body.addView(info("Dữ liệu nhân sự đã có trên PDA nhưng Service chưa trả được trạng thái phiên. Mã lỗi: ${reason.take(100)}"));body.addView(gap(8))
         body.addView(primary("THỬ XÁC NHẬN LẠI",navy){loadEmployee(mnv)},matchWrap())
         var busy=false;fun submit(){val v=scan.text.toString();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét mã nhân viên.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;loadEmployee(v);scan.postDelayed({busy=false},500)};bindScannerEnter(scan){submit()}
-        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);scan.requestFocus()
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);hideKeyboardForResult(root,scan)
     }
 
     private fun renderEmployee(ctx: JSONObject, masters: JSONObject?) {
@@ -309,7 +312,7 @@ class OperationsActivity : Activity() {
         fun submit(){val v=scan.text.toString().trim();if(v.isBlank()){TopNotice.show(this,"Nhập hoặc quét mã nhân viên.",TopNotice.Kind.WARNING);return};if(busy)return;busy=true;loadEmployee(v);scan.postDelayed({busy=false},600)}
         bindScannerEnter(scan){submit()}
         when(state){"ACTIVE"->renderActive(body,ctx);"ENDED"->renderEnded(body,ctx);else->renderEnter(body,ctx,masters?:JSONObject())}
-        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);scan.requestFocus()
+        root.addView(ScrollView(this).apply{addView(body)},LinearLayout.LayoutParams(-1,0,1f));setScreen(root);hideKeyboardForResult(root,scan)
     }
 
     private fun scheduleAttendanceAutoReset(mnv:String,generation:Long){
@@ -1285,6 +1288,26 @@ class OperationsActivity : Activity() {
     }
     private fun isRootScreen()=screenState=="BUSINESS"||screenState=="STAFF"||screenState=="HISTORY"||screenState=="SYNC"||screenState=="SETTINGS"||screenState=="ROLE_MODE"
 
+    private fun hideSoftKeyboard(view:View){(getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)?.hideSoftInputFromWindow(view.windowToken,0)}
+    private fun hideKeyboardForResult(root:View,input:EditText){input.clearFocus();root.isFocusableInTouchMode=true;root.requestFocus();input.post{hideSoftKeyboard(input)}}
+    private fun bytesVi(v:Long):String=when{v<1024->"$v byte";v<1024L*1024->String.format(java.util.Locale.US,"%.1f KB",v/1024.0);else->String.format(java.util.Locale.US,"%.1f MB",v/(1024.0*1024.0))}
+    private fun statusTimeVi(v:Long):String=if(v<=0L)"Chưa có" else runCatching{java.time.Instant.ofEpochMilli(v).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}.getOrDefault("Chưa có")
+    private fun authorityViHeader(v:String):String=when(v.uppercase()){ "SERVICE_PRIMARY"->"Cloudflare là dịch vụ chính";"GOOGLE_FALLBACK"->"Google Drive đang dự phòng";"RECONCILING"->"Đang đối chiếu lại dữ liệu";"OFFLINE_LOCAL"->"Chỉ làm việc trên PDA";else->"Chưa xác định" }
+    private fun routeViHeader(v:String):String=when(v.uppercase()){ "SERVICE_D1_DIRECT"->"Kết nối trực tiếp Cloudflare";"SERVICE_D1_PENDING"->"Cloudflare đang chờ đồng bộ";"GOOGLE_FALLBACK","GAS_COMPAT"->"Kết nối Google Drive dự phòng";"UNRESOLVED"->"Chưa xác định đường kết nối";else->if(v.isBlank())"Chưa xác định" else "Đang xử lý kết nối" }
+    private fun runtimeErrorVi(v:String):String{val x=v.uppercase();return when{v.isBlank()->"Không có lỗi gần nhất";x.contains("SESSION_EXCHANGE")->"Chưa tạo được phiên kết nối tới Cloudflare";x.contains("DISCOVERY_WARMING")->"Ứng dụng đang xác định dịch vụ dữ liệu";x.contains("SERVICE_SESSION_UNAVAILABLE")->"Phiên Cloudflare chưa sẵn sàng";x.contains("AUTHORITY_NOT_SERVICE_PRIMARY")->"Cloudflare hiện không giữ quyền ghi chính";x.contains("NETWORK")||x.contains("TIMEOUT")->"Kết nối mạng tới dịch vụ bị gián đoạn";else->"Có lỗi kết nối gần nhất; bấm làm mới để kiểm tra lại"}}
+    private fun showHeaderStatusDetail(kind:String){
+        val runtime=api.runtimeStatus();val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(lastProjectionPending);val flow=SyncDirectionTracker.snapshot();val provider=serviceProviderFromRuntime();val network=when(lastConnected){true->"Đang kết nối";false->"Mất kết nối";null->"Chưa kiểm tra"}
+        val title=when(kind){"NETWORK"->"Chi tiết Mạng";"SYNC"->"Chi tiết Đồng bộ";else->"Chi tiết Dịch vụ"}
+        val rows=when(kind){
+            "NETWORK"->listOf("Trạng thái" to network,"Độ trễ" to (lastSyncLatencyMs?.let{"$it mili giây"}?:"Chưa đo"),"Lần kiểm tra gần nhất" to statusTimeVi(lastStatusUpdateAt),"Dịch vụ đang dùng" to provider)
+            "SYNC"->listOf("Trạng thái" to (if(pending>0)"Còn dữ liệu chờ đồng bộ" else if(flow.active)flow.label else if(lastConnected==true)"Đã đồng bộ" else "Đang chờ kết nối"),"Mục còn chờ" to pending.toString(),"Hoạt động hiện tại" to flow.label,"Đồng bộ gần nhất" to (lastSyncE2eMs?.let{"$it mili giây"}?:"Chưa đo"),"Dữ liệu đã gửi" to bytesVi(flow.uploadedBytes),"Dữ liệu đã nhận" to bytesVi(flow.downloadedBytes),"Dịch vụ đang dùng" to provider)
+            else->listOf("Dịch vụ đang dùng" to provider,"Chế độ dữ liệu" to authorityViHeader(runtime.optString("authority_mode")),"Tuyến kết nối" to routeViHeader(runtime.optString("route")),"Phiên dịch vụ" to (if(runtime.optBoolean("service_session",false))"Đã sẵn sàng" else "Chưa sẵn sàng"),"Tình trạng lỗi" to runtimeErrorVi(runtime.optString("last_error")),"Địa chỉ kết nối" to runtime.optString("service_url").ifBlank{"Không có khi OFFLINE"})
+        }
+        val note=when(kind){"NETWORK"->"Mạng thể hiện khả năng ứng dụng liên lạc với hệ thống dữ liệu, không chỉ việc PDA có Wi‑Fi hay 4G.";"SYNC"->"Đồng bộ cho biết dữ liệu trên PDA đã được gửi lên và dữ liệu mới từ hệ thống đã được nhận về hay chưa.";else->"Cloudflare là dịch vụ chính; Google Drive là đường dự phòng; OFFLINE nghĩa là hiện tại ứng dụng không liên lạc được với dịch vụ dữ liệu."}
+        val box=column(surface).apply{setPadding(dp(14),dp(10),dp(14),dp(8));addView(details(rows),matchWrap());addView(gap(8));addView(info(note),matchWrap())}
+        AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply{addView(box)}).setPositiveButton("ĐÓNG",null).show()
+    }
+
     private fun manualRefreshFromHeader(icon:ImageView){
         if(manualRefreshInFlight)return
         manualRefreshInFlight=true;icon.isEnabled=false;icon.alpha=.55f
@@ -1306,27 +1329,27 @@ class OperationsActivity : Activity() {
     }
 
     private fun serviceProviderFromRuntime():String{
-        val st=api.runtimeStatus();val mode=st.optString("authority_mode");val route=st.optString("route")
+        if(lastConnected==false)return "OFFLINE"
+        val st=api.runtimeStatus();val mode=st.optString("authority_mode");val route=st.optString("route");val url=st.optString("service_url")
         return when{
-            mode=="GOOGLE_FALLBACK"||route=="GAS_COMPAT"->"Google Drive"
-            mode=="SERVICE_PRIMARY"||mode=="RECONCILING"||route.startsWith("SERVICE_")->"Cloudflare"
-            st.optString("service_url").isNotBlank()->"Cloudflare"
-            else->serviceProviderCache
+            mode=="GOOGLE_FALLBACK"||route=="GOOGLE_FALLBACK"||route=="GAS_COMPAT"->"Google Drive"
+            mode=="SERVICE_PRIMARY"||mode=="RECONCILING"||route.startsWith("SERVICE_")||url.isNotBlank()->"Cloudflare"
+            else->"OFFLINE"
         }
     }
-    private fun connectionSummary():String{val network=when(lastConnected){true->lastSyncLatencyMs?.let{"$it ms"}?:"Có mạng";false->"Mất kết nối";null->"Chưa kiểm tra"};val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(0);return "Mạng: $network | Đồng bộ: ${if(pending==0)"Hoàn tất" else "Đang chờ đồng bộ"} | Dịch vụ: ${if(lastConnected==true)"Hoạt động" else "Đang chờ"}"}
-    private fun refreshHeaderConnection(){val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(lastProjectionPending);networkStatusText?.text=when(lastConnected){true->lastSyncLatencyMs?.let{"$it ms"}?:"Có mạng";false->"Mất mạng";null->"—"};syncStatusText?.text=if(pending>0)"Đang chờ" else if(lastConnected==true)"Hoàn tất" else "Đang chờ";serviceStatusText?.text=if(lastConnected==true)"Hoạt động" else if(lastConnected==false)"Mất kết nối" else "—"}
-    private fun headerStatusChip(iconRes:Int,label:String,valueView:TextView)=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(6),dp(6),dp(6),dp(6));background=round(Color.argb(32,255,255,255),13);addView(ImageView(this@OperationsActivity).apply{setImageResource(iconRes);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(2),dp(2),dp(2),dp(2))},size(dp(22),dp(22)));addView(column(Color.TRANSPARENT).apply{addView(txt(label,7.2f,Color.argb(210,255,255,255),false).apply{maxLines=1;setAutoSizeTextTypeUniformWithConfiguration(6,8,1,android.util.TypedValue.COMPLEX_UNIT_SP)});addView(valueView.apply{maxLines=1;setAutoSizeTextTypeUniformWithConfiguration(6,10,1,android.util.TypedValue.COMPLEX_UNIT_SP)})},LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(4)})}
+    private fun connectionSummary():String{val network=when(lastConnected){true->lastSyncLatencyMs?.let{"$it ms"}?:"Có mạng";false->"Mất kết nối";null->"Chưa kiểm tra"};val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(0);return "Mạng: $network | Đồng bộ: ${if(pending==0)"Hoàn tất" else "Đang chờ đồng bộ"} | Dịch vụ: ${serviceProviderFromRuntime()}"}
+    private fun refreshHeaderConnection(){val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(lastProjectionPending);networkStatusText?.text=when(lastConnected){true->lastSyncLatencyMs?.let{"$it ms"}?:"Có mạng";false->"Mất mạng";null->"—"};syncStatusText?.text=if(pending>0)"Đang chờ" else if(lastConnected==true)"Hoàn tất" else "Đang chờ";serviceStatusText?.text=serviceProviderFromRuntime()}
+    private fun headerStatusChip(iconRes:Int,label:String,valueView:TextView,click:()->Unit)=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(6),dp(6),dp(6),dp(6));background=round(Color.argb(32,255,255,255),13);isClickable=true;isFocusable=true;setOnClickListener{click()};addView(ImageView(this@OperationsActivity).apply{setImageResource(iconRes);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(2),dp(2),dp(2),dp(2))},size(dp(22),dp(22)));addView(column(Color.TRANSPARENT).apply{addView(txt(label,7.2f,Color.argb(210,255,255,255),false).apply{maxLines=1;setAutoSizeTextTypeUniformWithConfiguration(6,8,1,android.util.TypedValue.COMPLEX_UNIT_SP)});addView(valueView.apply{maxLines=1;setAutoSizeTextTypeUniformWithConfiguration(6,10,1,android.util.TypedValue.COMPLEX_UNIT_SP)})},LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(4)})}
     private fun greetingText():String{val h=java.time.LocalTime.now(ZoneId.of("Asia/Ho_Chi_Minh")).hour;val part=when(h){in 5..10->"sáng";in 11..13->"trưa";in 14..17->"chiều";else->"tối"};return "Chào buổi $part, ${name.ifBlank{login}}"}
-    private fun appBar(title:String)=column(Color.TRANSPARENT).apply{setPadding(dp(16),dp(11),dp(16),dp(12));background=gradient(navy,accent,0);val identity=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL};if(!isRootScreen())identity.addView(ImageView(this@OperationsActivity).apply{setImageResource(R.drawable.ic_pp_back);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(7),dp(7),dp(7),dp(7));setOnClickListener{navigateBack()}},size(dp(36),dp(36)));identity.addView(txt(greetingText(),16f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},LinearLayout.LayoutParams(0,-2,1f).apply{if(!isRootScreen())marginStart=dp(3)});identity.addView(ImageView(this@OperationsActivity).apply{contentDescription="Đồng bộ lại dữ liệu";setImageResource(R.drawable.ic_pp_sync);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(8),dp(8),dp(8),dp(8));setOnClickListener{manualRefreshFromHeader(this)}},size(dp(36),dp(36)));addView(identity,matchWrap());addView(gap(10));val statuses=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER};val net=txt("—",9f,Color.WHITE,true);networkStatusText=net;val syn=txt("—",9f,Color.WHITE,true);syncStatusText=syn;val svc=txt("—",9f,Color.WHITE,true);serviceStatusText=svc;statuses.addView(headerStatusChip(R.drawable.ic_pp_network,"Mạng",net),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=dp(3)});statuses.addView(headerStatusChip(R.drawable.ic_pp_sync,"Đồng bộ",syn),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(2);marginEnd=dp(2)});statuses.addView(headerStatusChip(R.drawable.ic_pp_service,"Dịch vụ",svc),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(3)});addView(statuses,matchWrap());refreshHeaderConnection()}
+    private fun appBar(title:String)=column(Color.TRANSPARENT).apply{setPadding(dp(16),dp(11),dp(16),dp(12));background=gradient(navy,accent,0);val identity=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL};if(!isRootScreen())identity.addView(ImageView(this@OperationsActivity).apply{setImageResource(R.drawable.ic_pp_back);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(7),dp(7),dp(7),dp(7));setOnClickListener{navigateBack()}},size(dp(36),dp(36)));identity.addView(txt(greetingText(),16f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},LinearLayout.LayoutParams(0,-2,1f).apply{if(!isRootScreen())marginStart=dp(3)});identity.addView(ImageView(this@OperationsActivity).apply{contentDescription="Làm mới và đồng bộ dữ liệu";setImageResource(R.drawable.ic_pp_refresh_round);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(7),dp(7),dp(7),dp(7));setOnClickListener{manualRefreshFromHeader(this)}},size(dp(36),dp(36)));addView(identity,matchWrap());addView(gap(10));val statuses=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER};val net=txt("—",9f,Color.WHITE,true);networkStatusText=net;val syn=txt("—",9f,Color.WHITE,true);syncStatusText=syn;val svc=txt("—",9f,Color.WHITE,true);serviceStatusText=svc;statuses.addView(headerStatusChip(R.drawable.ic_pp_network,"Mạng",net){showHeaderStatusDetail("NETWORK")},LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=dp(3)});statuses.addView(headerStatusChip(R.drawable.ic_pp_sync,"Đồng bộ",syn){showHeaderStatusDetail("SYNC")},LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(2);marginEnd=dp(2)});statuses.addView(headerStatusChip(R.drawable.ic_pp_service,"Dịch vụ",svc){showHeaderStatusDetail("SERVICE")},LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(3)});addView(statuses,matchWrap());refreshHeaderConnection()}
     private fun activeTab()=when(module){"STAFF"->"STAFF";"HISTORY"->"HISTORY";"SYNC"->"SYNC";"SETTINGS"->"SETTINGS";"ROLE_MODE"->"ROLE_MODE";else->"BUSINESS"}
 
     private fun bottomNav():LinearLayout=row(surface).apply{
         gravity=Gravity.CENTER;setPadding(dp(3),dp(5),dp(3),dp(5));background=outlineBg(surface,16);elevation=dp(8).toFloat();navRefs.clear()
         val items=mutableListOf(
             Triple(R.drawable.ic_pp_business,"Nghiệp vụ","BUSINESS"),
+            Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF"),
             Triple(R.drawable.ic_pp_history,"Lịch sử","HISTORY"),
-            Triple(R.drawable.ic_pp_sync,"Đồng bộ","SYNC"),
             Triple(R.drawable.ic_pp_settings,"Cài đặt","SETTINGS")
         )
         if(isActualSuper())items.add(Triple(R.drawable.ic_pp_settings,"Quyền","ROLE_MODE"))

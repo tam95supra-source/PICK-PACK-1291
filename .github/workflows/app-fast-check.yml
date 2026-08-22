@@ -12,6 +12,7 @@ on:
       - 'tools/apply_s12_gas_patch.py'
       - 'tools/apply_s12_gas_health_patch.py'
       - 'tools/apply_s55_beta51_owner_refresh_history_fix.py'
+      - 'tools/apply_s56_beta53_owner_ui_status_fix.py'
       - 'ops/s55-owner-fix-trigger.txt'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
@@ -29,6 +30,7 @@ on:
       - 'tools/apply_s12_gas_patch.py'
       - 'tools/apply_s12_gas_health_patch.py'
       - 'tools/apply_s55_beta51_owner_refresh_history_fix.py'
+      - 'tools/apply_s56_beta53_owner_ui_status_fix.py'
       - 'ops/s55-owner-fix-trigger.txt'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
@@ -71,6 +73,22 @@ jobs:
             git commit -m 'fix(beta): refresh, cross-device history and readable conflicts'
             git push origin HEAD:"$TARGET_BRANCH"
           fi
+      - name: Apply Beta53 owner UI/status fix
+        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'stabilization/beta48-golden-reset-beta50-20260822' && github.event.pull_request.head.ref == 'fix/beta53-owner-ui-status-20260822'
+        shell: bash
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/apply_s56_beta53_owner_ui_status_fix.py
+          python3 tools/apply_s56_beta53_owner_ui_status_fix.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt app/src/main/res/drawable/ic_pp_refresh_round.xml
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(beta53): restore staff tab and improve status UX'
+            git push origin HEAD:"$TARGET_BRANCH"
+          fi
       - id: result
         shell: bash
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -107,7 +125,7 @@ jobs:
           fi
           ANDROID=false
           GAS=false
-          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch|55_beta51_owner_refresh_history_fix)\.py$|ops/s55-owner-fix-trigger\.txt$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
+          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch|55_beta51_owner_refresh_history_fix|56_beta53_owner_ui_status_fix)\.py$|ops/s55-owner-fix-trigger\.txt$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
           if grep -Eq '^(google-apps-script/|tools/apply_s12_gas(_health)?_patch\.py$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
           echo "gas=$GAS" >> "$GITHUB_OUTPUT"
@@ -129,18 +147,26 @@ jobs:
           set -euo pipefail
           test -f ARCHITECTURE_GUARDRAILS.md
           test -f app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          test -f app/src/main/res/drawable/ic_pp_refresh_round.xml
           test -f google-apps-script/PICK_PACK_API.gs
           test -f google-apps-script/SERVICE_MIGRATION_M2.gs
           echo "$EXPECTED_OWNER_ICON_SHA256  app/src/main/res/drawable-nodpi/owner_launcher.png" | sha256sum -c -
           grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           grep -q 'private fun businessHome()' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_business,"Nghiệp vụ","BUSINESS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          ! grep -q 'Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_history,"Lịch sử","HISTORY")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple(R.drawable.ic_pp_sync,"Đồng bộ","SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'Triple(R.drawable.ic_pp_sync,"Đồng bộ","SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_settings,"Cài đặt","SETTINGS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'S55_BETA51_OWNER_REFRESH_HISTORY_FIX' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'contentDescription="Đồng bộ lại dữ liệu"' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'S56_BETA53_OWNER_UI_STATUS_FIX' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'contentDescription="Làm mới và đồng bộ dữ liệu"' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'R.drawable.ic_pp_refresh_round' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'showHeaderStatusDetail("NETWORK")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'showHeaderStatusDetail("SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'showHeaderStatusDetail("SERVICE")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'return "OFFLINE"' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'private fun hideKeyboardForResult' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'private fun refreshHistoryCanonical(force:Boolean=false)' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'raw.contains("EXCLUSIVE_RESOURCE_CONFLICT")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           ! grep -q 'addView(txt("Mã nhân viên $id •' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
@@ -151,15 +177,16 @@ jobs:
           grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
           grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
           grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
-          python3 -m py_compile tools/apply_s55_beta51_owner_refresh_history_fix.py
+          python3 -m py_compile tools/apply_s55_beta51_owner_refresh_history_fix.py tools/apply_s56_beta53_owner_ui_status_fix.py
           python3 tools/apply_s55_beta51_owner_refresh_history_fix.py
+          python3 tools/apply_s56_beta53_owner_ui_status_fix.py
           if [[ "${{ needs.changes.outputs.gas }}" == "true" ]]; then
             cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
             cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
             node --check /tmp/PICK_PACK_API.js
             node --check /tmp/SERVICE_MIGRATION_M2.js
           fi
-          echo 'PASS - Beta51 static guards.'
+          echo 'PASS - Beta53 static guards.'
 
   android-debug:
     needs: [apply-owner-fix, changes, static-guards]
