@@ -1,0 +1,16 @@
+checked_at=2026-08-22T02:52:51Z
+source_sha=5adbcf5ae44f6d3b4230a626f4baa4756b9688aa
+run_id=32547440341
+gas_version=
+from_version=0.4.2-beta.46
+target_version=0.4.2-beta.47
+target_code=53
+ota_metadata=STATIC_CANONICAL
+runtime_github_releases_api=DISABLED
+expected_sha256=6884b295d0c55ab030a86c74f52ffda33443cead4b0de4c1885dfe84c12aadb6
+download_sha256=
+download_size=
+live_manual_update=skipped
+stable=UNTOUCHED
+pr38_merge=FORBIDDEN
+verdict=FAIL
