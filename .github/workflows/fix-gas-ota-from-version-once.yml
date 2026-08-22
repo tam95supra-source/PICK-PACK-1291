@@ -1,0 +1,82 @@
+name: One-time Fix GAS OTA From Version
+
+on:
+  push:
+    branches: [agent/service-migration-m2]
+    paths:
+      - '.github/workflows/fix-gas-ota-from-version-once.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: one-time-fix-gas-ota-from-version
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Announce recurrence fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="GAS_FROM_VERSION_FIX start run=${GITHUB_RUN_ID} sha=${GITHUB_SHA}"
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          fetch-depth: 0
+      - name: Replace n-1 inference with explicit beta_from trigger contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/gas-deploy.yml')
+          s=p.read_text()
+          old="""          import json,re
+          m=json.load(open('ops/beta-ota-current.json'))
+          assert m.get('source')=='GITHUB_RELEASE',m
+          v=str(m['version_name']);sha=str(m['sha256']).lower();code=int(m['version_code']);size=int(m['size'])
+          n=int(re.search(r'beta\\.(\\d+)$',v).group(1)); prev=re.sub(r'beta\\.\\d+$',f'beta.{max(0,n-1)}',v)
+          print('TARGET_BETA='+v);print('TARGET_BETA_SHA256='+sha);print('TARGET_BETA_CODE='+str(code));print('TARGET_BETA_SIZE='+str(size));print('FROM_BETA='+prev)
+"""
+          new="""          import json,re
+          from pathlib import Path
+          m=json.load(open('ops/beta-ota-current.json'))
+          assert m.get('source')=='GITHUB_RELEASE',m
+          v=str(m['version_name']);sha=str(m['sha256']).lower();code=int(m['version_code']);size=int(m['size'])
+          trigger=Path('ops/gas-deploy-trigger.txt').read_text()
+          fm=re.search(r'^beta_from=(0\\.4\\.2-beta\\.\\d+)\\s*$',trigger,re.M)
+          assert fm, 'GAS_DEPLOY_TRIGGER_BETA_FROM_MISSING'
+          prev=fm.group(1)
+          assert prev != v, (prev,v)
+          print('TARGET_BETA='+v);print('TARGET_BETA_SHA256='+sha);print('TARGET_BETA_CODE='+str(code));print('TARGET_BETA_SIZE='+str(size));print('FROM_BETA='+prev)
+"""
+          if old not in s:
+              if "GAS_DEPLOY_TRIGGER_BETA_FROM_MISSING" in s:
+                  print('already_fixed=YES')
+              else:
+                  raise SystemExit('GAS_FROM_VERSION_ANCHOR_MISSING')
+          else:
+              p.write_text(s.replace(old,new,1))
+          PY
+          grep -q 'GAS_DEPLOY_TRIGGER_BETA_FROM_MISSING' .github/workflows/gas-deploy.yml
+          ! grep -q "max(0,n-1)" .github/workflows/gas-deploy.yml
+          rm .github/workflows/fix-gas-ota-from-version-once.yml
+      - name: Commit fix without rewriting concurrent history
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/workflows/gas-deploy.yml .github/workflows/fix-gas-ota-from-version-once.yml
+          git commit -m 'fix(ota): use explicit beta_from for skipped beta versions'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+      - name: Report recurrence fix
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="GAS_FROM_VERSION_FIX finish run=${GITHUB_RUN_ID} job=${{ job.status }}"
