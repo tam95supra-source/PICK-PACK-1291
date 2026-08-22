@@ -51,7 +51,9 @@ for required in ('Quản lý biên bản','THÔNG TIN TRÊN PDA','THÔNG TIN TR�
 ops.write_text(s)
 
 build=Path('app/build.gradle.kts');t=build.read_text()
-t,n=re.subn(r'\nval generateS10Operations = tasks\.register<Exec>\("generateS10Operations"\) \{.*?\n\}\n\nandroid \{','\nandroid {',t,count=1,flags=re.S);assert n==1
+start=t.index('\nval generateS10Operations = tasks.register<Exec>("generateS10Operations")')
+end=t.index('\nandroid {',start)
+t=t[:start]+t[end:]
 t=t.replace('versionCode = 54','versionCode = 56',1).replace('versionName = "0.4.2-beta.48"','versionName = "0.4.2-beta.50"',1)
 t=t.replace('\ntasks.named("preBuild").configure { dependsOn(generateS10Operations) }\n','\n')
 assert 'generateS10Operations' not in t and 'apply_m2_android_transport_patch.py' not in t
