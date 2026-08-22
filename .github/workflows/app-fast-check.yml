@@ -11,6 +11,7 @@ on:
       - 'tools/apply_s12_real_pda_patch.py'
       - 'tools/apply_s12_gas_patch.py'
       - 'tools/apply_s12_gas_health_patch.py'
+      - 'tools/apply_s55_beta51_owner_refresh_history_fix.py'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -26,6 +27,7 @@ on:
       - 'tools/apply_s12_real_pda_patch.py'
       - 'tools/apply_s12_gas_patch.py'
       - 'tools/apply_s12_gas_health_patch.py'
+      - 'tools/apply_s55_beta51_owner_refresh_history_fix.py'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -38,10 +40,39 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  apply-owner-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.result.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+      - name: Apply owner Beta51 fix on stabilization line only
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'stabilization/beta48-golden-reset-beta50-20260822'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/apply_s55_beta51_owner_refresh_history_fix.py
+          python3 tools/apply_s55_beta51_owner_refresh_history_fix.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(beta): refresh, cross-device history and readable conflicts'
+            git push origin HEAD:stabilization/beta48-golden-reset-beta50-20260822
+          fi
+      - id: result
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   changes:
+    needs: apply-owner-fix
     runs-on: ubuntu-latest
     timeout-minutes: 3
     outputs:
@@ -50,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # PR scope calculation diffs against the base SHA, which can be older than two commits.
+          ref: ${{ needs.apply-owner-fix.outputs.sha }}
           fetch-depth: 0
       - id: scope
         shell: bash
@@ -68,24 +99,26 @@ jobs:
           if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then
             FILES=$(git ls-files)
           else
-            FILES=$(git diff --name-only "$BEFORE" "${{ github.sha }}")
+            FILES=$(git diff --name-only "$BEFORE" "${{ needs.apply-owner-fix.outputs.sha }}")
           fi
           ANDROID=false
           GAS=false
-          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch)\.py$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
+          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch|55_beta51_owner_refresh_history_fix)\.py$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
           if grep -Eq '^(google-apps-script/|tools/apply_s12_gas(_health)?_patch\.py$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
           echo "gas=$GAS" >> "$GITHUB_OUTPUT"
           printf 'Changed files:\n%s\nAndroid build: %s | GAS syntax: %s\n' "$FILES" "$ANDROID" "$GAS"
 
   static-guards:
-    needs: changes
+    needs: [apply-owner-fix, changes]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       EXPECTED_OWNER_ICON_SHA256: 371d0e5ad552e3cf63eef60a3da270896946458a506252a7fa132a67747c7a5d
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.apply-owner-fix.outputs.sha }}
       - name: Static project guards
         shell: bash
         run: |
@@ -98,10 +131,15 @@ jobs:
           grep -q 'put("action", "update_check")' app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt
           grep -q 'private fun businessHome()' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_business,"Nghiệp vụ","BUSINESS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_history,"Lịch sử","HISTORY")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_sync,"Đồng bộ","SYNC")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'Triple(R.drawable.ic_pp_settings,"Cài đặt","SETTINGS")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'S55_BETA51_OWNER_REFRESH_HISTORY_FIX' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'contentDescription="Đồng bộ lại dữ liệu"' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'private fun refreshHistoryCanonical(force:Boolean=false)' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'raw.contains("EXCLUSIVE_RESOURCE_CONFLICT")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'addView(txt("Mã nhân viên $id •' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           grep -q 'position=role.toLowerCase()' google-apps-script/PICK_PACK_API.gs
           grep -q 'val allowedPositions=if(isSuper())arrayOf("USER","ADMIN")else arrayOf("USER")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           ! grep -q 'catalogValues("DANH SÁCH ADMIN_Vị trí")' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
@@ -113,7 +151,8 @@ jobs:
           ! grep -R -n 'overridePendingTransition(android.R.anim.fade_in' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
           ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
-          python3 -m py_compile tools/apply_s10_ui_patch.py tools/apply_s10_ui_patch_in_place.py tools/apply_s11_compact_report_patch.py tools/apply_s12_real_pda_patch.py tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py
+          python3 -m py_compile tools/apply_s10_ui_patch.py tools/apply_s10_ui_patch_in_place.py tools/apply_s11_compact_report_patch.py tools/apply_s12_real_pda_patch.py tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s55_beta51_owner_refresh_history_fix.py
+          python3 tools/apply_s55_beta51_owner_refresh_history_fix.py
           python3 tools/apply_s10_ui_patch.py
           PATCHED=app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt
           test -s "$PATCHED"
@@ -130,15 +169,17 @@ jobs:
             node --check /tmp/PICK_PACK_API.js
             node --check /tmp/SERVICE_MIGRATION_M2.js
           fi
-          echo 'PASS - static guards and S10 generated UI checks.'
+          echo 'PASS - static guards and generated UI checks.'
 
   android-debug:
-    needs: [changes, static-guards]
+    needs: [apply-owner-fix, changes, static-guards]
     if: needs.changes.outputs.android == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.apply-owner-fix.outputs.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
