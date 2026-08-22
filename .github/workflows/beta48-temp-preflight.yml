@@ -3,9 +3,15 @@ name: Beta48 Temp Preflight
 on:
   push:
     branches: [ agent/beta48-owner-10-fixes-20260822 ]
+    paths-ignore:
+      - 'ops/beta48-temp-preflight-result.txt'
+
+concurrency:
+  group: beta48-temp-preflight
+  cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   preflight:
@@ -13,6 +19,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -21,6 +29,7 @@ jobs:
         with:
           gradle-version: '9.4.1'
       - name: Resolve Android SDK
+        id: sdk
         shell: bash
         run: |
           set -euo pipefail
@@ -37,12 +46,14 @@ jobs:
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
       - name: Validate patch scripts and materialize Android
+        id: materialize
         shell: bash
         run: |
           set -euo pipefail
           python3 -m py_compile tools/apply_s54_beta48_owner_10_fixes.py tools/apply_m2_android_transport_patch.py
           python3 tools/apply_m2_android_transport_patch.py
       - name: Assert Beta48 materialized owner contracts
+        id: contracts
         shell: bash
         run: |
           set -euo pipefail
@@ -71,16 +82,50 @@ jobs:
           grep -q 'versionCode = 1' app/build.gradle.kts
           grep -q 'versionName = "0.1.0-stable"' app/build.gradle.kts
       - name: Build Beta and Stable debug
+        id: android
         shell: bash
         run: |
           set -euo pipefail
           gradle --no-daemon --build-cache --parallel :app:assembleBetaDebug :app:assembleStableDebug
       - name: Service check
+        id: service
         working-directory: service
         shell: bash
         run: |
           set -euo pipefail
           npm ci
           npm run check
-      - name: Result
-        run: echo 'PASS - Beta48 owner 10-fix temp preflight.'
+      - name: Persist preflight receipt
+        if: always()
+        shell: bash
+        env:
+          SDK_OUTCOME: ${{ steps.sdk.outcome }}
+          MATERIALIZE_OUTCOME: ${{ steps.materialize.outcome }}
+          CONTRACTS_OUTCOME: ${{ steps.contracts.outcome }}
+          ANDROID_OUTCOME: ${{ steps.android.outcome }}
+          SERVICE_OUTCOME: ${{ steps.service.outcome }}
+        run: |
+          set -euo pipefail
+          verdict=FAIL
+          if [[ "$SDK_OUTCOME" == success && "$MATERIALIZE_OUTCOME" == success && "$CONTRACTS_OUTCOME" == success && "$ANDROID_OUTCOME" == success && "$SERVICE_OUTCOME" == success ]]; then verdict=PASS; fi
+          mkdir -p ops
+          cat > ops/beta48-temp-preflight-result.txt <<EOF
+          checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          source_sha=$GITHUB_SHA
+          run_id=$GITHUB_RUN_ID
+          sdk=$SDK_OUTCOME
+          materialize=$MATERIALIZE_OUTCOME
+          contracts=$CONTRACTS_OUTCOME
+          android=$ANDROID_OUTCOME
+          service=$SERVICE_OUTCOME
+          stable_publish=FORBIDDEN
+          pr38_merge=FORBIDDEN
+          verdict=$verdict
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/beta48-temp-preflight-result.txt
+          git commit -m 'ops: record Beta48 isolated preflight' || true
+          git pull --rebase origin agent/beta48-owner-10-fixes-20260822
+          git push origin HEAD:agent/beta48-owner-10-fixes-20260822
+          [[ "$verdict" == PASS ]]
