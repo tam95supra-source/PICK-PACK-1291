@@ -2,7 +2,7 @@ name: App Fast Check
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, stabilization/beta48-golden-reset-beta50-20260822 ]
     paths:
       - 'app/**'
       - 'tools/apply_s10_ui_patch.py'
@@ -54,7 +54,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
       - name: Apply owner Beta51 fix on stabilization line only
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'stabilization/beta48-golden-reset-beta50-20260822'
+        if: (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'stabilization/beta48-golden-reset-beta50-20260822') || (github.event_name == 'push' && github.ref_name == 'stabilization/beta48-golden-reset-beta50-20260822')
         shell: bash
         run: |
           set -euo pipefail
