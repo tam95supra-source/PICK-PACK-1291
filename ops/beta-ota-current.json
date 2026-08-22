@@ -1,14 +1,14 @@
 {
   "source": "GITHUB_RELEASE",
   "channel": "BETA",
-  "version_name": "0.4.2-beta.52",
-  "version_code": 58,
-  "apk_name": "pick-pack-1291-public-beta-0.4.2-beta.52.apk",
-  "apk_url": "https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.52-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.52.apk",
-  "sha256": "2845a17d0fb3ba6ff5fbf492d49073881ada831548b190bec59fede053420c38",
-  "size": 13011507,
-  "published_at": "2026-08-22T13:17:08Z",
-  "notes": "Beta52: bỏ tab Nhân sự; danh sách bỏ tiền tố Mã nhân viên; lịch sử canonical đa thiết bị; nút đồng bộ nhanh; thông báo conflict/RA/SỬA rõ ràng hơn; MNV fallback phía app. Stable không thay đổi.",
+  "version_name": "0.4.2-beta.53",
+  "version_code": 59,
+  "apk_name": "pick-pack-1291-public-beta-0.4.2-beta.53.apk",
+  "apk_url": "https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.53-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.53.apk",
+  "sha256": "57e4930e41c299ca96e1bc65639b9a62ebac7fe608f3239c8b06880f4262e2f1",
+  "size": 13011563,
+  "published_at": "2026-08-22T13:47:34Z",
+  "notes": "Beta53: khôi phục tab Nhân sự; bỏ tab Đồng bộ; icon làm mới vòng tròn; ba thẻ Mạng/Đồng bộ/Dịch vụ mở chi tiết thuần Việt; Dịch vụ hiển thị Cloudflare/Google Drive/OFFLINE; ẩn bàn phím sau khi hiển thị thông tin nhân sự. Stable không thay đổi.",
   "mandatory": false,
   "retention": 10
 }
