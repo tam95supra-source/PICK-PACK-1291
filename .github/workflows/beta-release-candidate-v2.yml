@@ -1,0 +1,182 @@
+name: Beta Release Candidate V2
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths:
+      - 'ops/beta-release-candidate-v2-trigger.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-release-candidate-v2
+  cancel-in-progress: false
+
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Lock release metadata to trigger
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+          text=Path('app/build.gradle.kts').read_text()
+          trig=Path('ops/beta-release-candidate-v2-trigger.txt').read_text()
+          beta=re.search(r'create\("beta"\)\s*\{(.*?)\n\s*\}',text,re.S).group(1)
+          stable=re.search(r'create\("stable"\)\s*\{(.*?)\n\s*\}',text,re.S).group(1)
+          def one(block,p): return re.search(p,block).group(1)
+          bn=one(beta,r'versionName\s*=\s*"([^"]+)"'); bc=one(beta,r'versionCode\s*=\s*(\d+)')
+          sn=one(stable,r'versionName\s*=\s*"([^"]+)"'); sc=one(stable,r'versionCode\s*=\s*(\d+)')
+          t=dict(line.split('=',1) for line in trig.splitlines() if '=' in line)
+          assert t.get('target')==bn,(t.get('target'),bn)
+          assert t.get('version_code')==bc,(t.get('version_code'),bc)
+          assert t.get('stable_publish')=='FORBIDDEN'
+          assert t.get('merge_pr38')=='FORBIDDEN'
+          assert sn=='0.1.0-stable' and sc=='1',(sn,sc)
+          print('beta_name='+bn);print('beta_code='+bc);print('stable_name='+sn);print('stable_code='+sc)
+          PY
+          test -f tools/apply_s54_beta48_owner_10_fixes.py
+          python3 -m py_compile tools/apply_s54_beta48_owner_10_fixes.py tools/apply_m2_android_transport_patch.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Resolve Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"; exit 0
+          fi
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
+          echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"
+          mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build Beta and Stable release validation candidates exactly once
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
+      - name: Verify materialized owner contracts and package metadata
+        id: package
+        shell: bash
+        env:
+          BETA_CODE: ${{ steps.meta.outputs.beta_code }}
+          BETA_NAME: ${{ steps.meta.outputs.beta_name }}
+          STABLE_CODE: ${{ steps.meta.outputs.stable_code }}
+          STABLE_NAME: ${{ steps.meta.outputs.stable_name }}
+        run: |
+          set -euo pipefail
+          OPS=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          TR=app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
+          grep -q 'S54_BETA48_OWNER_10_FIXES' "$OPS"
+          grep -q 'Không dùng User hy1.outbound' "$OPS"; ! grep -q 'Không dùng User Pick' "$OPS"
+          ! grep -q 'Quản trị cao nhất có thể chọn nhiều lịch sử' "$OPS"
+          grep -q 'SERI PDA ĐÃ CHỌN' "$OPS"; grep -q 'Dung lượng cache' "$OPS"; grep -q 'Tên thiết bị' "$OPS"
+          grep -q '/v1/service/connections' "$TR"; grep -q 'retryDateWindowRejects' "$TR"
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          "$BT/aapt" dump badging "$BETA" > /tmp/beta.txt; "$BT/aapt" dump badging "$STABLE" > /tmp/stable.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta.txt
+          grep -q "versionCode='$BETA_CODE'" /tmp/beta.txt; grep -q "versionName='$BETA_NAME'" /tmp/beta.txt
+          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt
+          grep -q "versionCode='$STABLE_CODE'" /tmp/stable.txt; grep -q "versionName='$STABLE_NAME'" /tmp/stable.txt
+      - name: Sign Beta and verify locked signer
+        id: sign
+        shell: bash
+        env:
+          BETA_NAME: ${{ steps.meta.outputs.beta_name }}
+        run: |
+          set -euo pipefail
+          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]]; done
+          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
+          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          mkdir -p dist/beta
+          OUT="dist/beta/pick-pack-1291-public-beta-${BETA_NAME}.apk"; BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" > /tmp/cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+          sha=$(sha256sum "$OUT" | awk '{print $1}'); size=$(stat -c '%s' "$OUT"); file=$(basename "$OUT")
+          printf '%s  %s\n' "$sha" "$file" > "dist/beta/SHA256SUMS-${BETA_NAME}.txt"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "size=$size" >> "$GITHUB_OUTPUT"; echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Upload exact signed Beta candidate
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-${{ steps.meta.outputs.beta_name }}-signed-validation
+          path: dist/beta/*
+          retention-days: 14
+      - name: Persist candidate receipt
+        if: always()
+        shell: bash
+        env:
+          BETA_NAME: ${{ steps.meta.outputs.beta_name }}
+          BETA_CODE: ${{ steps.meta.outputs.beta_code }}
+          STABLE_NAME: ${{ steps.meta.outputs.stable_name }}
+          STABLE_CODE: ${{ steps.meta.outputs.stable_code }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          SIGN_OUTCOME: ${{ steps.sign.outcome }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          APK_SHA: ${{ steps.sign.outputs.sha }}
+          APK_SIZE: ${{ steps.sign.outputs.size }}
+          APK_FILE: ${{ steps.sign.outputs.file }}
+        run: |
+          set -euo pipefail
+          verdict=FAIL
+          if [[ "$BUILD_OUTCOME" == success && "$PACKAGE_OUTCOME" == success && "$SIGN_OUTCOME" == success && -n "${ARTIFACT_ID:-}" ]]; then verdict=PASS; fi
+          mkdir -p ops
+          cat > ops/beta-release-candidate-result.txt <<EOF
+          checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          source_sha=$GITHUB_SHA
+          run_id=$GITHUB_RUN_ID
+          beta_name=$BETA_NAME
+          beta_code=$BETA_CODE
+          stable_name=$STABLE_NAME
+          stable_code=$STABLE_CODE
+          build=$BUILD_OUTCOME
+          package=$PACKAGE_OUTCOME
+          sign=$SIGN_OUTCOME
+          artifact_id=${ARTIFACT_ID:-}
+          apk_file=${APK_FILE:-}
+          apk_sha256=${APK_SHA:-}
+          apk_size=${APK_SIZE:-}
+          signer_sha256=$EXPECTED_SIGNER_SHA256
+          stable_publish=FORBIDDEN
+          verdict=$verdict
+          EOF
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/beta-release-candidate-result.txt
+          git commit -m 'ops: record Beta release candidate v2' || true
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
+          [[ "$verdict" == PASS ]]
+      - name: Cleanup signing material
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
