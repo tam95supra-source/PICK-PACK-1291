@@ -1,8 +1,10 @@
-build=2026-08-22T09:21:00+07:00
+build=2026-08-22T09:24:30+07:00
 target=0.4.2-beta.47
 version_code=53
 base=Beta46
 change=Sheet operational model alignment, full audit history UI, pending history delete, concise sync, APP+WEB connections
+retry_seq=2
+retry_reason=bind candidate to final catalog-source-only Service source
 publish_ota=AFTER_PASS_MANUAL_CHECK_ONLY
 drive_backup=REQUIRED_BETA47_PLUS
 stable_publish=FORBIDDEN
