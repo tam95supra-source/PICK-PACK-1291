@@ -107,18 +107,18 @@ function ppOtaSha256_(file) {
   cache.put(key,sha,21600); return sha;
 }
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
+// PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 function ppUpdateCheck_(body) {
   const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
   const current=String(body.current_version||body._app_version||'').trim();
   if(channel==='STABLE') return {ok:true,source:'GITHUB_RELEASE',channel:'STABLE',available:false,reason:'NO_RELEASE'};
-  const version="0.4.2-beta.44", available=ppOtaCompare_(version,current)>0;
-  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:50,size:12962299,published_at:"2026-08-21T15:06:29Z",notes:"Pick Pack 1291 Beta 0.4.2-beta.44",mandatory:false};
+  const version="0.4.2-beta.47", available=ppOtaCompare_(version,current)>0;
+  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:53,size:12978683,published_at:"2026-08-22T02:39:56Z",notes:"Đồng bộ logic Google Sheet mới. Lịch sử nghiệp vụ ghi các thao tác thay đổi dữ liệu từ App/Web, gồm nhật ký xóa. RA - VÀO tổng hợp toàn bộ PDA/User Pick/Bàn Pack/User Pack phát sinh trong phiên. THÔNG TIN USER CỦA NLĐ lưu mỗi User Pick/Pack một dòng. Danh mục lấy một chiều từ Google Sheet vào Service. Đồng bộ hiển thị kết nối App + Web và bỏ các mục xử lý/phạm vi cũ. SUPERADMIN được xóa lịch sử chưa đồng bộ mà không hủy event nghiệp vụ. Cập nhật phiên bản hiển thị gọn và changelog khi có bản mới.",mandatory:false};
   if(!available)return out;
-  out.sha256="aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9";
-  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.44-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.44.apk";
+  out.sha256="6884b295d0c55ab030a86c74f52ffda33443cead4b0de4c1885dfe84c12aadb6";
+  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.47-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.47.apk";
   return out;
 }
-
 
 function ppJson_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
