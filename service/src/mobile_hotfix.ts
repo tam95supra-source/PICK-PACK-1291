@@ -63,10 +63,14 @@ function employeeJson(e:Employee|null){return e?{mnv:e.mnv,full_name:e.full_name
 function visibleWork(v:string){return v==="KHONG"?"KHÔNG":v;}
 
 async function resourceOptions(db:D1Database,date:string,mnv:string):Promise<Record<string,unknown>>{
+  // Availability is global for the business day. Never exclude rows merely because the
+  // current employee owns them: that made an already-held/already-used resource appear
+  // selectable again. The only exception is the exact resource on this employee's
+  // currently ACTIVE session so an editor can preserve its current selection.
   const leaseRows=(await db.prepare("SELECT resource_type,resource_id,mnv FROM resource_leases WHERE business_date=?1").bind(date).all<{resource_type:string;resource_id:string;mnv:string}>()).results??[];
-  const busy=new Set(leaseRows.filter(x=>x.mnv!==mnv).map(x=>`${x.resource_type}|${x.resource_id}`));
+  const busy=new Set(leaseRows.map(x=>`${x.resource_type}|${x.resource_id}`));
   const usedRows=(await db.prepare("SELECT resource_type,resource_id,mnv FROM resource_daily_consumption WHERE business_date=?1").bind(date).all<{resource_type:string;resource_id:string;mnv:string}>()).results??[];
-  const used=new Set(usedRows.filter(x=>x.mnv!==mnv).map(x=>`${x.resource_type}|${x.resource_id}`));
+  const used=new Set(usedRows.map(x=>`${x.resource_type}|${x.resource_id}`));
   const current=await db.prepare("SELECT pda_serial,user_pick,pack_table,user_pack FROM attendance_sessions WHERE business_date=?1 AND mnv=?2 AND state='ACTIVE'").bind(date,mnv).first<{pda_serial:string|null;user_pick:string|null;pack_table:string|null;user_pack:string|null}>();
 
   const pdasRaw=(await db.prepare("SELECT resource_id,status_label,metadata_json FROM resources WHERE resource_type='PDA' AND available=1 ORDER BY resource_id").all<{resource_id:string;status_label:string;metadata_json:string}>()).results??[];
@@ -74,7 +78,12 @@ async function resourceOptions(db:D1Database,date:string,mnv:string):Promise<Rec
   const picksRaw=(await db.prepare("SELECT resource_id FROM resources WHERE resource_type='USER_PICK' AND available=1 ORDER BY resource_id").all<{resource_id:string}>()).results??[];
   const user_picks=picksRaw.map(x=>x.resource_id).filter(id=>(!busy.has(`USER_PICK|${id}`)&&!used.has(`USER_PICK|${id}`))||id===current?.user_pick);
   const packsRaw=(await db.prepare("SELECT pack_table,shift,user_pack FROM resource_pack_map WHERE available=1 ORDER BY pack_table,shift,user_pack").all<{pack_table:string;shift:string;user_pack:string}>()).results??[];
-  const pack_tables=packsRaw.filter(x=>(!busy.has(`PACK_TABLE|${x.pack_table}`)&&!busy.has(`USER_PACK|${x.user_pack}`))||(x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack)).map(x=>({table:x.pack_table,shift:x.shift,user_pack:x.user_pack}));
+  const pack_tables=packsRaw.filter(x=>{
+    const exactCurrent=x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack;
+    const tableFree=!busy.has(`PACK_TABLE|${x.pack_table}`);
+    const userPackFree=!busy.has(`USER_PACK|${x.user_pack}`)&&!used.has(`USER_PACK|${x.user_pack}`);
+    return exactCurrent||(tableFree&&userPackFree);
+  }).map(x=>({table:x.pack_table,shift:x.shift,user_pack:x.user_pack}));
   return{ok:true,business_date:date,pdas,user_picks,pack_tables,current};
 }
 
