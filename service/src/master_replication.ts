@@ -1,15 +1,15 @@
 import type { EventRow } from "./domain";
 import { isAvailableLabel } from "./util";
 
-type Dataset="employees"|"catalogs"|"pda"|"user_pick"|"pack_table"|"user_pack";
+type Dataset="employees"|"pda"|"user_pick"|"pack_table"|"user_pack";
 type Grid=unknown[][];
 type DataUpdate={range:string;values:unknown[][]};
-const MASTER_TYPES:Record<string,Dataset>={MASTER_EMPLOYEES:"employees",MASTER_CATALOGS:"catalogs",MASTER_PDA:"pda",MASTER_USER_PICK:"user_pick",MASTER_PACK_TABLE:"pack_table",MASTER_USER_PACK:"user_pack"};
+// Beta47: Danh mục is Google -> Service only. MASTER_CATALOGS is intentionally not projectable back to Google.
+const MASTER_TYPES:Record<string,Dataset>={MASTER_EMPLOYEES:"employees",MASTER_PDA:"pda",MASTER_USER_PICK:"user_pick",MASTER_PACK_TABLE:"pack_table",MASTER_USER_PACK:"user_pack"};
 const CATALOG_HEADERS=["DANH SÁCH NHÂN SỰ_Vị trí chính","DANH SÁCH NHÂN SỰ_Nhà cung cấp","DANH SÁCH NHÂN SỰ_Bộ phận","DANH SÁCH NHÂN SỰ_Site","DANH SÁCH NHÂN SỰ_Kho","DANH SÁCH PDA_Tình trạng","DANH SÁCH USER PICK_Tình trạng","DANH SÁCH BÀN PACK_Tình trạng","DANH SÁCH USER PACK_Tình trạng","RA - VÀO TRONG CA_Loại thao tác","VÀO - RA TRONG CA_Ca","CÔNG NHẬT_Thông tin công nhật","CÔNG NHẬT_Mốc thời gian","CÔNG NHẬT_Trạng thái"] as const;
 function q(name:string):string{return `'${name.replace(/'/g,"''")}'`;}
-function col(n:number):string{let s="";for(let x=n;x>0;x=Math.floor((x-1)/26))s=String.fromCharCode(65+(x-1)%26)+s;return s;}
 function payload(e:EventRow):Record<string,unknown>{try{return JSON.parse(e.payload_json) as Record<string,unknown>;}catch{return{};}}
-function after(e:EventRow):Record<string,unknown>|null{const p=payload(e),v=e.event_type==="MASTER_IMPORT_ROLLBACK"?p.after:p.after;return v&&typeof v==="object"&&!Array.isArray(v)?v as Record<string,unknown>:null;}
+function after(e:EventRow):Record<string,unknown>|null{const p=payload(e),v=p.after;return v&&typeof v==="object"&&!Array.isArray(v)?v as Record<string,unknown>:null;}
 function text(v:unknown):string{return String(v??"").trim();}
 function meta(v:unknown):Record<string,unknown>{try{const x=typeof v==="string"?JSON.parse(v):v;return x&&typeof x==="object"&&!Array.isArray(x)?x as Record<string,unknown>:{};}catch{return{};}}
 function rowIndex(grid:Grid,keyCol:number,key:string):number|null{for(let i=1;i<grid.length;i++)if(text(grid[i]?.[keyCol])===key)return i+1;return null;}
@@ -23,15 +23,13 @@ export async function replicateMasterProjection(db:D1Database,env:Env,token:stri
   const master=events.filter(e=>Boolean(MASTER_TYPES[e.entity_type])&&(e.event_type==="MASTER_IMPORT_UPSERT"||e.event_type==="MASTER_IMPORT_ROLLBACK"));if(!master.length)return 0;
   const id=env.GOOGLE_SOURCE_SHEET_ID,ranges=[`${q("Danh mục")}!A:N`,`${q("DANH SÁCH NHÂN SỰ")}!A:L`,`${q("DANH SÁCH PDA")}!A:D`,`${q("DANH SÁCH USER PICK")}!A:D`,`${q("DANH SÁCH BÀN PACK")}!A:B`,`${q("DANH SÁCH USER PACK")}!A:D`],g=await batchGet(id,token,ranges),catalog=g[0]??[],staff=g[1]??[],pda=g[2]??[],pick=g[3]??[],tables=g[4]??[],pack=g[5]??[];
   assertHeader(catalog,CATALOG_HEADERS,"Danh mục");assertHeader(staff,["Mã nhân viên","Họ và tên","Số điện thoại","Vị trí chính","Nhà cung cấp","Bộ phận","Site","Kho","Ngày bắt đầu làm việc","Ghi chú","Người cập nhật","Thời gian cập nhật"],"DANH SÁCH NHÂN SỰ");assertHeader(pda,["Seri PDA","5 số cuối Seri","Tình trạng","Ghi chú"],"DANH SÁCH PDA");assertHeader(pick,["Số User","User Pick","Tình trạng","Ghi chú"],"DANH SÁCH USER PICK");assertHeader(tables,["Tên bàn pack","Tình trạng"],"DANH SÁCH BÀN PACK");assertHeader(pack,["Tên bàn pack","User pack","User Pack","Tình trạng"],"DANH SÁCH USER PACK");
-  const updates:DataUpdate[]=[],affectedCatalogs=new Set<string>();let projected=0;
+  const updates:DataUpdate[]=[];let projected=0;
   for(const e of master){const dataset=MASTER_TYPES[e.entity_type]!,r=after(e);if(!r)continue;
-    if(dataset==="catalogs"){affectedCatalogs.add(text(r.namespace));projected++;continue;}
     if(dataset==="employees"){const key=text(r.mnv),row=rowIndex(staff,0,key)??nextRow(staff);if(row>staff.length)staff.push([]);updates.push({range:`${q("DANH SÁCH NHÂN SỰ")}!A${row}:L${row}`,values:[[key,text(r.full_name),text(r.phone),text(r.main_position),text(r.supplier),text(r.department),text(r.site),text(r.warehouse),text(r.start_date),text(r.note),e.actor_id,e.committed_at]]});projected++;continue;}
     if(dataset==="pda"){const key=text(r.resource_id),m=meta(r.metadata_json),row=rowIndex(pda,0,key)??nextRow(pda);if(row>pda.length)pda.push([]);const old=pda[row-1]??[];updates.push({range:`${q("DANH SÁCH PDA")}!A${row}:D${row}`,values:[[key,text(m["5 số cuối Seri"]??m.last5)||key.slice(-5),text(r.status_label),text(m["Ghi chú"]??m.note??old[3])]]});projected++;continue;}
     if(dataset==="user_pick"){const key=text(r.resource_id),m=meta(r.metadata_json),row=rowIndex(pick,1,key)??nextRow(pick);if(row>pick.length)pick.push([]);const old=pick[row-1]??[];updates.push({range:`${q("DANH SÁCH USER PICK")}!A${row}:D${row}`,values:[[text(m["Số User"]??m.number??old[0]),key,text(r.status_label),text(m["Ghi chú"]??m.note??old[3])]]});projected++;continue;}
     if(dataset==="user_pack"){const key=text(r.resource_id),m=meta(r.metadata_json),row=rowIndex(pack,2,key)??nextRow(pack);if(row>pack.length)pack.push([]);const old=pack[row-1]??[];updates.push({range:`${q("DANH SÁCH USER PACK")}!A${row}:D${row}`,values:[[text(m["Tên bàn pack"]??m.pack_table??old[0]),text(m["User pack"]??m.label??old[1]),key,text(r.status_label)]]});projected++;continue;}
     if(dataset==="pack_table"){const key=text(r.pack_table),available=Boolean(Number(r.available)),status=text(r.status_label)||await statusLabel(db,"DANH SÁCH BÀN PACK_Tình trạng",available),tableRow=rowIndex(tables,0,key)??nextRow(tables);if(tableRow>tables.length)tables.push([]);updates.push({range:`${q("DANH SÁCH BÀN PACK")}!A${tableRow}:B${tableRow}`,values:[[key,status]]});const user=text(r.user_pack);if(user){const packRow=rowIndex(pack,2,user)??nextRow(pack);if(packRow>pack.length)pack.push([]);const old=pack[packRow-1]??[];updates.push({range:`${q("DANH SÁCH USER PACK")}!A${packRow}:D${packRow}`,values:[[key,text(r.label)||text(old[1]),user,text(old[3])||await statusLabel(db,"DANH SÁCH USER PACK_Tình trạng",true)]]});}projected++;}
   }
-  if(affectedCatalogs.size){const rows=(await db.prepare("SELECT namespace,ordinal,value FROM catalog_values ORDER BY namespace,ordinal").all<{namespace:string;ordinal:number;value:string}>()).results??[],by=new Map<string,string[]>();for(const r of rows){if(!affectedCatalogs.has(r.namespace))continue;const a=by.get(r.namespace)??[];a.push(r.value);by.set(r.namespace,a);}for(const [ns,values] of by){const ci=CATALOG_HEADERS.indexOf(ns as never);if(ci<0)throw new Error(`GOOGLE_CATALOG_NAMESPACE_UNKNOWN:${ns}`);const c=col(ci+1);updates.push({range:`${q("Danh mục")}!${c}2:${c}${Math.max(2,values.length+1)}`,values:values.map(v=>[v])});}}
   await batchPut(id,token,updates);return projected;
 }
