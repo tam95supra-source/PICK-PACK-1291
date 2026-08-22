@@ -1,10 +1,11 @@
-requested_at=2026-08-22T14:28:00+07:00
+requested_at=2026-08-22T14:35:00+07:00
 mode=READ_ONLY
 focus=sheet_replication_outbox,replication_status,user_events,leases,daily_consumption
 known_event_1=0d387d95-4012-4dc9-a46d-f757efe9f2b7
 known_event_2=9ab91ee3-484c-444d-9eb2-de02e0649a48
 post_service_worker=ea880abc-54c6-447a-a351-d1c768d800fd
-retry_seq=2
+retry_seq=3
+expect_pending=0
 no_mutation=true
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
