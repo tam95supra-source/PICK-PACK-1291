@@ -1,10 +1,10 @@
-deploy=2026-08-22T11:22:00+07:00
+deploy=2026-08-22T11:25:00+07:00
 target=pick-pack-1291-service
-source=Beta48 OWNER 10-fix service source + signed candidate carrier after S54A
-features=CURRENT_DAY_ROLLOVER,PDA_7_DAY_WINDOW_REPAIR,USER_PACK_BOTH_SHIFTS,USER_PACK_REUSE_AFTER_END,APP_WEB_CONNECTIONS,BETA48_BUILD_SIGN,S54A_HISTORY_NORMALIZE
+source=Beta48 OWNER 10-fix service source + signed candidate carrier structural S54
+features=CURRENT_DAY_ROLLOVER,PDA_7_DAY_WINDOW_REPAIR,USER_PACK_BOTH_SHIFTS,USER_PACK_REUSE_AFTER_END,APP_WEB_CONNECTIONS,BETA48_BUILD_SIGN,S54_HISTORY_STRUCTURAL
 expected_route=/v1/service/connections
 expected_authority=SERVICE_PRIMARY
-retry_seq=10
+retry_seq=11
 source_frozen=YES
 candidate_version=0.4.2-beta.48
 candidate_code=54
