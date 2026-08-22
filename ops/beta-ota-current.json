@@ -1,14 +1,14 @@
 {
   "source": "GITHUB_RELEASE",
   "channel": "BETA",
-  "version_name": "0.4.2-beta.46",
-  "version_code": 52,
-  "apk_name": "pick-pack-1291-public-beta-0.4.2-beta.46.apk",
-  "apk_url": "https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.46-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.46.apk",
-  "sha256": "14ee4c0ac2264af90e2aa4a6e94291b1157a6299e5f48b19a5df462c4e36dbc4",
+  "version_name": "0.4.2-beta.47",
+  "version_code": 53,
+  "apk_name": "pick-pack-1291-public-beta-0.4.2-beta.47.apk",
+  "apk_url": "https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.47-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.47.apk",
+  "sha256": "6884b295d0c55ab030a86c74f52ffda33443cead4b0de4c1885dfe84c12aadb6",
   "size": 12978683,
-  "published_at": "2026-08-22T01:47:17Z",
-  "notes": "Pick Pack 1291 Beta 0.4.2-beta.46",
+  "published_at": "2026-08-22T02:39:56Z",
+  "notes": "Đồng bộ logic Google Sheet mới. Lịch sử nghiệp vụ ghi các thao tác thay đổi dữ liệu từ App/Web, gồm nhật ký xóa. RA - VÀO tổng hợp toàn bộ PDA/User Pick/Bàn Pack/User Pack phát sinh trong phiên. THÔNG TIN USER CỦA NLĐ lưu mỗi User Pick/Pack một dòng. Danh mục lấy một chiều từ Google Sheet vào Service. Đồng bộ hiển thị kết nối App + Web và bỏ các mục xử lý/phạm vi cũ. SUPERADMIN được xóa lịch sử chưa đồng bộ mà không hủy event nghiệp vụ. Cập nhật phiên bản hiển thị gọn và changelog khi có bản mới.",
   "mandatory": false,
   "retention": 10
 }
