@@ -73,6 +73,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s49c_kotlin_syntax_hotfix.py"))
     inputs.file(rootProject.file("tools/apply_s50_beta44_owner_user_projection_admin_bulk_sync_vi.py"))
     inputs.file(rootProject.file("tools/apply_s51_beta45_manual_update_sync_detail_vi.py"))
+    inputs.file(rootProject.file("tools/apply_s52_beta46_superadmin_history_delete.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
@@ -98,8 +99,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 51
-            versionName = "0.4.2-beta.45"
+            versionCode = 52
+            versionName = "0.4.2-beta.46"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -140,7 +141,7 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and manual update lookup path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// Beta45 is rebuilt cleanly from the finalized Beta44 source and adds only S51 manual update + detailed Vietnamese Sync UI.
+// Beta46 extends the clean Beta45 source with S52 SUPERADMIN password-gated logical History deletion and tombstone filtering.
 // Legacy Beta44 candidate-workflow compatibility markers only; actual beta metadata above is authoritative:
 // versionCode = 50
 // versionName = "0.4.2-beta.44"
