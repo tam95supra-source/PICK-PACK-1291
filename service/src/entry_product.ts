@@ -3,7 +3,9 @@ import { authenticate } from "./auth";
 import { exchangeGasSession, mobileRead } from "./mobile_hotfix";
 import { resourceAdminList, resourceAdminMutate } from "./resource_admin";
 import { attendanceExitDelete, attendanceTimeCorrect, flushSessionSpecialProjections, sessionExitGuarded, sessionWorkUpdate } from "./session_hotfix";
-import { serviceConnections, superadminDeleteAccounts } from "./beta44_owner";
+import { superadminDeleteAccounts } from "./beta44_owner";
+import { serviceConnectionsV47 } from "./beta47_connections";
+import { reconcileBeta47OperationalProjection } from "./beta47_projection";
 import { historyDelete } from "./history_delete";
 import { apiError, json } from "./util";
 
@@ -25,7 +27,7 @@ export default {
     if(u.pathname==="/v1/auth/gas-session"&&method==="POST")return exchangeGasSession(request,env);
     if(u.pathname==="/v1/mobile/read"&&method==="POST")return mobileRead(request,env);
     if(u.pathname==="/v1/admin/business-dates"&&method==="GET")return historicalBusinessDates(request,env);
-    if(u.pathname==="/v1/service/connections"&&method==="GET")return serviceConnections(request,env);
+    if(u.pathname==="/v1/service/connections"&&method==="GET")return serviceConnectionsV47(request,env);
     if(u.pathname==="/v1/admin/accounts/delete"&&method==="POST")return superadminDeleteAccounts(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="GET")return resourceAdminList(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="POST")return resourceAdminMutate(request,env);
@@ -39,5 +41,7 @@ export default {
   async scheduled(controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{
     await current.scheduled(controller,env,ctx);
     await flushSessionSpecialProjections(env);
+    try{const r=await reconcileBeta47OperationalProjection(env);console.log(JSON.stringify({level:"info",kind:"beta47_projection",...r}));}
+    catch(e){console.log(JSON.stringify({level:"error",kind:"beta47_projection_failed",error:String(e).slice(0,500)}));}
   },
 } satisfies ExportedHandler<Env>;
