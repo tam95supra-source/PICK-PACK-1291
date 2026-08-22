@@ -1,0 +1,109 @@
+name: Beta50 OTA E2E
+
+on:
+  push:
+    branches:
+      - stabilization/beta48-golden-reset-beta50-20260822
+    paths:
+      - '.github/workflows/beta50-ota-e2e.yml'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: beta50-ota-e2e
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      FROM_VERSION: 0.4.2-beta.48
+      TARGET_VERSION: 0.4.2-beta.50
+      TARGET_CODE: '56'
+      EXPECTED_SHA: 712350b17d2ed1a54069cf3bf30cb1be492d6df131b2ad1ce5393278501bc93c
+      EXPECTED_SIZE: '12995123'
+      EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+    steps:
+      - name: Announce OTA E2E run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_OTA_E2E start run=${GITHUB_RUN_ID} from=${FROM_VERSION} target=${TARGET_VERSION}"
+
+      - name: Wait for live GAS static Beta50 metadata and download exact release bytes
+        id: discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          good=false
+          for n in $(seq 1 60); do
+            code=$(curl -sSL --connect-timeout 20 --max-time 90 -o /tmp/update.json -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$FROM_VERSION\"}" || true)
+            if [[ "$code" == 200 ]] && python3 - <<'PY'
+          import json,os
+          try:j=json.load(open('/tmp/update.json'))
+          except Exception: raise SystemExit(1)
+          ok=(j.get('ok') is True and j.get('available',j.get('update_available')) is True and j.get('source')=='GITHUB_RELEASE' and str(j.get('channel'))=='BETA' and str(j.get('version_name',j.get('version','')))==os.environ['TARGET_VERSION'] and int(j.get('version_code',-1))==int(os.environ['TARGET_CODE']) and int(j.get('size',-1))==int(os.environ['EXPECTED_SIZE']) and str(j.get('sha256','')).lower()==os.environ['EXPECTED_SHA'].lower() and str(j.get('apk_url','')).startswith('https://github.com/'))
+          raise SystemExit(0 if ok else 1)
+          PY
+            then good=true; break; fi
+            sleep 10
+          done
+          [[ "$good" == true ]] || { echo LIVE_GAS_BETA50_NOT_READY; cat /tmp/update.json || true; exit 44; }
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/update.json'))
+          open('/tmp/url','w').write(j['apk_url'])
+          print('ota_source='+str(j.get('source')))
+          print('ota_version='+str(j.get('version_name',j.get('version'))))
+          print('ota_code='+str(j.get('version_code')))
+          PY
+          curl -fL --retry 6 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 "$(cat /tmp/url)" -o /tmp/ota.apk
+          [[ "$(sha256sum /tmp/ota.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          [[ "$(stat -c '%s' /tmp/ota.apk)" == "$EXPECTED_SIZE" ]]
+          echo "sha=$(sha256sum /tmp/ota.apk|awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c '%s' /tmp/ota.apk)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package version and locked signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          if [[ ! -x "$BT/aapt" || ! -x "$BT/apksigner" ]]; then
+            BT=$(dirname "$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -perm -u+x | sort -V | tail -1)")
+          fi
+          test -x "$BT/aapt"; test -x "$BT/apksigner"
+          "$BT/aapt" dump badging /tmp/ota.apk > /tmp/badge.txt
+          grep -q "package: name='$EXPECTED_PACKAGE'" /tmp/badge.txt
+          grep -q "versionCode='$TARGET_CODE'" /tmp/badge.txt
+          grep -q "versionName='$TARGET_VERSION'" /tmp/badge.txt
+          "$BT/apksigner" verify --verbose --print-certs /tmp/ota.apk > /tmp/cert.txt
+          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+
+      - name: Verify target self-update false and Stable isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          post(){ curl -sSL --connect-timeout 20 --max-time 90 -H 'content-type: application/json' "$GAS_URL" -d "$1"; }
+          post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_VERSION\"}" > /tmp/self.json
+          post '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' > /tmp/stable.json
+          python3 - <<'PY'
+          import json,os
+          s=json.load(open('/tmp/self.json')); t=json.load(open('/tmp/stable.json'))
+          assert s.get('ok') is True and s.get('source')=='GITHUB_RELEASE' and s.get('available',s.get('update_available')) is False,s
+          assert t.get('ok') is True and t.get('available',t.get('update_available')) is False,t
+          assert str(t.get('version_name',t.get('version',''))) != os.environ['TARGET_VERSION'],t
+          PY
+
+      - name: Report OTA E2E result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.discovery.outputs.sha }}
+          SIZE: ${{ steps.discovery.outputs.size }}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_OTA_E2E finish run=${GITHUB_RUN_ID} job=${{ job.status }} from=${FROM_VERSION} target=${TARGET_VERSION}/${TARGET_CODE} sha256=${SHA:-NONE} size=${SIZE:-NONE} stable=UNTOUCHED beta49=ABANDONED"
