@@ -9,7 +9,7 @@ path = ROOT / "app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt"
 s = path.read_text()
 marker = "M2_SERVICE_TRANSPORT_APPLIED"
 if marker in s:
-    print("M2 Android transport already applied; composing S19..S56 runtime fixes.")
+    print("M2 Android transport already applied; composing S19..S56L runtime fixes.")
     runpy.run_path(str(ROOT / "tools/apply_s19_m2_runtime_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s20_pack_identity_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s21_labor_shift_fix.py"), run_name="__main__")
@@ -32,6 +32,7 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s54_beta48_owner_10_fixes.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s55_beta48_log_summary_ui.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s56_beta49_android_field_fixes.py"), run_name="__main__")
+    runpy.run_path(str(ROOT / "tools/apply_s56l_beta49_log_accounting.py"), run_name="__main__")
     raise SystemExit(0)
 
 anchor = "    private val executor = Executors.newSingleThreadExecutor()\n"
@@ -98,4 +99,5 @@ runpy.run_path(str(ROOT / "tools/apply_s54a_beta48_history_anchor.py"), run_name
 runpy.run_path(str(ROOT / "tools/apply_s54_beta48_owner_10_fixes.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s55_beta48_log_summary_ui.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s56_beta49_android_field_fixes.py"), run_name="__main__")
-print(f"Applied M2 dynamic Service transport + Beta44/Beta45/Beta46/Beta47/Beta48/Beta49 S56 chain: {path}")
+runpy.run_path(str(ROOT / "tools/apply_s56l_beta49_log_accounting.py"), run_name="__main__")
+print(f"Applied M2 dynamic Service transport + Beta44/Beta45/Beta46/Beta47/Beta48/Beta49 S56L chain: {path}")
