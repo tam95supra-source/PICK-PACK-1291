@@ -1,0 +1,53 @@
+name: Beta50 Canonicalize Bootstrap
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - stabilization/beta48-golden-reset-beta50-20260822
+
+permissions:
+  contents: read
+
+jobs:
+  canonicalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Materialize Beta48 chain exactly once
+        run: |
+          python3 tools/apply_m2_android_transport_patch.py
+          git status --short
+      - name: Capture canonicalized source delta
+        run: |
+          mkdir -p canonicalized
+          git diff --name-only --diff-filter=ACMRT > canonicalized/files.txt
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            mkdir -p "canonicalized/$(dirname "$f")"
+            cp "$f" "canonicalized/$f"
+          done < canonicalized/files.txt
+          printf 'source_sha=%s\n' "${GITHUB_SHA}" > canonicalized/manifest.txt
+          printf 'materializer=tools/apply_m2_android_transport_patch.py\n' >> canonicalized/manifest.txt
+          printf 'beta_golden=0.4.2-beta.48/54\n' >> canonicalized/manifest.txt
+          cat canonicalized/files.txt
+      - name: Compile materialized Beta source
+        run: ./gradlew :app:compileBetaReleaseKotlin --no-daemon
+      - name: Upload canonicalized source
+        uses: actions/upload-artifact@v4
+        with:
+          name: beta48-canonicalized-source
+          path: canonicalized
+          if-no-files-found: error
+          retention-days: 7
