@@ -9,15 +9,19 @@ if 'S54_BETA48_OWNER_10_FIXES' in ops.read_text(encoding='utf-8'):
     raise SystemExit(0)
 
 q=patch.read_text(encoding='utf-8')
-old='''    s = replace_once(
+def swap(old:str,new:str,name:str):
+    global q
+    if old not in q:
+        raise SystemExit(f'S54A source block missing: {name}')
+    q=q.replace(old,new,1)
+
+swap('''    s = replace_once(
         s,
         'var selectedDate=operationalStore.latestBusinessDate().ifBlank{operationalStore.businessDate()};var filter="ALL";var pageSize=60;var query=""',
         'var selectedDate=operationalStore.businessDate();var filter="ALL";var pageSize=60;var query=""',
         "history-current-day",
     )
-'''
-new='''    # History declaration shape has evolved across S36..S53. Scope replacement to historyScreen
-    # and change only selectedDate, preserving surrounding filters/paging/search declarations.
+''','''    # History declaration shape has evolved across S36..S53. Scope replacement to historyScreen.
     hs=s.find('    private fun historyScreen(){')
     he=s.find('\\n    private fun ',hs+20)
     if hs<0 or he<0:
@@ -28,8 +32,42 @@ new='''    # History declaration shape has evolved across S36..S53. Scope replac
     if n!=1:
         raise SystemExit(f"S54 history selectedDate structural anchor mismatch: {n}")
     s=s[:hs]+hb+s[he:]
-'''
-if old not in q:
-    raise SystemExit('S54A source patch block not found')
-patch.write_text(q.replace(old,new,1),encoding='utf-8')
-print('S54A converted S54 History patch to structural matching')
+''','history')
+
+swap('''    s = replace_once(
+        s,
+        'private fun body()=column(bg).apply{setPadding(dp(16),dp(15),dp(16),dp(92))}',
+        'private fun body()=column(bg).apply{setPadding(dp(14),dp(13),dp(14),dp(83))}',
+        "body-spacing",
+    )
+    s = replace_once(
+        s,
+        'private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(h))}',
+        'private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(((h*9)+5)/10))}',
+        "gap-spacing",
+    )
+''','''    s,n=_re.subn(r'private fun body\\(\\)\\s*=\\s*column\\(bg\\)\\.apply\\{setPadding\\(dp\\(\\d+\\),dp\\(\\d+\\),dp\\(\\d+\\),dp\\(\\d+\\)\\)\\}', 'private fun body()=column(bg).apply{setPadding(dp(14),dp(13),dp(14),dp(83))}', s, count=1)
+    if n!=1: raise SystemExit(f"S54 body-spacing structural mismatch: {n}")
+    s,n=_re.subn(r'private fun gap\\(h:Int\\)\\s*=\\s*Space\\(this\\)\\.apply\\{layoutParams=size\\(1,dp\\(h\\)\\)\\}', 'private fun gap(h:Int)=Space(this).apply{layoutParams=size(1,dp(((h*9)+5)/10))}', s, count=1)
+    if n!=1: raise SystemExit(f"S54 gap-spacing structural mismatch: {n}")
+''','spacing')
+
+swap('''    s = replace_once(
+        s,
+        '"Dữ liệu chờ gửi" to pending.toString(),"Luồng trao đổi dữ liệu"',
+        '"Dữ liệu chờ gửi" to pending.toString(),"Dung lượng cache" to humanBytes(operationalStore.storageBytes()),"Luồng trao đổi dữ liệu"',
+        "sync-cache-size",
+    )
+''','''    s,n=_re.subn(r'"Dữ liệu chờ gửi"\\s*to\\s*pending\\.toString\\(\\)\\s*,\\s*"Luồng trao đổi dữ liệu"', '"Dữ liệu chờ gửi" to pending.toString(),"Dung lượng cache" to humanBytes(operationalStore.storageBytes()),"Luồng trao đổi dữ liệu"', s, count=1)
+    if n!=1: raise SystemExit(f"S54 sync-cache-size structural mismatch: {n}")
+''','cache')
+
+swap('''    s = replace_once(s, load_app_old, load_app_new, "sync-device-name")
+''','''    la=s.find('        fun loadApp(){')
+    lb=s.find('\\n        fun load(){',la)
+    if la<0 or lb<0: raise SystemExit("S54 sync-device-name structural anchor missing")
+    s=s[:la]+'        '+load_app_new+s[lb:]
+''','load-app')
+
+patch.write_text(q,encoding='utf-8')
+print('S54A converted History/spacing/cache/app anchors to structural matching')
