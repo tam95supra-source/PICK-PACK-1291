@@ -1,11 +1,12 @@
-deploy=2026-08-22T10:48:00+07:00
+deploy=2026-08-22T11:20:00+07:00
 target=pick-pack-1291-service
-source=Beta48 OWNER 10-fix service source
-features=CURRENT_DAY_ROLLOVER,PDA_7_DAY_WINDOW_REPAIR,USER_PACK_BOTH_SHIFTS,USER_PACK_REUSE_AFTER_END,APP_WEB_CONNECTIONS
+source=Beta48 OWNER 10-fix service source + signed candidate carrier
+features=CURRENT_DAY_ROLLOVER,PDA_7_DAY_WINDOW_REPAIR,USER_PACK_BOTH_SHIFTS,USER_PACK_REUSE_AFTER_END,APP_WEB_CONNECTIONS,BETA48_BUILD_SIGN
 expected_route=/v1/service/connections
 expected_authority=SERVICE_PRIMARY
-retry_seq=8
+retry_seq=9
 source_frozen=YES
 candidate_version=0.4.2-beta.48
+candidate_code=54
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
