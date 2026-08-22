@@ -1,20 +1,27 @@
 name: Beta50 Canonicalize Bootstrap
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches:
       - stabilization/beta48-golden-reset-beta50-20260822
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   canonicalize:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Announce run checkpoint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_CANONICALIZE_RUN start run=${GITHUB_RUN_ID} sha=${GITHUB_SHA} event=${GITHUB_EVENT_NAME}"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -42,8 +49,6 @@ jobs:
           printf 'materializer=tools/apply_m2_android_transport_patch.py\n' >> canonicalized/manifest.txt
           printf 'beta_golden=0.4.2-beta.48/54\n' >> canonicalized/manifest.txt
           cat canonicalized/files.txt
-      - name: Compile materialized Beta source
-        run: ./gradlew :app:compileBetaReleaseKotlin --no-daemon
       - name: Upload canonicalized source
         uses: actions/upload-artifact@v4
         with:
@@ -51,3 +56,11 @@ jobs:
           path: canonicalized
           if-no-files-found: error
           retention-days: 7
+      - name: Compile materialized Beta source
+        run: ./gradlew :app:compileBetaReleaseKotlin --no-daemon
+      - name: Report run checkpoint
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_CANONICALIZE_RUN finish run=${GITHUB_RUN_ID} sha=${GITHUB_SHA} job=${{ job.status }}"
