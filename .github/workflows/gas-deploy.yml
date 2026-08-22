@@ -40,7 +40,7 @@ jobs:
           python3 tools/apply_s46_gas_auth.py
           python3 tools/apply_github_ota_canonical.py
           grep -q 'PP_GITHUB_RELEASE_OTA_CANONICAL_V1' google-apps-script/PICK_PACK_API.gs
-          grep -q 'PP_GITHUB_OTA_STATIC_V1' google-apps-script/ZZZ_GITHUB_OTA_OVERRIDE.gs
+          grep -q 'PP_GITHUB_RELEASE_OTA_STATIC_CANONICAL_V2' google-apps-script/ZZZ_GITHUB_OTA_OVERRIDE.gs
           ! grep -q 'function ppUpdateCheck_' google-apps-script/ZZZ_GITHUB_OTA_OVERRIDE.gs
           ! grep -R -q 'api.github.com/.*/releases' google-apps-script
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
@@ -140,8 +140,8 @@ jobs:
           DOWNLOAD_SIZE: ${{ steps.verify.outputs.download_size }}
         run: |
           set -euo pipefail
-          verdict=FAIL
-          [[ "$DEPLOY_OUTCOME" == success && "$VERIFY_OUTCOME" == success ]] && verdict=PASS
+          verdict=FAIL; manual=FAIL; self_state=UNKNOWN
+          if [[ "$DEPLOY_OUTCOME" == success && "$VERIFY_OUTCOME" == success ]]; then verdict=PASS; manual=PASS; self_state=FALSE; fi
           git reset --hard "$GITHUB_SHA"
           cat > ops/gas-deploy-result.txt <<EOF
           checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -160,9 +160,9 @@ jobs:
           beta_size=${TARGET_BETA_SIZE:-}
           download_sha256=${DOWNLOAD_SHA:-}
           download_size=${DOWNLOAD_SIZE:-}
-          manual_check=PASS
+          manual_check=$manual
           automatic_check=DISABLED_IN_APP
-          target_self_update=FALSE
+          target_self_update=$self_state
           stable=UNTOUCHED
           pr38_merge=FORBIDDEN
           verdict=$verdict
