@@ -49,29 +49,30 @@ jobs:
           runq "SELECT singleton_id,state,pending_count,retry_count,last_attempt_at,last_success_at,last_error_class,substr(COALESCE(last_error,''),1,400) AS last_error,updated_at FROM replication_status WHERE singleton_id=1" > /tmp/status.json
           runq "SELECT outbox_id,event_id,status,attempt_count,next_attempt_at,last_error_class,substr(COALESCE(last_error,''),1,400) AS last_error,replicated_at,created_at FROM sheet_replication_outbox WHERE event_id IN ('0d387d95-4012-4dc9-a46d-f757efe9f2b7','9ab91ee3-484c-444d-9eb2-de02e0649a48') OR status IN ('PENDING','RETRY','INFLIGHT','PAUSED_SCHEMA') ORDER BY outbox_id DESC LIMIT 60" > /tmp/recent.json
           runq "SELECT event_id,event_type,business_date,authority_seq,committed_at FROM events WHERE event_id IN ('0d387d95-4012-4dc9-a46d-f757efe9f2b7','9ab91ee3-484c-444d-9eb2-de02e0649a48') ORDER BY authority_seq" > /tmp/events.json
+          runq "SELECT event_id,event_type,business_date,authority_seq,committed_at,COALESCE(json_extract(payload_json,'$.user_pick'),json_extract(payload_json,'$.after.user_pick'),'') AS user_pick,COALESCE(json_extract(payload_json,'$.user_pack'),json_extract(payload_json,'$.after.user_pack'),'') AS user_pack,COALESCE(json_extract(payload_json,'$.pack_table'),json_extract(payload_json,'$.after.pack_table'),'') AS pack_table,COALESCE(json_extract(payload_json,'$.pda_serial'),json_extract(payload_json,'$.after.pda_serial'),'') AS pda_serial FROM events WHERE business_date='2026-08-22' AND event_type IN ('ATTENDANCE_ENTER','RESOURCE_CHANGE') AND (COALESCE(json_extract(payload_json,'$.user_pick'),json_extract(payload_json,'$.after.user_pick'),'')<>'' OR COALESCE(json_extract(payload_json,'$.user_pack'),json_extract(payload_json,'$.after.user_pack'),'')<>'') ORDER BY authority_seq DESC LIMIT 30" > /tmp/user_events.json
+          runq "SELECT resource_type,resource_id,mnv,business_date,session_id,acquired_event_id,acquired_at FROM resource_leases WHERE business_date='2026-08-22' ORDER BY resource_type,resource_id" > /tmp/leases.json
+          runq "SELECT business_date,resource_type,resource_id,mnv,first_event_id FROM resource_daily_consumption WHERE business_date='2026-08-22' ORDER BY resource_type,resource_id" > /tmp/used.json
           python3 - <<'PY'
           import json
           def rows(p):
               j=json.load(open(p))
-              if isinstance(j,list) and j:
-                  return j[0].get('results',[]) or []
+              if isinstance(j,list) and j: return j[0].get('results',[]) or []
               return []
-          counts=rows('/tmp/counts.json'); status=rows('/tmp/status.json'); recent=rows('/tmp/recent.json'); events=rows('/tmp/events.json')
-          out=[]
-          out.append('checked_at=__NOW__')
-          out.append('source_sha=__SHA__')
-          out.append('read_only=PASS')
+          counts=rows('/tmp/counts.json'); status=rows('/tmp/status.json'); recent=rows('/tmp/recent.json'); events=rows('/tmp/events.json'); users=rows('/tmp/user_events.json'); leases=rows('/tmp/leases.json'); used=rows('/tmp/used.json')
+          out=['checked_at=__NOW__','source_sha=__SHA__','read_only=PASS']
           for r in counts: out.append('count_'+str(r.get('status','UNKNOWN'))+'='+str(r.get('n',0)))
           if status:
               r=status[0]
-              for k in ('state','pending_count','retry_count','last_attempt_at','last_success_at','last_error_class','last_error','updated_at'):
-                  out.append('replication_'+k+'='+str(r.get(k,'')).replace('\n',' ')[:500])
+              for k in ('state','pending_count','retry_count','last_attempt_at','last_success_at','last_error_class','last_error','updated_at'): out.append('replication_'+k+'='+str(r.get(k,'')).replace('\n',' ')[:500])
           for i,r in enumerate(recent):
-              prefix=f'row{i}_'
-              for k in ('outbox_id','event_id','status','attempt_count','next_attempt_at','last_error_class','last_error','replicated_at','created_at'):
-                  out.append(prefix+k+'='+str(r.get(k,'')).replace('\n',' ')[:500])
-          for i,r in enumerate(events):
-              out.append(f'event{i}='+','.join(str(r.get(k,'')) for k in ('event_id','event_type','business_date','authority_seq','committed_at')))
+              for k in ('outbox_id','event_id','status','attempt_count','next_attempt_at','last_error_class','last_error','replicated_at','created_at'): out.append(f'row{i}_{k}='+str(r.get(k,'')).replace('\n',' ')[:500])
+          for i,r in enumerate(events): out.append(f'event{i}='+','.join(str(r.get(k,'')) for k in ('event_id','event_type','business_date','authority_seq','committed_at')))
+          out.append('user_event_count='+str(len(users)))
+          for i,r in enumerate(users): out.append(f'user_event{i}='+','.join(str(r.get(k,'')) for k in ('event_id','event_type','business_date','authority_seq','committed_at','user_pick','pack_table','user_pack','pda_serial')))
+          out.append('active_lease_count='+str(len(leases)))
+          for i,r in enumerate(leases): out.append(f'lease{i}='+','.join(str(r.get(k,'')) for k in ('resource_type','resource_id','mnv','session_id','acquired_event_id','acquired_at')))
+          out.append('daily_user_consumption_count='+str(len(used)))
+          for i,r in enumerate(used): out.append(f'used{i}='+','.join(str(r.get(k,'')) for k in ('resource_type','resource_id','mnv','first_event_id')))
           open('/tmp/receipt.txt','w').write('\n'.join(out)+'\n')
           PY
           sed -i "s/__NOW__/$(date -u +%Y-%m-%dT%H:%M:%SZ)/;s/__SHA__/$GITHUB_SHA/" /tmp/receipt.txt
