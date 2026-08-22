@@ -1,9 +1,11 @@
-requested_at=2026-08-22T08:56:00+07:00
-from_version=0.4.2-beta.45
-target_version=0.4.2-beta.46
-expected_sha256=14ee4c0ac2264af90e2aa4a6e94291b1157a6299e5f48b19a5df462c4e36dbc4
+requested_at=2026-08-22T09:42:00+07:00
+from_version=0.4.2-beta.46
+target_version=0.4.2-beta.47
+expected_sha256=6884b295d0c55ab030a86c74f52ffda33443cead4b0de4c1885dfe84c12aadb6
 source=GITHUB_RELEASE
 canonical_manifest=ops/beta-ota-current.json
 identity_gate=ANDROID_BUILD_TOOLS_36_0_0_PROVEN_CANDIDATE_METHOD
 beta_retention=10
+drive_backup_apk_id=1xNr-gNczlk0pun5WWPWroGriosSwRMfR
+drive_backup_checksum_id=1aDK-4iVxyZJIks8jT376WbAkqjJYvWyi
 stable=FORBIDDEN
