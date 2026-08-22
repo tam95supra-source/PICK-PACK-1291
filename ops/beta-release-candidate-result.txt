@@ -1,12 +1,12 @@
-checked_at=2026-08-22T07:28:09Z
-source_sha=a059ebc86f13bed7b261a1f4da0a03249c4e0f2a
-run_id=32559643866
+checked_at=2026-08-22T07:30:47Z
+source_sha=cefb002953b45a7fc2d810082dbe4d6716970bcf
+run_id=32559753608
 beta_name=0.4.2-beta.49
 beta_code=55
 stable_name=0.1.0-stable
 stable_code=1
-materialize=failure
-field_contract=skipped
+materialize=success
+field_contract=failure
 build=skipped
 package=skipped
 sign=skipped
