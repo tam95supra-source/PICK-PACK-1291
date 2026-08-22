@@ -72,15 +72,9 @@ swap('''    t = replace_once(
         'store.retryDateWindowRejects()\\n        val items = store.pendingMutations(100)',
         "date-reject-requeue",
     )
-''','''    fs=t.find('    fun flushOutbox(): Boolean {')
-    fe=t.find('\\n    fun ',fs+20)
-    if fs<0: raise SystemExit("S54 flushOutbox structural anchor missing")
-    if fe<0: fe=len(t)
-    fb=t[fs:fe]
-    m=_re.search(r'val items\\s*=\\s*store\\.pendingMutations\\([^)]*\\)',fb)
+''','''    m=_re.search(r'val items\\s*=\\s*store\\.pendingMutations\\([^)]*\\)',t)
     if not m: raise SystemExit("S54 date-reject-requeue structural anchor missing")
-    fb=fb[:m.start()]+'store.retryDateWindowRejects()\\n        '+m.group(0)+fb[m.end():]
-    t=t[:fs]+fb+t[fe:]
+    t=t[:m.start()]+'store.retryDateWindowRejects()\\n        '+m.group(0)+t[m.end():]
 ''','transport-requeue')
 
 swap('''    t = replace_once(
