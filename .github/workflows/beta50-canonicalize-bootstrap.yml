@@ -1,4 +1,4 @@
-name: Beta50 Canonicalize Bootstrap
+name: Beta50 Canonical Source Verify
 
 on:
   push:
@@ -10,15 +10,19 @@ permissions:
   issues: write
   pull-requests: write
 
+concurrency:
+  group: beta50-canonical-verify
+  cancel-in-progress: true
+
 jobs:
-  canonicalize:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Announce run checkpoint
+      - name: Announce verify run
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_CANONICALIZE_RUN start run=${GITHUB_RUN_ID} sha=${GITHUB_SHA} event=${GITHUB_EVENT_NAME}"
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_VERIFY_RUN start run=${GITHUB_RUN_ID} sha=${GITHUB_SHA}"
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -30,33 +34,44 @@ jobs:
         with:
           gradle-version: '9.4.1'
           cache-read-only: true
-      - name: Materialize Beta48 chain exactly once
+      - name: Canonical-source and OWNER UI contracts
+        shell: bash
         run: |
-          python3 tools/apply_m2_android_transport_patch.py
-          git status --short
-      - name: Capture complete canonicalized source delta
+          set -euo pipefail
+          ! grep -q 'generateS10Operations' app/build.gradle.kts
+          ! grep -q 'apply_m2_android_transport_patch.py' app/build.gradle.kts
+          grep -q 'versionCode = 56' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.50"' app/build.gradle.kts
+          grep -q 'Quản lý biên bản' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Quản lý biên bản đang chờ xây dựng.' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          test -s app/src/main/res/drawable/ic_pp_document.xml
+          ! grep -q 'NGƯỜI DÙNG ĐANG KẾT NỐI' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'service_connections' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -Fq 'Còn $pending mục' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'THÔNG TIN TRÊN PDA' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'THÔNG TIN TRÊN SERVICE' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'THÔNG TIN TRÊN GOOGLE SHEET' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'THÔNG TIN ĐỒNG BỘ KHÁC' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'THÔNG TIN ỨNG DỤNG' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+      - name: Compile Beta50 committed source
+        run: gradle --no-daemon :app:compileBetaReleaseKotlin
+      - name: Build Beta50 only
+        run: gradle --no-daemon :app:assembleBetaRelease
+      - name: Prove build did not mutate source
+        shell: bash
         run: |
-          mkdir -p canonicalized
-          { git diff --name-only --diff-filter=ACMRT; git ls-files --others --exclude-standard; } | sort -u > canonicalized/files.txt
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            mkdir -p "canonicalized/$(dirname "$f")"
-            cp "$f" "canonicalized/$f"
-          done < canonicalized/files.txt
-          printf 'source_sha=%s\n' "${GITHUB_SHA}" > canonicalized/manifest.txt
-          printf 'materializer=tools/apply_m2_android_transport_patch.py\n' >> canonicalized/manifest.txt
-          printf 'beta_golden=0.4.2-beta.48/54\n' >> canonicalized/manifest.txt
-          cat canonicalized/files.txt
-      - uses: actions/upload-artifact@v4
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+      - name: Upload unsigned verification APK
+        uses: actions/upload-artifact@v4
         with:
-          name: beta48-canonicalized-source
-          path: canonicalized
+          name: beta50-unsigned-verification
+          path: app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           if-no-files-found: error
           retention-days: 7
-      - name: Compile materialized Beta source without re-running materializer
-        run: gradle --no-daemon -x :app:generateS10Operations :app:compileBetaReleaseKotlin
-      - name: Report run checkpoint
+      - name: Report verify run
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_CANONICALIZE_RUN finish run=${GITHUB_RUN_ID} sha=${GITHUB_SHA} job=${{ job.status }}"
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_VERIFY_RUN finish run=${GITHUB_RUN_ID} sha=${GITHUB_SHA} job=${{ job.status }}"
