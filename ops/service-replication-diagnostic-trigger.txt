@@ -1,6 +1,6 @@
-requested_at=2026-08-22T12:37:00+07:00
+requested_at=2026-08-22T13:05:00+07:00
 mode=READ_ONLY
-focus=sheet_replication_outbox,replication_status
+focus=sheet_replication_outbox,replication_status,user_events,leases,daily_consumption
 known_event_1=0d387d95-4012-4dc9-a46d-f757efe9f2b7
 known_event_2=9ab91ee3-484c-444d-9eb2-de02e0649a48
 no_mutation=true
