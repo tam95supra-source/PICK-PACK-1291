@@ -33,6 +33,7 @@ jobs:
           fetch-depth: 0
 
       - name: Lock Beta48 metadata
+        id: meta
         shell: bash
         run: |
           set -euo pipefail
@@ -61,12 +62,12 @@ jobs:
           cache-read-only: true
 
       - name: Resolve Android SDK
+        id: sdk
         shell: bash
         run: |
           set -euo pipefail
           if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
-            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-            exit 0
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"; exit 0
           fi
           SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
           curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
@@ -148,15 +149,24 @@ jobs:
           path: dist/beta/*
           retention-days: 14
 
-      - name: Persist exact candidate receipt
+      - name: Persist candidate observer
+        if: always()
         shell: bash
         env:
+          META: ${{ steps.meta.outcome }}
+          SDK: ${{ steps.sdk.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          PACKAGE: ${{ steps.package.outcome }}
+          SIGN: ${{ steps.sign.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
           APK_SHA: ${{ steps.sign.outputs.sha }}
           APK_SIZE: ${{ steps.sign.outputs.size }}
           APK_FILE: ${{ steps.sign.outputs.file }}
           ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
         run: |
           set -euo pipefail
+          verdict=FAIL
+          [[ "$META" == success && "$SDK" == success && "$BUILD" == success && "$PACKAGE" == success && "$SIGN" == success && "$UPLOAD" == success && -n "${ARTIFACT_ID:-}" ]] && verdict=PASS
           git reset --hard HEAD
           mkdir -p ops
           cat > ops/beta-release-candidate-result.txt <<EOF
@@ -167,23 +177,27 @@ jobs:
           beta_code=54
           stable_name=0.1.0-stable
           stable_code=1
-          build=success
-          package=success
-          sign=success
-          artifact_id=$ARTIFACT_ID
-          apk_file=$APK_FILE
-          apk_sha256=$APK_SHA
-          apk_size=$APK_SIZE
+          metadata=$META
+          sdk=$SDK
+          build=$BUILD
+          package=$PACKAGE
+          sign=$SIGN
+          upload=$UPLOAD
+          artifact_id=${ARTIFACT_ID:-}
+          apk_file=${APK_FILE:-}
+          apk_sha256=${APK_SHA:-}
+          apk_size=${APK_SIZE:-}
           signer_sha256=$EXPECTED_SIGNER_SHA256
           stable_publish=FORBIDDEN
-          verdict=PASS
+          verdict=$verdict
           EOF
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add ops/beta-release-candidate-result.txt
-          git commit -m 'ops: record Beta48 exact signed candidate'
+          git commit -m "ops: observe Beta48 candidate $verdict" || true
           git pull --rebase origin agent/service-migration-m2
           git push origin HEAD:agent/service-migration-m2
+          [[ "$verdict" == PASS ]]
 
       - name: Cleanup signing material
         if: always()
