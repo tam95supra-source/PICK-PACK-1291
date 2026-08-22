@@ -29,3 +29,4 @@ else:
 # Beta49 pre-S56 cleanup: callbacks after session edits/corrections must not re-render
 # resource choices from PdaLocalProjection. S56 will still remove the primary editor local source.
 runpy.run_path(str(ROOT / "tools/apply_s55c_beta49_no_local_resource_callbacks.py"), run_name="__main__")
+runpy.run_path(str(ROOT / "tools/apply_s55d_beta49_stale_resource_context.py"), run_name="__main__")
