@@ -50,19 +50,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'versionCode = 57' app/build.gradle.kts
-          grep -q 'versionName = "0.4.2-beta.51"' app/build.gradle.kts
+          grep -Fq 'versionCode = 57' app/build.gradle.kts
+          grep -Fq 'versionName = "0.4.2-beta.51"' app/build.gradle.kts
           f=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          grep -q 'Phát lại user pick' "$f"
-          grep -q 'Phát lại user pack' "$f"
-          grep -q 'User Pick hy1.outbound' "$f"
-          grep -q 'mutableListOf("Không dùng")' "$f"
-          grep -q 'naturalUserCompare' "$f"
-          grep -q 'pdaSelectedPanel(pdas,pdaField' "$f"
-          ! grep -q 'Chọn gợi ý để hiện đầy đủ Seri PDA' "$f"
-          ! grep -q 'Không dùng User hy1.outbound' "$f"
-          ! grep -q 'PHÁT LẠI USER ĐÃ DÙNG' "$f"
-          ! grep -q 'ẨN USER TRÙNG' "$f"
+          grep -Fq 'Phát lại user pick' "$f"
+          grep -Fq 'Phát lại user pack' "$f"
+          grep -Fq 'User Pick hy1.outbound' "$f"
+          grep -Fq 'mutableListOf("Không dùng")' "$f"
+          grep -Fq 'naturalUserCompare' "$f"
+          grep -Fq 'pdaSelectedPanel(pdas,pdaField' "$f"
+          ! grep -Fq 'Chọn gợi ý để hiện đầy đủ Seri PDA' "$f"
+          ! grep -Fq 'Không dùng User hy1.outbound' "$f"
+          ! grep -Fq 'PHÁT LẠI USER ĐÃ DÙNG' "$f"
+          ! grep -Fq 'ẨN USER TRÙNG' "$f"
           python3 - <<'PY'
           from pathlib import Path
           s=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text()
@@ -74,11 +74,15 @@ jobs:
           print('BETA51_ANDROID_CONTRACT=PASS')
           PY
       - name: Build Beta51 only
+        shell: bash
         run: |
+          set -euo pipefail
           gradle --no-daemon :app:assembleBetaRelease
           git diff --exit-code
       - name: Firebase BuildConfig gate
+        shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import pathlib,re
           t='\n'.join(p.read_text(errors='ignore') for p in list(pathlib.Path('app/build/generated').rglob('BuildConfig.java'))+list(pathlib.Path('app/build/generated').rglob('BuildConfig.kt')))
@@ -87,13 +91,17 @@ jobs:
           print('firebase_buildconfig=CONFIGURED')
           PY
       - name: Resolve build tools
+        shell: bash
         run: |
+          set -euo pipefail
           BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/36.0.0"; if [[ ! -x "$BT/aapt" || ! -x "$BT/apksigner" ]]; then BT=$(dirname "$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f -name apksigner -perm -u+x | sort -V | tail -1)"); fi
           test -x "$BT/aapt"; test -x "$BT/apksigner"; echo "BT=$BT" >> "$GITHUB_ENV"
       - name: Verify unsigned identity
+        shell: bash
         run: |
+          set -euo pipefail
           APK=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk; test -s "$APK"; "$BT/aapt" dump badging "$APK" >/tmp/badging
-          grep -q "package: name='$EXPECTED_PACKAGE'" /tmp/badging; grep -q "versionCode='$EXPECTED_CODE'" /tmp/badging; grep -q "versionName='$EXPECTED_VERSION'" /tmp/badging
+          grep -Fq "package: name='$EXPECTED_PACKAGE'" /tmp/badging; grep -Fq "versionCode='$EXPECTED_CODE'" /tmp/badging; grep -Fq "versionName='$EXPECTED_VERSION'" /tmp/badging
       - name: Sign exact Beta51
         id: sign
         shell: bash
@@ -103,7 +111,7 @@ jobs:
           KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64"|base64 -d >"$KS"; printf '%s' "$SIGNING_STORE_PASSWORD">"$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD">"$RUNNER_TEMP/key.pass"
           mkdir -p dist/beta51; OUT="dist/beta51/pick-pack-1291-public-beta-${EXPECTED_VERSION}.apk"
           "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          "$BT/apksigner" verify --verbose --print-certs "$OUT" >/tmp/certs; grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/certs
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" >/tmp/certs; grep -Fiq "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/certs
           SHA=$(sha256sum "$OUT"|awk '{print $1}'); SIZE=$(stat -c '%s' "$OUT"); NAME=$(basename "$OUT")
           printf '%s  %s\n' "$SHA" "$NAME">"dist/beta51/SHA256SUMS-${EXPECTED_VERSION}.txt"
           printf 'source_sha=%s\nversion=%s\nversion_code=%s\npackage=%s\nsigner_sha256=%s\napk_name=%s\napk_sha256=%s\napk_size=%s\nstable=UNTOUCHED\nbeta49=ABANDONED\nverdict=PASS\n' "$SOURCE_SHA" "$EXPECTED_VERSION" "$EXPECTED_CODE" "$EXPECTED_PACKAGE" "$EXPECTED_SIGNER_SHA256" "$NAME" "$SHA" "$SIZE" >dist/beta51/CANDIDATE_MANIFEST.txt
@@ -124,7 +132,9 @@ jobs:
           APK_SIZE: ${{ steps.sign.outputs.size }}
           APK_NAME: ${{ steps.sign.outputs.name }}
           ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        shell: bash
         run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_SIGNED_RUN finish run=${GITHUB_RUN_ID} source_sha=${SOURCE_SHA} job=${{ job.status }} artifact=${ARTIFACT_ID:-NONE} apk=${APK_NAME:-NONE} sha256=${APK_SHA:-NONE} size=${APK_SIZE:-NONE}"
       - name: Cleanup signing material
         if: always()
+        shell: bash
         run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
