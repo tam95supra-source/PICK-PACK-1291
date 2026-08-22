@@ -1,10 +1,11 @@
-build=2026-08-22T09:33:30+07:00
+build=2026-08-22T09:35:30+07:00
 target=0.4.2-beta.47
 version_code=53
 base=Beta46
-change=Sheet operational model alignment, readable full audit, pending history delete, concise sync, APP+WEB connections
-retry_seq=5
-retry_reason=bind candidate to exact final readable-delete-audit Service source
+change=Sheet operational model alignment, readable full audit, pending history delete, concise sync, APP+WEB connections, catalog realtime
+retry_seq=6
+retry_reason=bind candidate to frozen final Service source
+source_frozen=YES
 publish_ota=AFTER_PASS_MANUAL_CHECK_ONLY
 drive_backup=REQUIRED_BETA47_PLUS
 stable_publish=FORBIDDEN
