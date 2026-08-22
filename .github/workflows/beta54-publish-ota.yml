@@ -1,0 +1,226 @@
+name: Beta54 Publish OTA
+on:
+  push:
+    branches: [stabilization/beta48-golden-reset-beta50-20260822]
+    paths: ['.github/workflows/beta54-publish-ota.yml']
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+concurrency:
+  group: beta54-publish-ota
+  cancel-in-progress: false
+jobs:
+  publish-ota:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SIGNED_RUN_ID: '32583881510'
+      SIGNED_ARTIFACT_ID: '9925284720'
+      SOURCE_SHA: a0a4c73fd5564afe083a563078d8927b00710694
+      VERSION: 0.4.2-beta.54
+      VERSION_CODE: '60'
+      PREVIOUS_VERSION: 0.4.2-beta.53
+      TAG: v0.4.2-beta.54-publicbeta
+      APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.54.apk
+      ARTIFACT_NAME: pick-pack-1291-public-beta-0.4.2-beta.54-signed-candidate
+      EXPECTED_SHA: 77639236c72ad6d5f9a74742d0f84265854f3f97a25808c8ab78b4269c96893e
+      EXPECTED_SIZE: '13020342'
+      EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+      GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+      GAS_SCRIPT_ID: ${{ secrets.GAS_SCRIPT_ID }}
+      GAS_DEPLOYMENT_ID: ${{ secrets.GAS_DEPLOYMENT_ID }}
+    steps:
+      - name: Start receipt
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA54_PUBLISH_OTA start run=${GITHUB_RUN_ID} signed_run=${SIGNED_RUN_ID} source_sha=${SOURCE_SHA}"
+
+      - uses: actions/checkout@v4
+        with: {ref: '${{ env.SOURCE_SHA }}', fetch-depth: 0}
+
+      - name: Download and prove exact signed candidate
+        id: candidate
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SIGNED_RUN_ID}/artifacts?per_page=100" >/tmp/artifacts.json
+          ARTIFACT_ID=$(jq -r --arg n "$ARTIFACT_NAME" '.artifacts[]|select(.name==$n and .expired==false)|.id' /tmp/artifacts.json|head -1)
+          [[ "$ARTIFACT_ID" == "$SIGNED_ARTIFACT_ID" ]]
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" >/tmp/candidate.zip
+          rm -rf /tmp/candidate; mkdir -p /tmp/candidate; unzip -q /tmp/candidate.zip -d /tmp/candidate
+          APK=/tmp/candidate/$APK_NAME; MANIFEST=/tmp/candidate/CANDIDATE_MANIFEST.txt; SUM=/tmp/candidate/SHA256SUMS-$VERSION.txt
+          test -s "$APK"; test -s "$MANIFEST"; test -s "$SUM"
+          grep -qx "source_sha=$SOURCE_SHA" "$MANIFEST"
+          grep -qx "version=$VERSION" "$MANIFEST"
+          grep -qx "version_code=$VERSION_CODE" "$MANIFEST"
+          grep -qx "package=$EXPECTED_PACKAGE" "$MANIFEST"
+          grep -qx "signer_sha256=$EXPECTED_SIGNER_SHA256" "$MANIFEST"
+          grep -qx "apk_sha256=$EXPECTED_SHA" "$MANIFEST"
+          grep -qx "apk_size=$EXPECTED_SIZE" "$MANIFEST"
+          grep -qx 'stable=UNTOUCHED' "$MANIFEST"
+          grep -qx 'beta49=ABANDONED' "$MANIFEST"
+          grep -qx "previous_beta=$PREVIOUS_VERSION" "$MANIFEST"
+          grep -qx 'verdict=PASS' "$MANIFEST"
+          [[ "$(sha256sum "$APK"|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          [[ "$(stat -c '%s' "$APK")" == "$EXPECTED_SIZE" ]]
+          grep -qx "$EXPECTED_SHA  $APK_NAME" "$SUM"
+          echo "artifact_id=$ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "sum=$SUM" >> "$GITHUB_OUTPUT"
+
+      - name: Verify package version and locked signer
+        shell: bash
+        env: {APK: '${{ steps.candidate.outputs.apk }}'}
+        run: |
+          set -euo pipefail
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/36.0.0"
+          if [[ ! -x "$BT/aapt" || ! -x "$BT/apksigner" ]]; then BT=$(dirname "$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f -name apksigner -perm -u+x|sort -V|tail -1)"); fi
+          test -x "$BT/aapt"; test -x "$BT/apksigner"
+          "$BT/aapt" dump badging "$APK" >/tmp/badge.txt
+          grep -Fq "package: name='$EXPECTED_PACKAGE'" /tmp/badge.txt
+          grep -Fq "versionCode='$VERSION_CODE'" /tmp/badge.txt
+          grep -Fq "versionName='$VERSION'" /tmp/badge.txt
+          "$BT/apksigner" verify --verbose --print-certs "$APK" >/tmp/cert.txt
+          grep -Fiq "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+
+      - name: Publish GitHub prerelease and read back exact APK
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.candidate.outputs.apk }}
+          MANIFEST: ${{ steps.candidate.outputs.manifest }}
+          SUM: ${{ steps.candidate.outputs.sum }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            rm -rf /tmp/existing; mkdir /tmp/existing
+            gh release download "$TAG" -p "$APK_NAME" -D /tmp/existing --clobber
+            [[ "$(sha256sum /tmp/existing/$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+            [[ "$(stat -c '%s' /tmp/existing/$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          else
+            gh release create "$TAG" "$APK#$APK_NAME" "$SUM#$(basename "$SUM")" "$MANIFEST#CANDIDATE_MANIFEST.txt" --target "$SOURCE_SHA" --title "Pick Pack 1291 $VERSION" --prerelease --notes "Beta54: RA CA local-first bền vững; số chờ đồng bộ chỉ tính mutation thực sự retryable; chi tiết Mạng/Đồng bộ/Dịch vụ theo trạng thái thực; Settings bổ sung version, integrity, log; SUPERADMIN có thử nghiệm lỗi service theo thiết bị. Stable không thay đổi; Beta49 tiếp tục bị loại."
+          fi
+          rm -rf /tmp/release-check; mkdir /tmp/release-check
+          gh release download "$TAG" -p "$APK_NAME" -D /tmp/release-check --clobber
+          [[ "$(sha256sum /tmp/release-check/$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          [[ "$(stat -c '%s' /tmp/release-check/$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/tmp/release.json
+          jq -e --arg t "$TAG" --arg n "$APK_NAME" '.prerelease==true and .draft==false and .tag_name==$t and ([.assets[]|select(.name==$n)]|length)==1' /tmp/release.json >/dev/null
+          echo "id=$(jq -r .id /tmp/release.json)" >> "$GITHUB_OUTPUT"
+          echo "published_at=$(jq -r .published_at /tmp/release.json)" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout canonical GAS source
+        uses: actions/checkout@v4
+        with:
+          ref: agent/service-migration-m2
+          path: gas-source
+          fetch-depth: 0
+
+      - name: Materialize Beta54 OTA metadata into GAS
+        shell: bash
+        env: {PUBLISHED_AT: '${{ steps.release.outputs.published_at }}'}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path('gas-source'); v=os.environ['VERSION']; tag=os.environ['TAG']; name=os.environ['APK_NAME']
+          m={'source':'GITHUB_RELEASE','channel':'BETA','version_name':v,'version_code':int(os.environ['VERSION_CODE']),'apk_name':name,'apk_url':f'https://github.com/{os.environ["GITHUB_REPOSITORY"]}/releases/download/{tag}/{name}','sha256':os.environ['EXPECTED_SHA'].lower(),'size':int(os.environ['EXPECTED_SIZE']),'published_at':os.environ['PUBLISHED_AT'],'notes':'Beta54: RA CA local-first; pending count thực; trạng thái Mạng/Đồng bộ/Dịch vụ thực; Settings và kiểm thử lỗi service SUPERADMIN theo thiết bị. Stable không thay đổi.','mandatory':False,'retention':10}
+          (root/'ops/beta-ota-current.json').write_text(json.dumps(m,ensure_ascii=False,indent=2)+'\n')
+          PY
+          cd gas-source
+          python3 -m py_compile tools/apply_s46_gas_auth.py tools/apply_github_ota_canonical.py
+          python3 tools/apply_s46_gas_auth.py
+          python3 tools/apply_github_ota_canonical.py
+          grep -q 'PP_GITHUB_RELEASE_OTA_CANONICAL_V1' google-apps-script/PICK_PACK_API.gs
+          cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
+          cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
+          node --check /tmp/PICK_PACK_API.js
+          node --check /tmp/SERVICE_MIGRATION_M2.js
+
+      - name: Exchange OAuth and deploy Apps Script
+        id: gas
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN GAS_SCRIPT_ID GAS_DEPLOYMENT_ID; do test -n "${!v:-}"; done
+          SCRIPT_ID=$(printf '%s' "$GAS_SCRIPT_ID"|tr -d '\r\n\t ')
+          RAW=$(printf '%s' "$GAS_DEPLOYMENT_ID"|tr -d '\r\n\t ')
+          DEPLOYMENT_ID="$RAW"; if [[ "$RAW" =~ /s/([^/]+)/ ]]; then DEPLOYMENT_ID="${BASH_REMATCH[1]}"; fi
+          RESP=$(curl -fsS https://oauth2.googleapis.com/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode 'grant_type=refresh_token')
+          TOKEN=$(python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))' <<<"$RESP")
+          test -n "$TOKEN"; echo "::add-mask::$TOKEN"
+          python3 - <<'PY'
+          import json,pathlib
+          b=pathlib.Path('gas-source/google-apps-script'); files=[]
+          for p in sorted(b.glob('*.gs')): files.append({'name':p.stem,'type':'SERVER_JS','source':p.read_text()})
+          files.append({'name':'appsscript','type':'JSON','source':(b/'appsscript.json').read_text()})
+          pathlib.Path('/tmp/content.json').write_text(json.dumps({'files':files},ensure_ascii=False))
+          PY
+          H=$(curl -sS -o /tmp/content.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/content.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/content")
+          [[ "$H" == 200 ]] || { cat /tmp/content.out; exit 1; }
+          H=$(curl -sS -o /tmp/version.json -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"description":"Pick Pack 1291 Beta54 OTA"}' "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions")
+          [[ "$H" == 200 ]] || { cat /tmp/version.json; exit 1; }
+          V=$(jq -r .versionNumber /tmp/version.json)
+          jq -nc --arg sid "$SCRIPT_ID" --argjson v "$V" '{deploymentConfig:{scriptId:$sid,versionNumber:$v,manifestFileName:"appsscript",description:"Pick Pack 1291 Beta54 OTA"}}' >/tmp/deploy.json
+          H=$(curl -sS -o /tmp/deploy.out -w '%{http_code}' -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @/tmp/deploy.json "https://script.googleapis.com/v1/projects/$SCRIPT_ID/deployments/$DEPLOYMENT_ID")
+          [[ "$H" == 200 ]] || { cat /tmp/deploy.out; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Live OTA E2E
+        id: e2e
+        shell: bash
+        run: |
+          set -euo pipefail
+          check(){ local current="$1" want="$2" channel="$3" out="$4"; curl -sSL --connect-timeout 20 --max-time 90 -o "$out" -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"update_check\",\"channel\":\"$channel\",\"current_version\":\"$current\"}"; }
+          good=false
+          for n in $(seq 1 30); do
+            code=$(check "$PREVIOUS_VERSION" yes BETA /tmp/update.json || true)
+            if [[ "$code" == 200 ]] && python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/update.json'))
+          avail=j.get('available',j.get('update_available'))
+          ok=(j.get('ok') is True and avail is True and str(j.get('version_name',j.get('version','')))==os.environ['VERSION'] and int(j.get('version_code',-1))==int(os.environ['VERSION_CODE']) and str(j.get('sha256','')).lower()==os.environ['EXPECTED_SHA'].lower() and int(j.get('size',-1))==int(os.environ['EXPECTED_SIZE']) and str(j.get('apk_url','')).startswith('https://github.com/'))
+          raise SystemExit(0 if ok else 1)
+          PY
+            then good=true; break; fi
+            sleep 5
+          done
+          $good
+          URL=$(python3 -c "import json; j=json.load(open('/tmp/update.json')); print(j.get('apk_url',''))")
+          test -n "$URL"; curl -fL --connect-timeout 20 --max-time 180 "$URL" -o /tmp/live.apk
+          [[ "$(sha256sum /tmp/live.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          [[ "$(stat -c '%s' /tmp/live.apk)" == "$EXPECTED_SIZE" ]]
+          code=$(check "$VERSION" no BETA /tmp/self.json); [[ "$code" == 200 ]]
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/self.json')); assert j.get('ok') is True; assert j.get('available',j.get('update_available')) is not True
+          PY
+          code=$(check '0.4.2-beta.49' yes BETA /tmp/b49.json); [[ "$code" == 200 ]]
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/b49.json')); assert j.get('ok') is True; assert j.get('available',j.get('update_available')) is True; assert str(j.get('version_name',j.get('version','')))==os.environ['VERSION']
+          PY
+          code=$(check '0.1.0-stable' no STABLE /tmp/stable.json); [[ "$code" == 200 ]]
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/stable.json')); assert j.get('ok') is True; assert j.get('available',j.get('update_available')) is not True
+          PY
+          echo OTA_E2E=PASS
+
+      - name: Finish receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          GAS_VERSION: ${{ steps.gas.outputs.version }}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA54_PUBLISH_OTA finish run=${GITHUB_RUN_ID} job=${{ job.status }} signed_artifact=${SIGNED_ARTIFACT_ID} apk_sha256=${EXPECTED_SHA} apk_size=${EXPECTED_SIZE} release_id=${RELEASE_ID:-NONE} gas_version=${GAS_VERSION:-NONE} url=${RELEASE_URL:-NONE} stable=UNTOUCHED main=UNTOUCHED"
