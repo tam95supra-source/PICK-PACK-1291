@@ -28,6 +28,7 @@ class M2ServiceTransport(context: Context) {
     private val connectivity = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     fun loginFromPassword(loginId: String, password: String) {
+        if (ServiceFaultInjection.cloudflareDisabled(app)) return
         if (!hasNetwork()) return
         val d = discover(force = true) ?: return
         if (d.optString("authority_mode") != "SERVICE_PRIMARY") return
@@ -108,6 +109,7 @@ class M2ServiceTransport(context: Context) {
     /** Direct Service read using cached discovery only. A Service failure is handled, never a GAS fall-through. */
     fun sync(action: String, payload: JSONObject): TransportResult {
         if (action !in SYNC_ACTIONS) return TransportResult(false, false, 0, null, null)
+        if (ServiceFaultInjection.cloudflareDisabled(app)) return TransportResult(true,false,-1,null,"TEST_CLOUDFLARE_DISABLED")
         if (!hasNetwork()) return TransportResult(true, false, -1, null, "OFFLINE_LOCAL")
         val discovery = cachedDiscoverySnapshot() ?: return TransportResult(true, false, 0, null, "DISCOVERY_WARMING")
         val mode = discovery.optString("authority_mode")
@@ -150,6 +152,11 @@ class M2ServiceTransport(context: Context) {
 
     private fun flushOutboxLocked(): Boolean {
         if (!hasNetwork()) return false
+        if(ServiceFaultInjection.cloudflareDisabled(app)){
+            // Fault injection simulates provider loss only. Do not bypass the authority fence or
+            // manufacture a Google write authority while production still says SERVICE_PRIMARY.
+            return false
+        }
         var discovery=cachedDiscoverySnapshot();if(discovery==null)discovery=discover(force=true);if(discovery==null)return false
         if(discovery.optString("authority_mode")=="GOOGLE_FALLBACK")return flushFallbackItems(store.unresolvedMutations(100))
         if(discovery.optString("authority_mode")!="SERVICE_PRIMARY")return false
@@ -179,6 +186,7 @@ class M2ServiceTransport(context: Context) {
     fun discoverySnapshot(): JSONObject? = cachedDiscoverySnapshot()
 
     private fun flushFallbackItems(items: List<OperationalDataStore.PendingMutation>): Boolean {
+        if (ServiceFaultInjection.googleDisabled(app)) return false
         if (items.isEmpty()) return true
         val gasToken = app.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE).getString(AUTH_TOKEN, null).orEmpty()
         if (gasToken.isBlank()) return false
@@ -200,6 +208,7 @@ class M2ServiceTransport(context: Context) {
             .put("projection", projection).put("result", JSONObject().put("event_id", eventId)), null)
 
     private fun discover(force: Boolean = false): JSONObject? {
+        if(ServiceFaultInjection.googleDisabled(app)) return cachedDiscoverySnapshot()
         val now = System.currentTimeMillis()
         if (!force) {
             val cachedAt = prefs.getLong(KEY_DISCOVERY_AT, 0L); val cached = prefs.getString(KEY_DISCOVERY_JSON, null)
@@ -227,6 +236,8 @@ class M2ServiceTransport(context: Context) {
 
     private data class HttpResult(val ok: Boolean, val code: Int, val json: JSONObject?, val error: String?)
     private fun httpJson(endpoint: String, payload: JSONObject, bearer: String?, requireServiceHost: Boolean = true): HttpResult {
+        if(requireServiceHost && ServiceFaultInjection.cloudflareDisabled(app)) return HttpResult(false,-1,null,"TEST_CLOUDFLARE_DISABLED")
+        if(!requireServiceHost && ServiceFaultInjection.googleDisabled(app)) return HttpResult(false,-1,null,"TEST_GOOGLE_DISABLED")
         if (requireServiceHost && !validServiceUrl(endpoint.substringBefore("/v1/"))) return HttpResult(false, -1, null, "SERVICE_URL_INVALID")
         var conn: HttpURLConnection? = null
         return try {
@@ -239,6 +250,7 @@ class M2ServiceTransport(context: Context) {
     }
 
     private fun httpGetJson(endpoint:String,bearer:String?):HttpResult{
+        if(ServiceFaultInjection.cloudflareDisabled(app))return HttpResult(false,-1,null,"TEST_CLOUDFLARE_DISABLED")
         if(!validServiceUrl(endpoint.substringBefore("/v1/")))return HttpResult(false,-1,null,"SERVICE_URL_INVALID")
         var conn:HttpURLConnection?=null
         return try{

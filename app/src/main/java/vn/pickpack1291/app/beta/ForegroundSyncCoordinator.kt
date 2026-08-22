@@ -37,6 +37,9 @@ class ForegroundSyncCoordinator(
         val retentionFloor: String = "",
         val retentionEpoch: Long = 0L,
         val dayRevisions: JSONObject = JSONObject(),
+        val replicationState:String = "",
+        val replicationPending:Int = 0,
+        val replicationLastSuccessAt:String = "",
     )
 
     interface Listener {
@@ -173,6 +176,9 @@ class ForegroundSyncCoordinator(
                                 retentionFloor = body.optString("retention_floor").ifBlank { body.optString("server_retention_floor") },
                                 retentionEpoch = body.optLong("retention_epoch", 0L),
                                 dayRevisions = body.optJSONObject("day_revisions") ?: JSONObject(),
+                                replicationState = body.optJSONObject("replication")?.optString("state").orEmpty(),
+                                replicationPending = body.optJSONObject("replication")?.optInt("pending_count",0) ?: 0,
+                                replicationLastSuccessAt = body.optJSONObject("replication")?.optString("last_success_at").orEmpty(),
                             )
                         )
                     }

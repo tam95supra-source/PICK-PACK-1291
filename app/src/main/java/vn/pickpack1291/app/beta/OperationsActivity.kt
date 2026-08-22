@@ -31,6 +31,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class OperationsActivity : Activity() {
+    // S57_BETA54_OWNER_RESILIENCE_FIX
     // S56_BETA53_OWNER_UI_STATUS_FIX
     // S55_BETA51_OWNER_REFRESH_HISTORY_FIX
     // S54_BETA48_OWNER_10_FIXES
@@ -82,6 +83,9 @@ class OperationsActivity : Activity() {
     private var lastConnected: Boolean? = null
     private var lastSyncLatencyMs: Long? = null // S33_OWNER_UI_SYNC_RESOURCES
     private var lastProjectionPending: Int = 0
+    private var lastReplicationState:String = ""
+    private var lastReplicationPending:Int = 0
+    private var lastReplicationSuccessAt:String = ""
     private var historySyncInFlight=false // S35_OWNER_UI_HISTORY_CONSISTENCY
     private var historyLastCanonicalRefreshAt=0L
     private var manualRefreshInFlight=false
@@ -112,6 +116,9 @@ class OperationsActivity : Activity() {
                 lastConnected = status.connected
                 lastSyncLatencyMs = status.latencyMs
                 lastProjectionPending = status.projectionPending.coerceAtLeast(0)
+                lastReplicationState = status.replicationState
+                lastReplicationPending = status.replicationPending.coerceAtLeast(0)
+                lastReplicationSuccessAt = status.replicationLastSuccessAt
                 lastLatencyMs = status.latencyMs
                 lastSyncE2eMs = status.syncE2eMs
                 serviceProviderCache = serviceProviderFromRuntime()
@@ -507,7 +514,7 @@ class OperationsActivity : Activity() {
         if(activeLabor!=null){body.addView(status("CÒN CÔNG NHẬT ĐANG LÀM",orange,Color.rgb(255,247,230)));body.addView(gap(4));body.addView(info("${activeLabor.optString("labor_type")} • bắt đầu ${formatIso(activeLabor.optString("start_at"))}. Phải hoàn thành công nhật trước khi ra ca."));body.addView(gap(8))}
         addSessionTimeline(body,mnv);body.addView(gap(9));body.addView(primary("THÊM / SỬA CÔNG VIỆC TRONG CA",orange){sessionWorkEditor(ctx)},matchWrap());body.addView(gap(6));if(isAdmin()){body.addView(smallButton("SỬA GIỜ VÀO CA",navy).apply{setOnClickListener{editAttendanceTime(ctx,"enter_at")}},matchWrap());body.addView(gap(8))}
         val exit=primary("RA CA",red){}
-        fun doExit(statusNow:String){exit.isEnabled=false;exit.text="ĐANG RA CA...";api.call("session_exit_guarded",JSONObject().put("session_id",ses.optString("session_id")).put("mnv",mnv).put("pda_exit_status",statusNow).put("idempotency_key",UUID.randomUUID().toString())){r->runOnUiThread{exit.isEnabled=true;exit.text="RA CA";if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"RA CA thất bại");return@runOnUiThread};TopNotice.show(this,"Đã ghi nhận ra ca.",TopNotice.Kind.SUCCESS);foregroundSync.requestSync();scheduleAttendanceAutoReset(mnv,employeeLookupGeneration)}}}
+        fun doExit(statusNow:String){exit.isEnabled=false;exit.text="ĐANG RA CA...";val eventId=UUID.randomUUID().toString();api.call("exit",JSONObject().put("event_id",eventId).put("mnv",mnv).put("pda_exit_status",statusNow).put("note","RA CA")){r->runOnUiThread{exit.isEnabled=true;exit.text="RA CA";if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"RA_CA_FAILED");return@runOnUiThread};TopNotice.show(this,if(r.code==202)"Đã ghi nhận ra ca trên PDA • đang đồng bộ" else "Đã ghi nhận ra ca.",TopNotice.Kind.SUCCESS);foregroundSync.requestSync();scheduleAttendanceAutoReset(mnv,employeeLookupGeneration)}}}
         exit.setOnClickListener{
             if(activeLabor!=null){showError("Còn công nhật đang làm. Hoàn thành công nhật trước khi ra ca.");return@setOnClickListener}
             if(pda.isBlank()){AlertDialog.Builder(this).setTitle("Xác nhận RA CA").setMessage("Không còn PDA/công nhật cần xử lý. Xác nhận kết thúc phiên?").setNegativeButton("Hủy",null).setPositiveButton("RA CA"){_,_->doExit("")}.show();return@setOnClickListener}
@@ -1122,14 +1129,49 @@ class OperationsActivity : Activity() {
             "Mã phiên bản" to BuildConfig.VERSION_CODE.toString()
         )))
         body.addView(section("CẬP NHẬT PHIÊN BẢN"))
+        body.addView(details(listOf(
+            "Phiên bản đang cài" to BuildConfig.VERSION_NAME,
+            "Mã phiên bản" to BuildConfig.VERSION_CODE.toString(),
+            "Kênh OTA" to BuildConfig.CHANNEL,
+            "Nguồn kiểm tra OTA" to "Google Apps Script",
+            "Kiểm tra APK" to "SHA-256 + chữ ký ứng dụng"
+        )))
+        body.addView(gap(7))
         body.addView(primary("KIỂM TRA CẬP NHẬT",teal){UpdateManager.openManual(this)},matchWrap())
         body.addView(gap(10))
-        body.addView(section("Nhật ký"))
+        body.addView(section("NHẬT KÝ"))
+        val logCounts=runCatching{operationalStore.mutationStatusCounts()}.getOrDefault(OperationalDataStore.MutationStatusCounts(0,0,0,0))
+        body.addView(details(listOf(
+            "Nhật ký trên thiết bị" to LocalLogManager.summary(this),
+            "Đang chờ gửi" to logCounts.pending.toString(),
+            "Cần kiểm tra" to logCounts.review.toString(),
+            "Bị từ chối" to logCounts.rejected.toString(),
+            "Đích gửi báo lỗi" to "Google Drive qua GAS"
+        )))
+        body.addView(gap(7))
         body.addView(primary("GỬI BÁO LỖI",teal){sendDiagnostic()},matchWrap())
+        if(isActualSuper()){
+            body.addView(gap(10));body.addView(section("THỬ NGHIỆM LỖI SERVICE"))
+            val fault=ServiceFaultInjection.mode(this)
+            body.addView(details(listOf(
+                "Chế độ hiện tại" to fault.label,
+                "Cloudflare" to if(ServiceFaultInjection.cloudflareDisabled(this))"Tắt thử nghiệm" else "Bình thường",
+                "Google Drive" to if(ServiceFaultInjection.googleDisabled(this))"Tắt thử nghiệm" else "Bình thường"
+            )))
+            body.addView(gap(7));body.addView(primary("CHỌN CHẾ ĐỘ THỬ NGHIỆM",orange){showServiceFaultModeDialog()},matchWrap())
+        }
         body.addView(gap(14))
         body.addView(primary("ĐĂNG XUẤT",red){api.call("logout"){runOnUiThread{api.clearSession();startActivity(android.content.Intent(this,FullBetaActivity::class.java).apply{addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)});finish();overridePendingTransition(0,0)}}},matchWrap())
         attach(root,body)
     }
+    private fun showServiceFaultModeDialog(){
+        if(!isActualSuper()){showError("SUPERADMIN_REQUIRED");return}
+        val modes=ServiceFaultInjection.Mode.entries.toTypedArray();val labels=modes.map{it.label}.toTypedArray();var selected=modes.indexOf(ServiceFaultInjection.mode(this)).coerceAtLeast(0)
+        AlertDialog.Builder(this).setTitle("Thử nghiệm lỗi service").setSingleChoiceItems(labels,selected){_,which->selected=which}.setNegativeButton("HỦY",null).setPositiveButton("ÁP DỤNG"){_,_->
+            ServiceFaultInjection.setMode(this,modes[selected]);M2ImmediateOutbox.kick(this);foregroundSync.requestSync();TopNotice.show(this,"Đã áp dụng: ${modes[selected].label}",TopNotice.Kind.INFO);settingsScreen()
+        }.show()
+    }
+
     private fun themePicker()=row(surface).apply{
         gravity=Gravity.CENTER
         setPadding(dp(5),dp(8),dp(5),dp(8))
@@ -1292,19 +1334,46 @@ class OperationsActivity : Activity() {
     private fun hideKeyboardForResult(root:View,input:EditText){input.clearFocus();root.isFocusableInTouchMode=true;root.requestFocus();input.post{hideSoftKeyboard(input)}}
     private fun bytesVi(v:Long):String=when{v<1024->"$v byte";v<1024L*1024->String.format(java.util.Locale.US,"%.1f KB",v/1024.0);else->String.format(java.util.Locale.US,"%.1f MB",v/(1024.0*1024.0))}
     private fun statusTimeVi(v:Long):String=if(v<=0L)"Chưa có" else runCatching{java.time.Instant.ofEpochMilli(v).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}.getOrDefault("Chưa có")
-    private fun authorityViHeader(v:String):String=when(v.uppercase()){ "SERVICE_PRIMARY"->"Cloudflare là dịch vụ chính";"GOOGLE_FALLBACK"->"Google Drive đang dự phòng";"RECONCILING"->"Đang đối chiếu lại dữ liệu";"OFFLINE_LOCAL"->"Chỉ làm việc trên PDA";else->"Chưa xác định" }
-    private fun routeViHeader(v:String):String=when(v.uppercase()){ "SERVICE_D1_DIRECT"->"Kết nối trực tiếp Cloudflare";"SERVICE_D1_PENDING"->"Cloudflare đang chờ đồng bộ";"GOOGLE_FALLBACK","GAS_COMPAT"->"Kết nối Google Drive dự phòng";"UNRESOLVED"->"Chưa xác định đường kết nối";else->if(v.isBlank())"Chưa xác định" else "Đang xử lý kết nối" }
-    private fun runtimeErrorVi(v:String):String{val x=v.uppercase();return when{v.isBlank()->"Không có lỗi gần nhất";x.contains("SESSION_EXCHANGE")->"Chưa tạo được phiên kết nối tới Cloudflare";x.contains("DISCOVERY_WARMING")->"Ứng dụng đang xác định dịch vụ dữ liệu";x.contains("SERVICE_SESSION_UNAVAILABLE")->"Phiên Cloudflare chưa sẵn sàng";x.contains("AUTHORITY_NOT_SERVICE_PRIMARY")->"Cloudflare hiện không giữ quyền ghi chính";x.contains("NETWORK")||x.contains("TIMEOUT")->"Kết nối mạng tới dịch vụ bị gián đoạn";else->"Có lỗi kết nối gần nhất; bấm làm mới để kiểm tra lại"}}
+    private fun authorityViHeader(v:String):String=when(v.uppercase()){ "SERVICE_PRIMARY"->"Cloudflare / D1";"GOOGLE_FALLBACK"->"Google Drive";"RECONCILING"->"Đang đối chiếu";"OFFLINE_LOCAL"->"PDA local";else->"Chưa xác định" }
+    private fun routeViHeader(v:String):String=when(v.uppercase()){ "SERVICE_D1_DIRECT"->"Cloudflare trực tiếp";"SERVICE_D1_PENDING"->"Cloudflare chưa xác nhận";"GOOGLE_FALLBACK","GAS_COMPAT"->"Google Drive";"UNRESOLVED"->"Chưa xác định";else->if(v.isBlank())"Chưa xác định" else v }
+    private fun replicaViHeader(v:String):String=when(v.uppercase()){ "SYNCED","HEALTHY","OK"->"Đã sao chép";"PENDING","INFLIGHT","RUNNING"->"Đang sao chép";"RETRY"->"Chờ gửi lại";"ERROR","FAILED"->"Lỗi";else->if(v.isBlank())"Chưa có trạng thái" else v }
+    private fun runtimeErrorVi(v:String):String{val x=v.uppercase();return when{v.isBlank()->"Không có";x.contains("TEST_CLOUDFLARE_DISABLED")->"Cloudflare đang tắt thử nghiệm";x.contains("TEST_GOOGLE_DISABLED")->"Google Drive đang tắt thử nghiệm";x.contains("SESSION_EXCHANGE")->"Không tạo được phiên Cloudflare";x.contains("SERVICE_SESSION_UNAVAILABLE")->"Phiên Cloudflare chưa sẵn sàng";x.contains("AUTHORITY_NOT_SERVICE_PRIMARY")->"Cloudflare không giữ quyền ghi";x.contains("NETWORK")||x.contains("TIMEOUT")->"Lỗi kết nối";else->v.take(120)}}
     private fun showHeaderStatusDetail(kind:String){
-        val runtime=api.runtimeStatus();val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(lastProjectionPending);val flow=SyncDirectionTracker.snapshot();val provider=serviceProviderFromRuntime();val network=when(lastConnected){true->"Đang kết nối";false->"Mất kết nối";null->"Chưa kiểm tra"}
+        val runtime=api.runtimeStatus();val counts=runCatching{operationalStore.mutationStatusCounts()}.getOrDefault(OperationalDataStore.MutationStatusCounts(0,0,0,0));val flow=SyncDirectionTracker.snapshot();val provider=serviceProviderFromRuntime();val net=DeviceNetworkStatus.snapshot(this);val fault=ServiceFaultInjection.mode(this)
         val title=when(kind){"NETWORK"->"Chi tiết Mạng";"SYNC"->"Chi tiết Đồng bộ";else->"Chi tiết Dịch vụ"}
         val rows=when(kind){
-            "NETWORK"->listOf("Trạng thái" to network,"Độ trễ" to (lastSyncLatencyMs?.let{"$it mili giây"}?:"Chưa đo"),"Lần kiểm tra gần nhất" to statusTimeVi(lastStatusUpdateAt),"Dịch vụ đang dùng" to provider)
-            "SYNC"->listOf("Trạng thái" to (if(pending>0)"Còn dữ liệu chờ đồng bộ" else if(flow.active)flow.label else if(lastConnected==true)"Đã đồng bộ" else "Đang chờ kết nối"),"Mục còn chờ" to pending.toString(),"Hoạt động hiện tại" to flow.label,"Đồng bộ gần nhất" to (lastSyncE2eMs?.let{"$it mili giây"}?:"Chưa đo"),"Dữ liệu đã gửi" to bytesVi(flow.uploadedBytes),"Dữ liệu đã nhận" to bytesVi(flow.downloadedBytes),"Dịch vụ đang dùng" to provider)
-            else->listOf("Dịch vụ đang dùng" to provider,"Chế độ dữ liệu" to authorityViHeader(runtime.optString("authority_mode")),"Tuyến kết nối" to routeViHeader(runtime.optString("route")),"Phiên dịch vụ" to (if(runtime.optBoolean("service_session",false))"Đã sẵn sàng" else "Chưa sẵn sàng"),"Tình trạng lỗi" to runtimeErrorVi(runtime.optString("last_error")),"Địa chỉ kết nối" to runtime.optString("service_url").ifBlank{"Không có khi OFFLINE"})
+            "NETWORK"->listOf(
+                "Loại kết nối" to net.transport,
+                "Internet" to when{!net.hasInternet->"Không có";net.validated->"Đã xác thực";else->"Có kết nối, chưa xác thực"},
+                "Mạng tính phí" to if(net.metered)"Có" else "Không",
+                "Độ trễ Cloudflare" to if(ServiceFaultInjection.cloudflareDisabled(this))"Tắt thử nghiệm" else (lastSyncLatencyMs?.let{"$it ms"}?:"Chưa đo"),
+                "Lần kiểm tra" to statusTimeVi(lastStatusUpdateAt)
+            )
+            "SYNC"->listOf(
+                "Trạng thái" to when{counts.pending>0->"Đang chờ gửi";flow.active->flow.label;lastConnected==true->"Hoàn tất";else->"Chưa kết nối"},
+                "Đang chờ gửi" to counts.pending.toString(),
+                "Cần kiểm tra" to counts.review.toString(),
+                "Bị từ chối" to counts.rejected.toString(),
+                "Đã xác nhận trên Service" to counts.confirmed.toString(),
+                "Google Drive chờ sao chép" to lastReplicationPending.toString(),
+                "Google Drive" to replicaViHeader(lastReplicationState),
+                "Google Drive sao chép gần nhất" to if(lastReplicationSuccessAt.isBlank())"Chưa có" else formatIso(lastReplicationSuccessAt),
+                "Dữ liệu đã gửi" to bytesVi(flow.uploadedBytes),
+                "Dữ liệu đã nhận" to bytesVi(flow.downloadedBytes)
+            )
+            else->listOf(
+                "Đang sử dụng" to provider,
+                "Cloudflare" to if(ServiceFaultInjection.cloudflareDisabled(this))"Tắt thử nghiệm" else if(provider=="Cloudflare")"Đang sử dụng" else "Không sử dụng",
+                "Google Drive" to if(ServiceFaultInjection.googleDisabled(this))"Tắt thử nghiệm" else replicaViHeader(lastReplicationState),
+                "Chế độ dữ liệu" to authorityViHeader(runtime.optString("authority_mode")),
+                "Tuyến kết nối" to routeViHeader(runtime.optString("route")),
+                "Phiên Cloudflare" to if(runtime.optBoolean("service_session",false))"Sẵn sàng" else "Chưa sẵn sàng",
+                "Chế độ thử nghiệm" to fault.label,
+                "Lỗi gần nhất" to runtimeErrorVi(runtime.optString("last_error")),
+                "Địa chỉ Cloudflare" to runtime.optString("service_url").ifBlank{"Chưa có"}
+            )
         }
-        val note=when(kind){"NETWORK"->"Mạng thể hiện khả năng ứng dụng liên lạc với hệ thống dữ liệu, không chỉ việc PDA có Wi‑Fi hay 4G.";"SYNC"->"Đồng bộ cho biết dữ liệu trên PDA đã được gửi lên và dữ liệu mới từ hệ thống đã được nhận về hay chưa.";else->"Cloudflare là dịch vụ chính; Google Drive là đường dự phòng; OFFLINE nghĩa là hiện tại ứng dụng không liên lạc được với dịch vụ dữ liệu."}
-        val box=column(surface).apply{setPadding(dp(14),dp(10),dp(14),dp(8));addView(details(rows),matchWrap());addView(gap(8));addView(info(note),matchWrap())}
+        val box=column(surface).apply{setPadding(dp(14),dp(10),dp(14),dp(8));addView(details(rows),matchWrap())}
         AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply{addView(box)}).setPositiveButton("ĐÓNG",null).show()
     }
 
@@ -1329,10 +1398,13 @@ class OperationsActivity : Activity() {
     }
 
     private fun serviceProviderFromRuntime():String{
-        if(lastConnected==false)return "OFFLINE"
+        val fault=ServiceFaultInjection.mode(this)
+        if(fault==ServiceFaultInjection.Mode.DISABLE_BOTH)return "OFFLINE"
         val st=api.runtimeStatus();val mode=st.optString("authority_mode");val route=st.optString("route");val url=st.optString("service_url")
+        if(ServiceFaultInjection.cloudflareDisabled(this)){return if(mode=="GOOGLE_FALLBACK"&&!ServiceFaultInjection.googleDisabled(this))"Google Drive" else "OFFLINE"}
+        if(lastConnected==false)return "OFFLINE"
         return when{
-            mode=="GOOGLE_FALLBACK"||route=="GOOGLE_FALLBACK"||route=="GAS_COMPAT"->"Google Drive"
+            mode=="GOOGLE_FALLBACK"||route=="GOOGLE_FALLBACK"||route=="GAS_COMPAT"->if(ServiceFaultInjection.googleDisabled(this))"OFFLINE" else "Google Drive"
             mode=="SERVICE_PRIMARY"||mode=="RECONCILING"||route.startsWith("SERVICE_")||url.isNotBlank()->"Cloudflare"
             else->"OFFLINE"
         }
@@ -1400,6 +1472,16 @@ class OperationsActivity : Activity() {
     private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}
     private fun showError(raw:String){val msg=when{
 raw.contains("EXCLUSIVE_RESOURCE_CONFLICT")->"Tài nguyên vừa bị phiên hoặc máy khác giữ / dùng trước. Bản ghi này không tự gửi lại để tránh cấp trùng. Hãy bấm đồng bộ, quét lại nhân sự và chọn tài nguyên còn trống.";
+raw.contains("ATTENDANCE_NOT_ACTIVE")||raw.contains("SESSION_NOT_ACTIVE")->"Không còn phiên đang hoạt động để ra ca. Hãy quét lại nhân sự và đồng bộ trạng thái.";
+raw.contains("SESSION_ACTIVE_AMBIGUOUS")->"Có nhiều phiên đang hoạt động cho cùng nhân sự. Không tự chọn phiên để tránh ghi sai dữ liệu.";
+raw.contains("SESSION_EMPLOYEE_MISMATCH")->"Phiên đang mở không khớp mã nhân viên. Hãy quét lại nhân sự.";
+raw.contains("OPEN_LABOR_BLOCKS_EXIT")->"Nhân sự còn công nhật chưa hoàn thành. Hoàn thành công nhật trước khi ra ca.";
+raw.contains("PDA_EXIT_STATUS_REQUIRED")->"Cần chọn tình trạng PDA hiện tại trước khi ra ca.";
+raw.contains("PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST")->"Tình trạng PDA hiện tại khác lúc nhận. Báo chuyên viên phụ trách trước khi ra ca.";
+raw.contains("STALE_BASE_VERSION")->"Dữ liệu phiên vừa thay đổi trên thiết bị khác. Ứng dụng sẽ đồng bộ lại; hãy quét lại nhân sự.";
+raw.contains("TEST_CLOUDFLARE_DISABLED")->"Cloudflare đang được tắt bằng chế độ thử nghiệm lỗi service.";
+raw.contains("TEST_GOOGLE_DISABLED")->"Google Drive đang được tắt bằng chế độ thử nghiệm lỗi service.";
+raw.contains("SERVICE_NOT_WRITE_AUTHORITY")->"Dịch vụ hiện tại không có quyền ghi dữ liệu.";
 raw.contains("PDA_IN_USE")->"PDA này đang được một phiên khác giữ. Hãy đồng bộ lại và chọn PDA khác.";
 raw.contains("USER_PICK_IN_USE")->"User Pick này đang được phiên khác giữ. Hãy chọn User Pick khác.";
 raw.contains("USER_PACK_IN_USE")->"User Pack này đang được phiên khác giữ. Hãy chọn User Pack khác.";
