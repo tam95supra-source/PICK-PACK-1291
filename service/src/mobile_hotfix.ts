@@ -1,6 +1,6 @@
 import { authenticate } from "./auth";
 import { currentAuthority } from "./core";
-import { ensureCurrentBangkokBusinessDate } from "./business_date";
+import { bangkokToday, ensureCurrentBangkokBusinessDate } from "./business_date";
 import { apiError, b64u, b64uDecode, hmacB64u, json, nowIso, readJsonBody } from "./util";
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec";
@@ -41,7 +41,6 @@ export async function exchangeGasSession(request:Request,env:Env):Promise<Respon
 
   const account=await env.DB.prepare("SELECT login_id,role,display_name,position,email,verifier_hash,status FROM accounts WHERE login_id=?1")
     .bind(String(payload.l)).first<{login_id:string;role:string;display_name:string;position:string;email:string;verifier_hash:string;status:string}>();
-  // GAS already validated the signed active session. D1 verifier replica freshness is not a transport gate.
   if(!account||account.status!=="ACTIVE"||account.role!==String(payload.r))return apiError("SESSION_EXCHANGE_ACCOUNT_MISMATCH","AUTH",401);
 
   const current=await env.DB.prepare("SELECT session_id,device_id FROM auth_sessions WHERE login_id=?1").bind(account.login_id).first<{session_id:string;device_id:string}>();
@@ -57,7 +56,7 @@ export async function exchangeGasSession(request:Request,env:Env):Promise<Respon
 }
 
 async function businessDate(db:D1Database):Promise<string>{
-  return ensureCurrentBangkokBusinessDate(db);
+  const date=bangkokToday();await ensureCurrentBangkokBusinessDate(db,date);return date;
 }
 
 function employeeJson(e:Employee|null){return e?{mnv:e.mnv,full_name:e.full_name,phone:e.phone,main_position:e.main_position,supplier:e.supplier,department:e.department,site:e.site,warehouse:e.warehouse,start_date:e.start_date,note:e.note}:null;}
@@ -75,8 +74,6 @@ async function resourceOptions(db:D1Database,date:string,mnv:string):Promise<Rec
   const picksRaw=(await db.prepare("SELECT resource_id FROM resources WHERE resource_type='USER_PICK' AND available=1 ORDER BY resource_id").all<{resource_id:string}>()).results??[];
   const user_picks=picksRaw.map(x=>x.resource_id).filter(id=>(!busy.has(`USER_PICK|${id}`)&&!used.has(`USER_PICK|${id}`))||id===current?.user_pick);
   const packsRaw=(await db.prepare("SELECT pack_table,shift,user_pack FROM resource_pack_map WHERE available=1 ORDER BY pack_table,shift,user_pack").all<{pack_table:string;shift:string;user_pack:string}>()).results??[];
-  // USER_PACK/PACK_TABLE availability is session-active, not once-per-calendar-day. Both shift mappings
-  // remain visible; an active lease still guarantees exactly one winner.
   const pack_tables=packsRaw.filter(x=>(!busy.has(`PACK_TABLE|${x.pack_table}`)&&!busy.has(`USER_PACK|${x.user_pack}`))||(x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack)).map(x=>({table:x.pack_table,shift:x.shift,user_pack:x.user_pack}));
   return{ok:true,business_date:date,pdas,user_picks,pack_tables,current};
 }
