@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 concurrency:
   group: beta50-signed-candidate
@@ -29,6 +31,11 @@ jobs:
       SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
       SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
     steps:
+      - name: Announce signed-candidate run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_SIGNED_RUN start run=${GITHUB_RUN_ID} trigger_sha=${GITHUB_SHA} source_sha=${SOURCE_SHA}"
       - name: Checkout exact verified Android source
         uses: actions/checkout@v4
         with:
@@ -156,12 +163,24 @@ jobs:
           echo "size=$SIZE" >> "$GITHUB_OUTPUT"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
       - name: Upload immutable signed candidate
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: pick-pack-1291-public-beta-0.4.2-beta.50-signed-candidate
           path: dist/beta50/*
           if-no-files-found: error
           retention-days: 14
+      - name: Report signed-candidate result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_SHA: ${{ steps.sign.outputs.sha }}
+          APK_SIZE: ${{ steps.sign.outputs.size }}
+          APK_NAME: ${{ steps.sign.outputs.name }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        shell: bash
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_SIGNED_RUN finish run=${GITHUB_RUN_ID} source_sha=${SOURCE_SHA} job=${{ job.status }} artifact=${ARTIFACT_ID:-NONE} apk=${APK_NAME:-NONE} sha256=${APK_SHA:-NONE} size=${APK_SIZE:-NONE}"
       - name: Cleanup signing material
         if: always()
         shell: bash
