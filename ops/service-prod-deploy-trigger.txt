@@ -1,9 +1,9 @@
-deploy=2026-08-22T14:20:00+07:00
+deploy=2026-08-22T14:24:00+07:00
 target=pick-pack-1291-service
-source=Beta49 S56 field acceptance fixes observable
+source=Beta49 S56 field acceptance fixes observable root-path-fixed
 scope=resource-global-exclusivity,user-daily-uniqueness,replication-await,ra-user-projection
 expected_authority=SERVICE_PRIMARY
 replication_recovery=STALE_INFLIGHT_IDEMPOTENT
-retry_seq=4
+retry_seq=5
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
