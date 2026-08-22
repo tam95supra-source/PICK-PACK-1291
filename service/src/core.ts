@@ -119,16 +119,25 @@ async function buildEvent(req: CanonicalMutationRequest, auth: AuthContext, a: A
   return { ...base, checksum: await sha256Hex(JSON.stringify(base)) };
 }
 
-function leaseStatements(db: D1Database, sessionId: string, mnv: string, date: string, eventId: string, at: string, resources: Array<[string,string]>): D1PreparedStatement[] {
+function leaseStatements(db: D1Database, sessionId: string, mnv: string, date: string, eventId: string, at: string, resources: Array<[string,string]>, allowDailyReplay=false): D1PreparedStatement[] {
   const out: D1PreparedStatement[] = [];
   for (const [type,id] of resources) {
     if (!id) continue;
     out.push(db.prepare("INSERT INTO resource_leases(resource_type,resource_id,session_id,mnv,business_date,acquired_event_id,acquired_at) VALUES(?1,?2,?3,?4,?5,?6,?7)").bind(type,id,sessionId,mnv,date,eventId,at));
     if (type === "USER_PICK" || type === "USER_PACK") {
-      out.push(db.prepare("INSERT INTO resource_daily_consumption(business_date,resource_type,resource_id,mnv,first_event_id) VALUES(?1,?2,?3,?4,?5)").bind(date,type,id,mnv,eventId));
+      const sql=allowDailyReplay?"INSERT OR IGNORE INTO resource_daily_consumption(business_date,resource_type,resource_id,mnv,first_event_id) VALUES(?1,?2,?3,?4,?5)":"INSERT INTO resource_daily_consumption(business_date,resource_type,resource_id,mnv,first_event_id) VALUES(?1,?2,?3,?4,?5)";
+      out.push(db.prepare(sql).bind(date,type,id,mnv,eventId));
     }
   }
   return out;
+}
+
+async function ensureDailyUserReuseAllowed(db:D1Database,date:string,pick:string,pack:string,duplicateUser:boolean,currentPick="",currentPack=""):Promise<void>{
+  for(const [type,id,current] of [["USER_PICK",pick,currentPick],["USER_PACK",pack,currentPack]] as Array<[string,string,string]>){if(!id||id===current)continue;const prior=await db.prepare("SELECT 1 x FROM resource_daily_consumption WHERE business_date=?1 AND resource_type=?2 AND resource_id=?3").bind(date,type,id).first();if(prior&&!duplicateUser)throw new CoreError(type==="USER_PICK"?"USER_PICK_ALREADY_USED_TODAY":"USER_PACK_ALREADY_USED_TODAY","RESOURCE",409,false);}
+}
+
+async function ensurePackPairAllowed(db:D1Database,table:string,pack:string):Promise<void>{
+  if(!table&&!pack)return;if(!table||!pack)throw new CoreError("PACK_RESOURCES_REQUIRED","VALIDATION",400);const row=await db.prepare("SELECT 1 x FROM resource_pack_map WHERE pack_table=?1 AND user_pack=?2 AND available=1 LIMIT 1").bind(table,pack).first();if(!row)throw new CoreError("PACK_MAPPING_INVALID","RESOURCE",409,false);
 }
 
 async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: CanonicalMutationRequest, a: AuthorityRow): Promise<EventRow> {
@@ -154,6 +163,9 @@ async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: Can
   if(pack&&!Boolean((checks[5]?.results?.[0] as {available?:number}|undefined)?.available)) throw new CoreError("USER_PACK_UNAVAILABLE","RESOURCE",409);
   if(choice==="PICK"&&!pda) throw new CoreError("PDA_REQUIRED_FOR_PICK","VALIDATION",400);
   if(choice==="PACK"&&(!table||!pack)) throw new CoreError("PACK_RESOURCES_REQUIRED","VALIDATION",400);
+  const duplicateUser=Boolean(p.duplicate_user);
+  await ensurePackPairAllowed(db,table,pack);
+  await ensureDailyUserReuseAllowed(db,req.business_date,pick,pack,duplicateUser);
   const event=await buildEvent(req,auth,a,currentVersion+1);
   const sessionId=req.entity_id;
   const stmts=eventStatements(db,event,a.authority_seq);
@@ -162,7 +174,7 @@ async function commitAttendanceEnter(db: D1Database, auth: AuthContext, req: Can
     ON CONFLICT(mnv,business_date) DO UPDATE SET session_id=excluded.session_id,shift=excluded.shift,work_choice=excluded.work_choice,state='ACTIVE',pda_serial=excluded.pda_serial,user_pick=excluded.user_pick,pack_table=excluded.pack_table,user_pack=excluded.user_pack,enter_at=excluded.enter_at,entered_by=excluded.entered_by,version=excluded.version,updated_at=excluded.updated_at`)
     .bind(sessionId,mnv,req.business_date,shift,choice,pda||null,pick||null,table||null,pack||null,event.committed_at,auth.login_id,event.new_version,event.committed_at));
   stmts.push(db.prepare("UPDATE attendance_sessions SET pda_enter_status=?1,resource_note=?2 WHERE session_id=?3").bind(pdaEnterStatus||null,resourceNote,sessionId));
-  stmts.push(...leaseStatements(db,sessionId,mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]]));
+  stmts.push(...leaseStatements(db,sessionId,mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]],duplicateUser));
   try { await db.batch(stmts); } catch (e) {
     const msg=String(e);
     if(msg.includes("resource_leases")||msg.includes("resource_daily_consumption")||msg.includes("UNIQUE constraint")) throw new CoreError("EXCLUSIVE_RESOURCE_CONFLICT","RESOURCE",409,false);
@@ -195,12 +207,15 @@ async function commitResourceChange(db:D1Database, auth:AuthContext, req:Canonic
   if(!current||current.state!=="ACTIVE") throw new CoreError("ATTENDANCE_NOT_ACTIVE","CONFLICT",409);
   if(current.version!==req.base_version) throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:current.version});
   const pda=text(p,"pda_serial")||current.pda_serial||"",pick=text(p,"user_pick")||"",table=text(p,"pack_table")||"",pack=text(p,"user_pack")||"";
+  const duplicateUser=Boolean(p.duplicate_user);
+  await ensurePackPairAllowed(db,table,pack);
+  await ensureDailyUserReuseAllowed(db,req.business_date,pick,pack,duplicateUser,current.user_pick||"",current.user_pack||"");
   const event=await buildEvent(req,auth,a,current.version+1),stmts=eventStatements(db,event,a.authority_seq);
   stmts.push(db.prepare("DELETE FROM resource_leases WHERE session_id=?1").bind(current.session_id));
   stmts.push(db.prepare("UPDATE attendance_sessions SET pda_serial=?1,user_pick=?2,pack_table=?3,user_pack=?4,version=?5,updated_at=?6 WHERE session_id=?7 AND version=?8").bind(pda||null,pick||null,table||null,pack||null,event.new_version,event.committed_at,current.session_id,current.version));
   const resourceNote=text(p,"resource_note",500);
   if(resourceNote)stmts.push(db.prepare("UPDATE attendance_sessions SET resource_note=?1 WHERE session_id=?2").bind(resourceNote,current.session_id));
-  stmts.push(...leaseStatements(db,current.session_id,current.mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]]));
+  stmts.push(...leaseStatements(db,current.session_id,current.mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]],duplicateUser));
   try{await db.batch(stmts);}catch(e){if(String(e).includes("UNIQUE constraint"))throw new CoreError("EXCLUSIVE_RESOURCE_CONFLICT","RESOURCE",409);throw e;} return event;
 }
 

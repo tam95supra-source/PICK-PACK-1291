@@ -63,28 +63,20 @@ function employeeJson(e:Employee|null){return e?{mnv:e.mnv,full_name:e.full_name
 function visibleWork(v:string){return v==="KHONG"?"KHÔNG":v;}
 
 async function resourceOptions(db:D1Database,date:string,mnv:string):Promise<Record<string,unknown>>{
-  // Availability is global for the business day. Never exclude rows merely because the
-  // current employee owns them: that made an already-held/already-used resource appear
-  // selectable again. The only exception is the exact resource on this employee's
-  // currently ACTIVE session so an editor can preserve its current selection.
   const leaseRows=(await db.prepare("SELECT resource_type,resource_id,mnv FROM resource_leases WHERE business_date=?1").bind(date).all<{resource_type:string;resource_id:string;mnv:string}>()).results??[];
   const busy=new Set(leaseRows.map(x=>`${x.resource_type}|${x.resource_id}`));
   const usedRows=(await db.prepare("SELECT resource_type,resource_id,mnv FROM resource_daily_consumption WHERE business_date=?1").bind(date).all<{resource_type:string;resource_id:string;mnv:string}>()).results??[];
   const used=new Set(usedRows.map(x=>`${x.resource_type}|${x.resource_id}`));
   const current=await db.prepare("SELECT pda_serial,user_pick,pack_table,user_pack FROM attendance_sessions WHERE business_date=?1 AND mnv=?2 AND state='ACTIVE'").bind(date,mnv).first<{pda_serial:string|null;user_pick:string|null;pack_table:string|null;user_pack:string|null}>();
-
   const pdasRaw=(await db.prepare("SELECT resource_id,status_label,metadata_json FROM resources WHERE resource_type='PDA' AND available=1 ORDER BY resource_id").all<{resource_id:string;status_label:string;metadata_json:string}>()).results??[];
   const pdas=pdasRaw.filter(x=>!busy.has(`PDA|${x.resource_id}`)||x.resource_id===current?.pda_serial).map(x=>{let m:Record<string,unknown>={};try{m=JSON.parse(x.metadata_json) as Record<string,unknown>;}catch{}return{serial:x.resource_id,last5:String(m["5 số cuối Seri"]||x.resource_id.slice(-5)),status:x.status_label};});
   const picksRaw=(await db.prepare("SELECT resource_id FROM resources WHERE resource_type='USER_PICK' AND available=1 ORDER BY resource_id").all<{resource_id:string}>()).results??[];
-  const user_picks=picksRaw.map(x=>x.resource_id).filter(id=>(!busy.has(`USER_PICK|${id}`)&&!used.has(`USER_PICK|${id}`))||id===current?.user_pick);
+  const user_picks:string[]=[],user_picks_reissue:Array<Record<string,unknown>>=[];
+  for(const x of picksRaw){const id=x.resource_id,isCurrent=id===current?.user_pick,isBusy=busy.has(`USER_PICK|${id}`),isUsed=used.has(`USER_PICK|${id}`);if(isCurrent||(!isBusy&&!isUsed))user_picks.push(id);else if(!isBusy&&isUsed)user_picks_reissue.push({id,busy:false,used_today:true,duplicate_user:true,note:"PHÁT LẠI USER"});}
   const packsRaw=(await db.prepare("SELECT pack_table,shift,user_pack FROM resource_pack_map WHERE available=1 ORDER BY pack_table,shift,user_pack").all<{pack_table:string;shift:string;user_pack:string}>()).results??[];
-  const pack_tables=packsRaw.filter(x=>{
-    const exactCurrent=x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack;
-    const tableFree=!busy.has(`PACK_TABLE|${x.pack_table}`);
-    const userPackFree=!busy.has(`USER_PACK|${x.user_pack}`)&&!used.has(`USER_PACK|${x.user_pack}`);
-    return exactCurrent||(tableFree&&userPackFree);
-  }).map(x=>({table:x.pack_table,shift:x.shift,user_pack:x.user_pack}));
-  return{ok:true,business_date:date,pdas,user_picks,pack_tables,current};
+  const pack_tables:Array<Record<string,unknown>>=[],pack_tables_reissue:Array<Record<string,unknown>>=[];
+  for(const x of packsRaw){const exactCurrent=x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack;const tableBusy=busy.has(`PACK_TABLE|${x.pack_table}`),userBusy=busy.has(`USER_PACK|${x.user_pack}`),userUsed=used.has(`USER_PACK|${x.user_pack}`);if(exactCurrent||(!tableBusy&&!userBusy&&!userUsed))pack_tables.push({table:x.pack_table,shift:x.shift,user_pack:x.user_pack,duplicate_user:false});else if(!tableBusy&&!userBusy&&userUsed)pack_tables_reissue.push({table:x.pack_table,shift:x.shift,user_pack:x.user_pack,duplicate_user:true,used_today:true,note:"PHÁT LẠI USER"});}
+  return{ok:true,business_date:date,pdas,user_picks,user_picks_reissue,pack_tables,pack_tables_reissue,current};
 }
 
 async function employeeContext(env:Env,body:Record<string,unknown>):Promise<Response>{
