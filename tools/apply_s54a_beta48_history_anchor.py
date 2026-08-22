@@ -66,15 +66,16 @@ swap('''    s = replace_once(s, load_app_old, load_app_new, "sync-device-name")
     s=s[:la]+'        '+load_app_new+s[lb:]
 ''','load-app')
 
+# S44/S31 rewrite the transport flush implementation. Do not couple Beta48 recovery to that
+# implementation. The durable store below exposes only the specific legacy date-window rejects as
+# pending again; their event_id/body stay unchanged and all other REJECTED rows remain final.
 swap('''    t = replace_once(
         t,
         'val items = store.pendingMutations(100)',
         'store.retryDateWindowRejects()\\n        val items = store.pendingMutations(100)',
         "date-reject-requeue",
     )
-''','''    m=_re.search(r'val items\\s*=\\s*store\\.pendingMutations\\([^)]*\\)',t)
-    if not m: raise SystemExit("S54 date-reject-requeue structural anchor missing")
-    t=t[:m.start()]+'store.retryDateWindowRejects()\\n        '+m.group(0)+t[m.end():]
+''','''    # Date-window rejects are re-admitted by OperationalDataStore.pendingMutations().
 ''','transport-requeue')
 
 swap('''    t = replace_once(
@@ -87,5 +88,23 @@ swap('''    t = replace_once(
     if n!=1: raise SystemExit(f"S54 connections-action structural mismatch: {n}")
 ''','transport-actions')
 
+store_header='''d = STORE.read_text(encoding="utf-8")
+if MARK not in d:
+'''
+store_inject='''d = STORE.read_text(encoding="utf-8")
+if MARK not in d:
+    pending_old = '''"status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') AND next_attempt_at <= ?"'''
+    pending_new = '''"(status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR (status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW')) AND next_attempt_at <= ?"'''
+    if pending_old not in d: raise SystemExit("S54 pendingMutations durable-date-reject anchor missing")
+    d=d.replace(pending_old,pending_new,1)
+    count_old = '''"SELECT COUNT(*) FROM mutation_outbox WHERE status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL')"'''
+    count_new = '''"SELECT COUNT(*) FROM mutation_outbox WHERE status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR (status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW')"'''
+    if count_old not in d: raise SystemExit("S54 pendingMutationCount durable-date-reject anchor missing")
+    d=d.replace(count_old,count_new,1)
+'''
+if store_header not in q:
+    raise SystemExit('S54A STORE header missing')
+q=q.replace(store_header,store_inject,1)
+
 patch.write_text(q,encoding='utf-8')
-print('S54A converted UI and transport anchors to structural matching')
+print('S54A converted UI/transport anchors and durable-store date recovery')
