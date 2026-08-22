@@ -1,0 +1,55 @@
+name: Beta54 App PR Bootstrap
+
+on:
+  pull_request:
+    branches:
+      - stabilization/beta48-golden-reset-beta50-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  apply-build-commit:
+    if: ${{ github.event.pull_request.head.ref == 'fix/beta54-owner-resilience-20260822' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Apply owner repair
+        run: |
+          python3 -m py_compile tools/apply_s57_beta54_owner_resilience.py
+          python3 tools/apply_s57_beta54_owner_resilience.py
+      - name: Static guards
+        run: |
+          grep -Fq 'S57_BETA54_OWNER_RESILIENCE_FIX' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -Fq 'api.call("exit"' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -Fq 'Mạng thể hiện khả năng' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -Fq 'MutationStatusCounts' app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt
+          grep -Fq 'fun retryDateWindowRejects():Int = 0' app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt
+          grep -Fq 'THỬ NGHIỆM LỖI SERVICE' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -Fq 'TEST_CLOUDFLARE_DISABLED' app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
+          grep -Fq 'TEST_GOOGLE_DISABLED' app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
+          git diff --check
+      - name: Assemble Beta and Stable debug
+        run: gradle --no-daemon --build-cache --parallel :app:assembleBetaDebug :app:assembleStableDebug
+      - name: Commit canonical repaired source to PR head
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add app/src/main/java/vn/pickpack1291/app/beta
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(beta54): durable exit, accurate sync and fault injection [beta54-app-applied]'
+            git push origin HEAD:"$TARGET_BRANCH"
+          fi
