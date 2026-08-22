@@ -73,6 +73,16 @@ Beta folder: `1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg`
 - E2E verifies live discovery, exact GitHub APK download, SHA/size, package, version, locked signer, target self-update false, and Stable isolation.
 - Beta49 remains ABANDONED and is not part of the OTA path.
 
+## Recurrence prevention added during release
+
+The pre-existing GAS deploy workflow inferred the previous Beta as `target_number - 1`. That is invalid when an abandoned number is deliberately skipped (Beta49 in this release). The dedicated E2E gate caught the distinction, and the workflow source was hardened after release:
+
+- Service branch commit: `110146bc6bfb419237f8368d446102fc4e043772`.
+- `.github/workflows/gas-deploy.yml` now reads explicit `beta_from` from `ops/gas-deploy-trigger.txt`.
+- Missing `beta_from` is a hard failure (`GAS_DEPLOY_TRIGGER_BETA_FROM_MISSING`).
+- It no longer computes `max(0, n-1)`.
+- This source-only hardening does not redeploy GAS by itself and therefore does not change live production data or the already-verified Beta50 deployment.
+
 ## Release isolation / Git safety
 
 - `main` was not changed by this stabilization/release work.
