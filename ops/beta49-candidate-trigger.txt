@@ -1,7 +1,8 @@
-requested_at=2026-08-22T13:02:00+07:00
+requested_at=2026-08-22T14:13:00+07:00
 beta=0.4.2-beta.49
 version_code=55
-field_fix=resource-exclusivity,pack-both-shifts,no-connections-ui,log-accounting,sheet-replication
+field_fix=live-resource-revalidate,pack-both-shifts,no-duplicate-user,no-connections-ui,log-accounting,sheet-replication
+retry_seq=2
 service_required=SERVICE_PRIMARY
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
