@@ -32,15 +32,15 @@ jobs:
           node-version: '22'
       - name: Materialize Beta49 Service field fixes and typecheck
         id: materialize
-        working-directory: service
         shell: bash
         run: |
           set -euo pipefail
-          python3 ../tools/apply_s56_beta49_service_field_fixes.py
-          grep -q 'S56_BETA49_EVENT_USER_PROJECTION_V1' src/replication.ts
-          grep -q 'S56_BETA49_RA_RESOURCE_AGGREGATE_V1' src/replication.ts
-          grep -q 'S56_BETA49_ACTIVE_SESSION_DAILY_USER_GUARD_V1' src/core.ts
-          grep -q 'S56_BETA49_AWAIT_CANONICAL_REPLICATION_V1' src/index.ts
+          python3 tools/apply_s56_beta49_service_field_fixes.py
+          grep -q 'S56_BETA49_EVENT_USER_PROJECTION_V1' service/src/replication.ts
+          grep -q 'S56_BETA49_RA_RESOURCE_AGGREGATE_V1' service/src/replication.ts
+          grep -q 'S56_BETA49_ACTIVE_SESSION_DAILY_USER_GUARD_V1' service/src/core.ts
+          grep -q 'S56_BETA49_AWAIT_CANONICAL_REPLICATION_V1' service/src/index.ts
+          cd service
           npm install --no-audit --no-fund
           npm run check
       - name: Pre-deploy live health
