@@ -1,14 +1,14 @@
 {
   "source": "GITHUB_RELEASE",
   "channel": "BETA",
-  "version_name": "0.4.2-beta.44",
-  "version_code": 50,
-  "apk_name": "pick-pack-1291-public-beta-0.4.2-beta.44.apk",
-  "apk_url": "https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.44-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.44.apk",
-  "sha256": "aa936554f473d83bd3ae931f70267181f29dd74f25386297c6f6103f82feb0b9",
-  "size": 12962299,
-  "published_at": "2026-08-21T15:06:29Z",
-  "notes": "Pick Pack 1291 Beta 0.4.2-beta.44",
+  "version_name": "0.4.2-beta.46",
+  "version_code": 52,
+  "apk_name": "pick-pack-1291-public-beta-0.4.2-beta.46.apk",
+  "apk_url": "https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.46-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.46.apk",
+  "sha256": "14ee4c0ac2264af90e2aa4a6e94291b1157a6299e5f48b19a5df462c4e36dbc4",
+  "size": 12978683,
+  "published_at": "2026-08-22T01:47:17Z",
+  "notes": "Pick Pack 1291 Beta 0.4.2-beta.46",
   "mandatory": false,
   "retention": 10
 }
