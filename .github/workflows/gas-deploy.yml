@@ -49,10 +49,15 @@ jobs:
           node --check /tmp/SERVICE_MIGRATION_M2.js
           python3 - <<'PY' >> "$GITHUB_ENV"
           import json,re
+          from pathlib import Path
           m=json.load(open('ops/beta-ota-current.json'))
           assert m.get('source')=='GITHUB_RELEASE',m
           v=str(m['version_name']);sha=str(m['sha256']).lower();code=int(m['version_code']);size=int(m['size'])
-          n=int(re.search(r'beta\.(\d+)$',v).group(1)); prev=re.sub(r'beta\.\d+$',f'beta.{max(0,n-1)}',v)
+          trigger=Path('ops/gas-deploy-trigger.txt').read_text()
+          fm=re.search(r'^beta_from=(0\.4\.2-beta\.\d+)\s*$',trigger,re.M)
+          assert fm, 'GAS_DEPLOY_TRIGGER_BETA_FROM_MISSING'
+          prev=fm.group(1)
+          assert prev != v, (prev,v)
           print('TARGET_BETA='+v);print('TARGET_BETA_SHA256='+sha);print('TARGET_BETA_CODE='+str(code));print('TARGET_BETA_SIZE='+str(size));print('FROM_BETA='+prev)
           PY
 
