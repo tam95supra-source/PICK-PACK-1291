@@ -12,13 +12,14 @@ on:
       - 'tools/apply_s12_gas_patch.py'
       - 'tools/apply_s12_gas_health_patch.py'
       - 'tools/apply_s55_beta51_owner_refresh_history_fix.py'
+      - 'ops/s55-owner-fix-trigger.txt'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
       - '.github/workflows/app-fast-check.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, stabilization/beta48-golden-reset-beta50-20260822 ]
     paths:
       - 'app/**'
       - 'tools/apply_s10_ui_patch.py'
@@ -28,6 +29,7 @@ on:
       - 'tools/apply_s12_gas_patch.py'
       - 'tools/apply_s12_gas_health_patch.py'
       - 'tools/apply_s55_beta51_owner_refresh_history_fix.py'
+      - 'ops/s55-owner-fix-trigger.txt'
       - 'google-apps-script/**'
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
@@ -53,9 +55,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
-      - name: Apply owner Beta51 fix on stabilization line only
-        if: (github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'stabilization/beta48-golden-reset-beta50-20260822') || (github.event_name == 'push' && github.ref_name == 'stabilization/beta48-golden-reset-beta50-20260822')
+      - name: Apply owner Beta51 fix on isolated fix branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'stabilization/beta48-golden-reset-beta50-20260822' && github.event.pull_request.head.ref == 'fix/beta51-owner-refresh-20260822'
         shell: bash
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
           python3 -m py_compile tools/apply_s55_beta51_owner_refresh_history_fix.py
@@ -65,7 +69,7 @@ jobs:
           git add app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
           if ! git diff --cached --quiet; then
             git commit -m 'fix(beta): refresh, cross-device history and readable conflicts'
-            git push origin HEAD:stabilization/beta48-golden-reset-beta50-20260822
+            git push origin HEAD:"$TARGET_BRANCH"
           fi
       - id: result
         shell: bash
@@ -103,7 +107,7 @@ jobs:
           fi
           ANDROID=false
           GAS=false
-          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch|55_beta51_owner_refresh_history_fix)\.py$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
+          if grep -Eq '^(app/|tools/apply_s(10_ui_patch(_in_place)?|11_compact_report_patch|12_real_pda_patch|55_beta51_owner_refresh_history_fix)\.py$|ops/s55-owner-fix-trigger\.txt$|build\.gradle\.kts$|settings\.gradle\.kts$|gradle\.properties$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then ANDROID=true; fi
           if grep -Eq '^(google-apps-script/|tools/apply_s12_gas(_health)?_patch\.py$|\.github/workflows/app-fast-check\.yml$)' <<<"$FILES"; then GAS=true; fi
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
           echo "gas=$GAS" >> "$GITHUB_OUTPUT"
