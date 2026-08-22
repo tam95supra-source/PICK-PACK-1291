@@ -1,0 +1,50 @@
+name: Beta54 Service Repair Bootstrap
+
+on:
+  push:
+    branches:
+      - fix/beta54-service-exit-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-check:
+    if: ${{ !contains(github.event.head_commit.message, '[beta54-service-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/beta54-service-exit-20260822
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+      - name: Apply guarded exit repairs
+        run: python3 tools/apply_beta54_service_exit_resilience.py
+      - name: Install Service dependencies
+        working-directory: service
+        run: npm ci
+      - name: Generate Cloudflare binding types and typecheck
+        working-directory: service
+        run: npm run check
+      - name: Static contract guards
+        run: |
+          grep -Fq 'PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST' service/src/core.ts
+          grep -Fq 'SESSION_ACTIVE_AMBIGUOUS' service/src/session_hotfix.ts
+          grep -Fq 'SESSION_EMPLOYEE_MISMATCH' service/src/session_hotfix.ts
+          grep -Fq 'sheet_replication_outbox' service/src/core.ts
+          git diff --check
+      - name: Commit canonical Service source
+        run: |
+          if git diff --quiet -- service/src/core.ts service/src/session_hotfix.ts; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'pick-pack-1291-release-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add service/src/core.ts service/src/session_hotfix.ts
+          git commit -m 'Fix Beta54 canonical exit and PDA guards [beta54-service-applied]'
+          git push origin HEAD:fix/beta54-service-exit-20260822
