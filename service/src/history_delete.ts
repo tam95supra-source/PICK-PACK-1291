@@ -5,9 +5,7 @@ import { enqueueInvalidation } from "./push";
 import { apiError, json, nowIso, readJsonBody, sha256Hex } from "./util";
 
 type DeleteBody={event_ids?:string[];idempotency_key?:string;reason?:string};
-
 type Target={event_id:string;event_type:string;business_date:string;entity_type:string;entity_id:string};
-
 const INSERT_EVENT=`INSERT INTO events(event_id,event_type,entity_type,entity_id,business_date,authority_epoch,authority_seq,service_generation,base_version,new_version,actor_id,actor_role,device_id,occurred_at,committed_at,payload_json,idempotency_key,origin,schema_version,checksum) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)`;
 
 export async function historyDelete(request:Request,env:Env):Promise<Response>{
@@ -37,13 +35,13 @@ export async function historyDelete(request:Request,env:Env):Promise<Response>{
   for(const date of dates){const key=`history-delete:${idem}:${date}`;const e=await env.DB.prepare("SELECT * FROM events WHERE idempotency_key=?1").bind(key).first<EventRow>();if(e)prior.push(e);}
   if(prior.length){if(prior.length===dates.length)return json({ok:true,duplicate:true,deleted_count:ids.length,target_event_ids:ids,tombstones:prior});return apiError("HISTORY_DELETE_PARTIAL_IDEMPOTENCY","INTEGRITY",409);}
 
-  const committed=nowIso();
+  const committed=nowIso(),clientSource=auth.session_kind==="WEB"?"WEB":"PDA";
   const tombstones:EventRow[]=[];
   let seq=authority.authority_seq;
   for(const date of dates){
     const rows=byDate.get(date)??[];seq+=1;
-    const payload={logical_delete:true,target_event_ids:rows.map(x=>x.event_id),deleted_count:rows.length,reason,source:"PDA",actor_login_id:auth.login_id,original_events_immutable:true};
-    const base={event_id:crypto.randomUUID(),event_type:"HISTORY_DELETE",entity_type:"HISTORY",entity_id:`history-delete:${date}:${crypto.randomUUID()}`,business_date:date,authority_epoch:authority.authority_epoch,authority_seq:seq,service_generation:authority.service_generation,base_version:0,new_version:1,actor_id:auth.login_id,actor_role:auth.role,device_id:auth.device_id,occurred_at:committed,committed_at:committed,payload_json:JSON.stringify(payload),idempotency_key:`history-delete:${idem}:${date}`,origin:"PDA_HISTORY_DELETE",schema_version:1};
+    const payload={logical_delete:true,target_event_ids:rows.map(x=>x.event_id),target_summaries:rows.map(x=>({event_id:x.event_id,event_type:x.event_type,entity_type:x.entity_type,entity_id:x.entity_id})),deleted_count:rows.length,reason,source:clientSource,actor_login_id:auth.login_id,actor_role:auth.role,original_events_immutable:true};
+    const base={event_id:crypto.randomUUID(),event_type:"HISTORY_DELETE",entity_type:"HISTORY",entity_id:`history-delete:${date}:${crypto.randomUUID()}`,business_date:date,authority_epoch:authority.authority_epoch,authority_seq:seq,service_generation:authority.service_generation,base_version:0,new_version:1,actor_id:auth.login_id,actor_role:auth.role,device_id:auth.device_id,occurred_at:committed,committed_at:committed,payload_json:JSON.stringify(payload),idempotency_key:`history-delete:${idem}:${date}`,origin:clientSource==="WEB"?"WEB_HISTORY_DELETE":"PDA_HISTORY_DELETE",schema_version:1};
     tombstones.push({...base,checksum:await sha256Hex(JSON.stringify(base))});
   }
 
