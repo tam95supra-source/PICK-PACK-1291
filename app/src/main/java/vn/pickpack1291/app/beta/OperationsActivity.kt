@@ -31,6 +31,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 class OperationsActivity : Activity() {
+    // S55_BETA51_OWNER_REFRESH_HISTORY_FIX
     // S54_BETA48_OWNER_10_FIXES
     // S31_SERVICE_FIRST_HOTPATH
     // S29_OWNER_LOCALFIRST_HISTORY
@@ -82,6 +83,7 @@ class OperationsActivity : Activity() {
     private var lastProjectionPending: Int = 0
     private var historySyncInFlight=false // S35_OWNER_UI_HISTORY_CONSISTENCY
     private var historyLastCanonicalRefreshAt=0L
+    private var manualRefreshInFlight=false
     private var lastLatencyMs: Long? = null
     private var lastSyncE2eMs: Long? = null
     private var serviceProviderCache = "—"
@@ -471,7 +473,7 @@ class OperationsActivity : Activity() {
         }
         pickOn.setOnCheckedChangeListener{_,_->rebuild()};packOn.setOnCheckedChangeListener{_,_->rebuild()};rebuild()
         AlertDialog.Builder(this).setTitle("Thêm / sửa công việc trong ca").setView(ScrollView(this).apply{addView(dialogBody)}).setNegativeButton("Hủy",null).setPositiveButton("LƯU"){_,_->
-            val p=JSONObject().put("session_id",ses.optString("session_id")).put("idempotency_key",UUID.randomUUID().toString())
+            val p=JSONObject().put("session_id",ses.optString("session_id")).put("mnv",mnv).put("idempotency_key",UUID.randomUUID().toString())
             val pickChoice=if(pickOn.isChecked)pickChoices.getOrNull(pickSpinner?.selectedItemPosition?:0) else null;val pick=pickChoice?.first.orEmpty();val pda=if(pickOn.isChecked)selectedPda?.optString("serial").orEmpty() else ""
             p.put("pda_serial",pda).put("user_pick",pick)
             var reissue=pickChoice?.second==true
@@ -502,7 +504,7 @@ class OperationsActivity : Activity() {
         if(activeLabor!=null){body.addView(status("CÒN CÔNG NHẬT ĐANG LÀM",orange,Color.rgb(255,247,230)));body.addView(gap(4));body.addView(info("${activeLabor.optString("labor_type")} • bắt đầu ${formatIso(activeLabor.optString("start_at"))}. Phải hoàn thành công nhật trước khi ra ca."));body.addView(gap(8))}
         addSessionTimeline(body,mnv);body.addView(gap(9));body.addView(primary("THÊM / SỬA CÔNG VIỆC TRONG CA",orange){sessionWorkEditor(ctx)},matchWrap());body.addView(gap(6));if(isAdmin()){body.addView(smallButton("SỬA GIỜ VÀO CA",navy).apply{setOnClickListener{editAttendanceTime(ctx,"enter_at")}},matchWrap());body.addView(gap(8))}
         val exit=primary("RA CA",red){}
-        fun doExit(statusNow:String){exit.isEnabled=false;exit.text="ĐANG RA CA...";api.call("session_exit_guarded",JSONObject().put("session_id",ses.optString("session_id")).put("pda_exit_status",statusNow).put("idempotency_key",UUID.randomUUID().toString())){r->runOnUiThread{exit.isEnabled=true;exit.text="RA CA";if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"RA CA thất bại");return@runOnUiThread};TopNotice.show(this,"Đã ghi nhận ra ca.",TopNotice.Kind.SUCCESS);foregroundSync.requestSync();scheduleAttendanceAutoReset(mnv,employeeLookupGeneration)}}}
+        fun doExit(statusNow:String){exit.isEnabled=false;exit.text="ĐANG RA CA...";api.call("session_exit_guarded",JSONObject().put("session_id",ses.optString("session_id")).put("mnv",mnv).put("pda_exit_status",statusNow).put("idempotency_key",UUID.randomUUID().toString())){r->runOnUiThread{exit.isEnabled=true;exit.text="RA CA";if(handleAuth(r))return@runOnUiThread;if(!r.ok){showError(r.error?:"RA CA thất bại");return@runOnUiThread};TopNotice.show(this,"Đã ghi nhận ra ca.",TopNotice.Kind.SUCCESS);foregroundSync.requestSync();scheduleAttendanceAutoReset(mnv,employeeLookupGeneration)}}}
         exit.setOnClickListener{
             if(activeLabor!=null){showError("Còn công nhật đang làm. Hoàn thành công nhật trước khi ra ca.");return@setOnClickListener}
             if(pda.isBlank()){AlertDialog.Builder(this).setTitle("Xác nhận RA CA").setMessage("Không còn PDA/công nhật cần xử lý. Xác nhận kết thúc phiên?").setNegativeButton("Hủy",null).setPositiveButton("RA CA"){_,_->doExit("")}.show();return@setOnClickListener}
@@ -673,7 +675,7 @@ class OperationsActivity : Activity() {
         if(isSuper()){body.addView(gap(7));val bulk=row(bg);bulk.addView(smallButton("CHỌN TẤT CẢ",navy).apply{setOnClickListener{checks.forEach{it.isChecked=true}}},LinearLayout.LayoutParams(0,dp(42),1f).apply{marginEnd=dp(3)});bulk.addView(smallButton("XÓA ĐÃ CHỌN",red).apply{setOnClickListener{deleteStaffBulk(selected.toList())}},LinearLayout.LayoutParams(0,dp(42),1f).apply{marginStart=dp(3)});body.addView(bulk,matchWrap())}
         body.addView(gap(10));val box=column(bg);body.addView(box,matchWrap());var pageSize=60
         fun render(query:String){box.removeAllViews();checks.clear();val clean=query.trim();val limit=if(clean.isBlank())pageSize else 180;val arr=MasterDataCache.searchStaff(this,clean,limit)
-            for(i in 0 until arr.length()){val e=arr.optJSONObject(i)?:continue;val id=e.optString("mnv");val card=column(surface).apply{setPadding(dp(12),dp(10),dp(12),dp(10));background=outlineBg(surface,18);val top=row(surface).apply{gravity=Gravity.CENTER_VERTICAL};if(isSuper()){val c=CheckBox(this@OperationsActivity).apply{isChecked=id in selected;setOnCheckedChangeListener{_,on->if(on)selected.add(id)else selected.remove(id)}};checks.add(c);top.addView(c,size(dp(42),dp(42)))};top.addView(column(surface).apply{addView(txt(e.optString("full_name"),14f,ink,true));addView(txt("Mã nhân viên $id • ${dash(e.optString("main_position"))}",10.7f,navy,true));addView(txt("${dash(e.optString("supplier"))} • ${dash(e.optString("department"))} • ${dash(e.optString("site"))}",9.8f,muted,false))},LinearLayout.LayoutParams(0,-2,1f));if(isAdmin()){top.addView(iconActionButton(R.drawable.ic_pp_edit,teal,"Sửa"){staffEditor(e)},size(dp(38),dp(38)));if(isSuper()){top.addView(gap(4));top.addView(iconActionButton(R.drawable.ic_pp_delete,red,"Xóa"){confirmDeleteStaff(e)},size(dp(38),dp(38)))}};addView(top,matchWrap())};box.addView(card,matchWrap());box.addView(gap(8))}
+            for(i in 0 until arr.length()){val e=arr.optJSONObject(i)?:continue;val id=e.optString("mnv");val card=column(surface).apply{setPadding(dp(12),dp(10),dp(12),dp(10));background=outlineBg(surface,18);val top=row(surface).apply{gravity=Gravity.CENTER_VERTICAL};if(isSuper()){val c=CheckBox(this@OperationsActivity).apply{isChecked=id in selected;setOnCheckedChangeListener{_,on->if(on)selected.add(id)else selected.remove(id)}};checks.add(c);top.addView(c,size(dp(42),dp(42)))};top.addView(column(surface).apply{addView(txt(e.optString("full_name"),14f,ink,true));addView(txt("$id • ${dash(e.optString("main_position"))}",10.7f,navy,true));addView(txt("${dash(e.optString("supplier"))} • ${dash(e.optString("department"))} • ${dash(e.optString("site"))}",9.8f,muted,false))},LinearLayout.LayoutParams(0,-2,1f));if(isAdmin()){top.addView(iconActionButton(R.drawable.ic_pp_edit,teal,"Sửa"){staffEditor(e)},size(dp(38),dp(38)));if(isSuper()){top.addView(gap(4));top.addView(iconActionButton(R.drawable.ic_pp_delete,red,"Xóa"){confirmDeleteStaff(e)},size(dp(38),dp(38)))}};addView(top,matchWrap())};box.addView(card,matchWrap());box.addView(gap(8))}
             if(arr.length()==0)box.addView(info("Không có nhân sự phù hợp."));if(clean.isBlank()&&arr.length()>=pageSize&&pageSize<MasterDataCache.staffCount(this)){box.addView(primary("XEM THÊM",teal){pageSize+=60;render("")},matchWrap())}}
         q.addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(v:CharSequence?,st:Int,c:Int,a:Int)=Unit;override fun onTextChanged(v:CharSequence?,st:Int,b:Int,c:Int){render(v?.toString().orEmpty())};override fun afterTextChanged(v:Editable?)=Unit});q.setOnEditorActionListener{_,_,_->render(q.text.toString());true};render("");attach(root,body)
     }
@@ -846,9 +848,9 @@ class OperationsActivity : Activity() {
     }
 
     // S36_PERF_HISTORY_REPORT_SERVICE: bounded background canonical refresh.
-    private fun refreshHistoryCanonical(){
+    private fun refreshHistoryCanonical(force:Boolean=false){
         if(historySyncInFlight)return
-        val now=System.currentTimeMillis();if(now-historyLastCanonicalRefreshAt<60_000L)return
+        val now=System.currentTimeMillis();if(!force&&now-historyLastCanonicalRefreshAt<60_000L)return
         val before=operationalStore.revisions().toString()
         historySyncInFlight=true
         Thread{
@@ -856,7 +858,7 @@ class OperationsActivity : Activity() {
             val changed=ok&&before!=operationalStore.revisions().toString()
             runOnUiThread{
                 historySyncInFlight=false;historyLastCanonicalRefreshAt=System.currentTimeMillis()
-                if(changed&&screenState=="HISTORY")historyScreen()
+                if(ok&&screenState=="HISTORY"&&(force||changed))historyScreen()
             }
         }.start()
     }
@@ -1283,6 +1285,26 @@ class OperationsActivity : Activity() {
     }
     private fun isRootScreen()=screenState=="BUSINESS"||screenState=="STAFF"||screenState=="HISTORY"||screenState=="SYNC"||screenState=="SETTINGS"||screenState=="ROLE_MODE"
 
+    private fun manualRefreshFromHeader(icon:ImageView){
+        if(manualRefreshInFlight)return
+        manualRefreshInFlight=true;icon.isEnabled=false;icon.alpha=.55f
+        M2ImmediateOutbox.kick(this);foregroundSync.requestSync();refreshMasterCache();historyLastCanonicalRefreshAt=0L
+        Thread{
+            val ok=runCatching{M2BackgroundSync.catchUp(applicationContext)}.getOrDefault(false)
+            runOnUiThread{
+                manualRefreshInFlight=false;icon.isEnabled=true;icon.alpha=1f;historyLastCanonicalRefreshAt=System.currentTimeMillis()
+                when(screenState){
+                    "HISTORY"->historyScreen()
+                    "SYNC"->syncScreen()
+                    "EMPLOYEE","EMPLOYEE_LOADING","EMPLOYEE_LOOKUP_ERROR"->if(liveEmployeeMnv.isNotBlank())loadEmployee(liveEmployeeMnv)
+                    "REPORT"->reportScreen()
+                    else->refreshHeaderConnection()
+                }
+                TopNotice.show(this,if(ok)"Đã đồng bộ lại dữ liệu từ Service." else "Đã yêu cầu đồng bộ; dữ liệu sẽ tiếp tục gửi lại khi kết nối phù hợp.",if(ok)TopNotice.Kind.SUCCESS else TopNotice.Kind.WARNING)
+            }
+        }.start()
+    }
+
     private fun serviceProviderFromRuntime():String{
         val st=api.runtimeStatus();val mode=st.optString("authority_mode");val route=st.optString("route")
         return when{
@@ -1296,14 +1318,13 @@ class OperationsActivity : Activity() {
     private fun refreshHeaderConnection(){val pending=runCatching{operationalStore.pendingMutationCount()}.getOrDefault(lastProjectionPending);networkStatusText?.text=when(lastConnected){true->lastSyncLatencyMs?.let{"$it ms"}?:"Có mạng";false->"Mất mạng";null->"—"};syncStatusText?.text=if(pending>0)"Đang chờ" else if(lastConnected==true)"Hoàn tất" else "Đang chờ";serviceStatusText?.text=if(lastConnected==true)"Hoạt động" else if(lastConnected==false)"Mất kết nối" else "—"}
     private fun headerStatusChip(iconRes:Int,label:String,valueView:TextView)=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(6),dp(6),dp(6),dp(6));background=round(Color.argb(32,255,255,255),13);addView(ImageView(this@OperationsActivity).apply{setImageResource(iconRes);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(2),dp(2),dp(2),dp(2))},size(dp(22),dp(22)));addView(column(Color.TRANSPARENT).apply{addView(txt(label,7.2f,Color.argb(210,255,255,255),false).apply{maxLines=1;setAutoSizeTextTypeUniformWithConfiguration(6,8,1,android.util.TypedValue.COMPLEX_UNIT_SP)});addView(valueView.apply{maxLines=1;setAutoSizeTextTypeUniformWithConfiguration(6,10,1,android.util.TypedValue.COMPLEX_UNIT_SP)})},LinearLayout.LayoutParams(0,-2,1f).apply{marginStart=dp(4)})}
     private fun greetingText():String{val h=java.time.LocalTime.now(ZoneId.of("Asia/Ho_Chi_Minh")).hour;val part=when(h){in 5..10->"sáng";in 11..13->"trưa";in 14..17->"chiều";else->"tối"};return "Chào buổi $part, ${name.ifBlank{login}}"}
-    private fun appBar(title:String)=column(Color.TRANSPARENT).apply{setPadding(dp(16),dp(11),dp(16),dp(12));background=gradient(navy,accent,0);val identity=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL};if(!isRootScreen())identity.addView(ImageView(this@OperationsActivity).apply{setImageResource(R.drawable.ic_pp_back);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(7),dp(7),dp(7),dp(7));setOnClickListener{navigateBack()}},size(dp(36),dp(36)));identity.addView(txt(greetingText(),16f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},LinearLayout.LayoutParams(0,-2,1f).apply{if(!isRootScreen())marginStart=dp(3)});addView(identity,matchWrap());addView(gap(10));val statuses=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER};val net=txt("—",9f,Color.WHITE,true);networkStatusText=net;val syn=txt("—",9f,Color.WHITE,true);syncStatusText=syn;val svc=txt("—",9f,Color.WHITE,true);serviceStatusText=svc;statuses.addView(headerStatusChip(R.drawable.ic_pp_network,"Mạng",net),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=dp(3)});statuses.addView(headerStatusChip(R.drawable.ic_pp_sync,"Đồng bộ",syn),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(2);marginEnd=dp(2)});statuses.addView(headerStatusChip(R.drawable.ic_pp_service,"Dịch vụ",svc),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(3)});addView(statuses,matchWrap());refreshHeaderConnection()}
+    private fun appBar(title:String)=column(Color.TRANSPARENT).apply{setPadding(dp(16),dp(11),dp(16),dp(12));background=gradient(navy,accent,0);val identity=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER_VERTICAL};if(!isRootScreen())identity.addView(ImageView(this@OperationsActivity).apply{setImageResource(R.drawable.ic_pp_back);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(7),dp(7),dp(7),dp(7));setOnClickListener{navigateBack()}},size(dp(36),dp(36)));identity.addView(txt(greetingText(),16f,Color.WHITE,true).apply{maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.END},LinearLayout.LayoutParams(0,-2,1f).apply{if(!isRootScreen())marginStart=dp(3)});identity.addView(ImageView(this@OperationsActivity).apply{contentDescription="Đồng bộ lại dữ liệu";setImageResource(R.drawable.ic_pp_sync);imageTintList=ColorStateList.valueOf(Color.WHITE);setPadding(dp(8),dp(8),dp(8),dp(8));setOnClickListener{manualRefreshFromHeader(this)}},size(dp(36),dp(36)));addView(identity,matchWrap());addView(gap(10));val statuses=row(Color.TRANSPARENT).apply{gravity=Gravity.CENTER};val net=txt("—",9f,Color.WHITE,true);networkStatusText=net;val syn=txt("—",9f,Color.WHITE,true);syncStatusText=syn;val svc=txt("—",9f,Color.WHITE,true);serviceStatusText=svc;statuses.addView(headerStatusChip(R.drawable.ic_pp_network,"Mạng",net),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginEnd=dp(3)});statuses.addView(headerStatusChip(R.drawable.ic_pp_sync,"Đồng bộ",syn),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(2);marginEnd=dp(2)});statuses.addView(headerStatusChip(R.drawable.ic_pp_service,"Dịch vụ",svc),LinearLayout.LayoutParams(0,dp(44),1f).apply{marginStart=dp(3)});addView(statuses,matchWrap());refreshHeaderConnection()}
     private fun activeTab()=when(module){"STAFF"->"STAFF";"HISTORY"->"HISTORY";"SYNC"->"SYNC";"SETTINGS"->"SETTINGS";"ROLE_MODE"->"ROLE_MODE";else->"BUSINESS"}
 
     private fun bottomNav():LinearLayout=row(surface).apply{
         gravity=Gravity.CENTER;setPadding(dp(3),dp(5),dp(3),dp(5));background=outlineBg(surface,16);elevation=dp(8).toFloat();navRefs.clear()
         val items=mutableListOf(
             Triple(R.drawable.ic_pp_business,"Nghiệp vụ","BUSINESS"),
-            Triple(R.drawable.ic_pp_staff,"Nhân sự","STAFF"),
             Triple(R.drawable.ic_pp_history,"Lịch sử","HISTORY"),
             Triple(R.drawable.ic_pp_sync,"Đồng bộ","SYNC"),
             Triple(R.drawable.ic_pp_settings,"Cài đặt","SETTINGS")
@@ -1354,7 +1375,28 @@ class OperationsActivity : Activity() {
     }
 
     private fun handleAuth(r:BetaApiClient.Result):Boolean{if(r.code==401){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi.").setCancelable(false).setPositiveButton("OK"){_,_->finishAffinity()}.show();return true};return false}
-    private fun showError(raw:String){val msg=when{raw.contains("PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST")->"Tình trạng PDA hiện tại không khớp lúc vào ca. Không thể RA CA. Phải thông báo cho Chuyên viên sự việc.";raw.contains("PDA_ENTRY_STATUS_MISSING_NOTIFY_SPECIALIST")->"Không xác định được tình trạng PDA lúc vào ca. Không thể RA CA. Phải thông báo cho Chuyên viên sự việc.";raw.contains("PDA_ENTRY_STATUS_STALE")->"Tình trạng PDA vừa thay đổi trên hệ thống. Chọn lại PDA trước khi VÀO CA.";raw.contains("DUPLICATE_USER_OVERRIDE_NOT_REQUIRED")->"User này hiện không thuộc nhóm đang dùng/đã dùng; hãy chọn từ danh sách thường.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"Mã nhân viên đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"Mã nhân viên không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("EMAIL_INVALID")->"Địa chỉ mail không hợp lệ.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy nhân sự.";raw.contains("STAFF_ACTIVE_SESSION")->"Nhân sự đang có phiên ACTIVE, chưa thể xóa.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}
+    private fun showError(raw:String){val msg=when{
+raw.contains("EXCLUSIVE_RESOURCE_CONFLICT")->"Tài nguyên vừa bị phiên hoặc máy khác giữ / dùng trước. Bản ghi này không tự gửi lại để tránh cấp trùng. Hãy bấm đồng bộ, quét lại nhân sự và chọn tài nguyên còn trống.";
+raw.contains("PDA_IN_USE")->"PDA này đang được một phiên khác giữ. Hãy đồng bộ lại và chọn PDA khác.";
+raw.contains("USER_PICK_IN_USE")->"User Pick này đang được phiên khác giữ. Hãy chọn User Pick khác.";
+raw.contains("USER_PACK_IN_USE")->"User Pack này đang được phiên khác giữ. Hãy chọn User Pack khác.";
+raw.contains("PACK_TABLE_IN_USE")->"Bàn Pack này đang được phiên khác giữ. Hãy chọn bàn khác.";
+raw.contains("USER_PICK_ALREADY_USED_TODAY")->"User Pick này đã dùng hôm nay. Nếu hiện đã rảnh, dùng nút Phát lại user pick.";
+raw.contains("USER_PACK_ALREADY_USED_TODAY")->"User Pack này đã dùng hôm nay. Nếu hiện đã rảnh, dùng nút Phát lại user pack.";
+raw.contains("PACK_MAPPING_INVALID")->"Bàn Pack và User Pack không còn khớp cấu hình hiện tại. Hãy đồng bộ và chọn lại.";
+raw.contains("OPEN_LABOR_BLOCKS_EXIT")->"Còn công nhật đang làm. Hoàn thành công nhật trước khi ra ca.";
+raw.contains("PDA_EXIT_STATUS_REQUIRED")->"Cần chọn tình trạng PDA hiện tại trước khi ra ca.";
+raw.contains("SESSION_NOT_FOUND")->"Phiên trên PDA chưa khớp phiên Service. Bấm đồng bộ rồi quét lại nhân sự.";
+raw.contains("SESSION_NOT_ACTIVE")->"Phiên này không còn ACTIVE trên Service. Bấm đồng bộ rồi quét lại nhân sự.";
+raw.contains("SESSION_WORK_CONFLICT")->"Phiên vừa thay đổi trên máy khác. Dữ liệu cũ không bị ghi đè; hãy đồng bộ rồi sửa lại.";
+raw.contains("SESSION_EXIT_CONFLICT")->"Phiên vừa thay đổi trên máy khác nên chưa thể ra ca. Hãy đồng bộ rồi quét lại.";
+raw.contains("SERVICE_DISCOVERY_UNAVAILABLE")->"Chưa lấy được địa chỉ Service. Kiểm tra mạng rồi bấm đồng bộ lại.";
+raw.contains("SERVICE_NOT_WRITE_AUTHORITY")->"Service hiện chưa ở quyền ghi chính. Hãy đồng bộ lại trước khi thao tác.";
+raw.contains("SUPERADMIN_REQUIRED")->"Thao tác này hiện yêu cầu quyền Superadmin trên Service.";
+raw.contains("CORRECTION_TARGET_NOT_FOUND")->"Không tìm thấy bản ghi gốc cần sửa trên Service. Hãy đồng bộ lịch sử rồi mở lại.";
+raw.contains("CORRECTION_CONFLICT")->"Bản ghi vừa thay đổi trên máy khác. Hãy đồng bộ rồi sửa lại.";
+raw.isBlank()||raw.equals("UNKNOWN",true)->"Service chưa trả mã lỗi cụ thể. Hãy bấm đồng bộ và thử lại; nếu còn lỗi hãy gửi log.";
+raw.contains("PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST")->"Tình trạng PDA hiện tại không khớp lúc vào ca. Không thể RA CA. Phải thông báo cho Chuyên viên sự việc.";raw.contains("PDA_ENTRY_STATUS_MISSING_NOTIFY_SPECIALIST")->"Không xác định được tình trạng PDA lúc vào ca. Không thể RA CA. Phải thông báo cho Chuyên viên sự việc.";raw.contains("PDA_ENTRY_STATUS_STALE")->"Tình trạng PDA vừa thay đổi trên hệ thống. Chọn lại PDA trước khi VÀO CA.";raw.contains("DUPLICATE_USER_OVERRIDE_NOT_REQUIRED")->"User này hiện không thuộc nhóm đang dùng/đã dùng; hãy chọn từ danh sách thường.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Tài nguyên cũ vẫn được giữ.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick này đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack này đã được dùng trong ngày.";raw.contains("PP_LABOR_ALREADY_ACTIVE")->"Mã nhân viên đang có công nhật chưa hoàn thành.";raw.contains("PP_LABOR_NOT_ACTIVE")->"Mã nhân viên không có công nhật đang hoạt động.";raw.contains("CURRENT_PASSWORD_INVALID")->"Mật khẩu hiện tại không đúng.";raw.contains("PASSWORD_POLICY")->"Mật khẩu mới phải có ít nhất 8 ký tự.";raw.contains("EMAIL_INVALID")->"Địa chỉ mail không hợp lệ.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy nhân sự.";raw.contains("STAFF_ACTIVE_SESSION")->"Nhân sự đang có phiên ACTIVE, chưa thể xóa.";raw.contains("FORBIDDEN")->"Tài khoản không có quyền thực hiện thao tác này.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}
 
     private fun iconBubble(res:Int,color:Int)=FrameLayout(this).apply{
         background=round(ThemeManager.soft(this@OperationsActivity),14)
@@ -1589,6 +1631,7 @@ class OperationsActivity : Activity() {
         }
         val e=raw.uppercase()
         return when{
+            e.contains("EXCLUSIVE_RESOURCE_CONFLICT")->"Tài nguyên vừa bị phiên hoặc máy khác giữ / dùng trước. Bản ghi cũ được dừng để tránh cấp trùng; hãy đồng bộ lại rồi tạo thao tác mới với tài nguyên còn trống."
             e.contains("RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Hãy chọn tài nguyên khác."
             e.contains("USER_PICK_USED_TODAY")->"User Pick này đã được sử dụng trong ngày."
             e.contains("USER_PACK_USED_TODAY")->"User Pack này đã được sử dụng trong ngày."
