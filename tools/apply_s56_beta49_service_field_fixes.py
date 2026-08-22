@@ -66,6 +66,21 @@ if old_early not in s:
 s = s.replace(old_early, new_early, 1)
 rep.write_text(s)
 
+core = Path("service/src/core.ts")
+c = core.read_text()
+old_leases = '''  stmts.push(...leaseStatements(db,current.session_id,current.mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["USER_PICK",pick],["PACK_TABLE",table],["USER_PACK",pack]]));'''
+new_leases = '''  // S56_BETA49_ACTIVE_SESSION_DAILY_USER_GUARD_V1: preserve the existing daily-consumption row for an unchanged User in this ACTIVE session.\n  // A newly selected User still uses INSERT and therefore retains the hard daily-uniqueness constraint.\n  stmts.push(...leaseStatements(db,current.session_id,current.mnv,req.business_date,event.event_id,event.committed_at,[["PDA",pda],["PACK_TABLE",table]]));\n  for(const [type,id,unchanged] of [["USER_PICK",pick,pick===(current.user_pick||"")],["USER_PACK",pack,pack===(current.user_pack||"")]] as Array<[string,string,boolean]>){\n    if(!id)continue;\n    stmts.push(db.prepare("INSERT INTO resource_leases(resource_type,resource_id,session_id,mnv,business_date,acquired_event_id,acquired_at) VALUES(?1,?2,?3,?4,?5,?6,?7)").bind(type,id,current.session_id,current.mnv,req.business_date,event.event_id,event.committed_at));\n    if(!unchanged)stmts.push(db.prepare("INSERT INTO resource_daily_consumption(business_date,resource_type,resource_id,mnv,first_event_id) VALUES(?1,?2,?3,?4,?5)").bind(req.business_date,type,id,current.mnv,event.event_id));\n  }'''
+# Only replace the RESOURCE_CHANGE occurrence: it is the second full 4-resource lease call in core.ts.
+pos = c.find("async function commitResourceChange")
+if pos < 0:
+    raise SystemExit("S56 commitResourceChange anchor missing")
+sub = c[pos:]
+if old_leases not in sub:
+    raise SystemExit("S56 resource-change lease anchor missing")
+sub = sub.replace(old_leases, new_leases, 1)
+c = c[:pos] + sub
+core.write_text(c)
+
 idx = Path("service/src/index.ts")
 t = idx.read_text()
 old_sched = '''  async scheduled(_controller:ScheduledController,env:Env,ctx:ExecutionContext):Promise<void>{ctx.waitUntil(Promise.all([replicatePending(env.DB,env),flushPushOutbox(env.DB,env)]).then(()=>undefined).catch(e=>console.log(JSON.stringify({level:"error",kind:"scheduled_background_failed",error:String(e).slice(0,240)}))));},'''
@@ -74,5 +89,14 @@ if old_sched not in t:
     raise SystemExit("S56 scheduler anchor missing")
 t = t.replace(old_sched, new_sched, 1)
 idx.write_text(t)
+
+entry = Path("service/src/entry.ts")
+e = entry.read_text()
+old_pending = '''COALESCE((SELECT pending_count FROM replication_status WHERE singleton_id=1),0) AS projection_pending,'''
+new_pending = '''COALESCE((SELECT COUNT(*) FROM sheet_replication_outbox WHERE status IN ('PENDING','RETRY','INFLIGHT')),0) AS projection_pending,'''
+if old_pending not in e:
+    raise SystemExit("S56 sync pending anchor missing")
+e = e.replace(old_pending, new_pending, 1)
+entry.write_text(e)
 
 print("S56 Beta49 Service field fixes materialized")
