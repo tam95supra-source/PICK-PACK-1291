@@ -21,16 +21,13 @@ swap('''    s = replace_once(
         'var selectedDate=operationalStore.businessDate();var filter="ALL";var pageSize=60;var query=""',
         "history-current-day",
     )
-''','''    # History declaration shape has evolved across S36..S53. Scope replacement to historyScreen.
-    hs=s.find('    private fun historyScreen(){')
+''','''    hs=s.find('    private fun historyScreen(){')
     he=s.find('\\n    private fun ',hs+20)
-    if hs<0 or he<0:
-        raise SystemExit("S54 historyScreen structural anchor missing")
+    if hs<0 or he<0: raise SystemExit("S54 historyScreen structural anchor missing")
     hb=s[hs:he]
     import re as _re
     hb,n=_re.subn(r'(?:var|val)\\s+selectedDate\\s*=\\s*[^;\\n]+', 'var selectedDate=operationalStore.businessDate()', hb, count=1)
-    if n!=1:
-        raise SystemExit(f"S54 history selectedDate structural anchor mismatch: {n}")
+    if n!=1: raise SystemExit(f"S54 history selectedDate structural anchor mismatch: {n}")
     s=s[:hs]+hb+s[he:]
 ''','history')
 
@@ -69,5 +66,32 @@ swap('''    s = replace_once(s, load_app_old, load_app_new, "sync-device-name")
     s=s[:la]+'        '+load_app_new+s[lb:]
 ''','load-app')
 
+swap('''    t = replace_once(
+        t,
+        'val items = store.pendingMutations(100)',
+        'store.retryDateWindowRejects()\\n        val items = store.pendingMutations(100)',
+        "date-reject-requeue",
+    )
+''','''    fs=t.find('    fun flushOutbox(): Boolean {')
+    fe=t.find('\\n    fun ',fs+20)
+    if fs<0: raise SystemExit("S54 flushOutbox structural anchor missing")
+    if fe<0: fe=len(t)
+    fb=t[fs:fe]
+    m=_re.search(r'val items\\s*=\\s*store\\.pendingMutations\\([^)]*\\)',fb)
+    if not m: raise SystemExit("S54 date-reject-requeue structural anchor missing")
+    fb=fb[:m.start()]+'store.retryDateWindowRejects()\\n        '+m.group(0)+fb[m.end():]
+    t=t[:fs]+fb+t[fe:]
+''','transport-requeue')
+
+swap('''    t = replace_once(
+        t,
+        'val SYNC_ACTIONS = setOf("sync_status", "sync_day", "sync_bootstrap")',
+        'val SYNC_ACTIONS = setOf("sync_status", "sync_day", "sync_bootstrap", "service_connections")',
+        "connections-action",
+    )
+''','''    t,n=_re.subn(r'val SYNC_ACTIONS\\s*=\\s*setOf\\(([^)]*)\\)',lambda m: m.group(0) if 'service_connections' in m.group(1) else 'val SYNC_ACTIONS = setOf('+m.group(1).rstrip()+', "service_connections")',t,count=1)
+    if n!=1: raise SystemExit(f"S54 connections-action structural mismatch: {n}")
+''','transport-actions')
+
 patch.write_text(q,encoding='utf-8')
-print('S54A converted History/spacing/cache/app anchors to structural matching')
+print('S54A converted UI and transport anchors to structural matching')
