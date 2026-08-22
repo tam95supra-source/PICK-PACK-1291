@@ -1,6 +1,9 @@
-build=2026-08-21T21:07:00+07:00
-target=0.4.2-beta.44
-version_code=50
-source=Beta44 + S30 idempotency fix + S50B normalized account manager Kotlin
+build=2026-08-22T07:52:00+07:00
+target=0.4.2-beta.45
+version_code=51
+base=Beta44 finalized source 3a1832e87117d8c2a4448d3838330237918b10f3
+change=manual-only version check + detailed Vietnamese Sync UI
+publish_ota=NO
+manual_apk=YES
 stable_publish=FORBIDDEN
 merge_pr38=FORBIDDEN
