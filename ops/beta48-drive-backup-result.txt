@@ -1,0 +1,16 @@
+checked_at=2026-08-22T05:13:00Z
+channel=BETA
+version=0.4.2-beta.48
+version_code=54
+folder_id=1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+apk_file_id=127D3Vi8LVPILlSvAEgqw4F6ZE0ojcfev
+checksum_file_id=1Bs2DI1fQdtY4rX-jkvXNK-zcZQahdlI2
+metadata_file_id=1NivH3twuNznir-nJOMI_ajH_Jk2iADAL
+apk_name=pick-pack-1291-public-beta-0.4.2-beta.48.apk
+expected_sha256=cfca4a83b3a69c554afabecae83ff150e9f0b66639360ea013e24bf4b08d996f
+readback_sha256=cfca4a83b3a69c554afabecae83ff150e9f0b66639360ea013e24bf4b08d996f
+expected_size=12995067
+readback_size=12995067
+exact_bytes=PASS
+stable=UNTOUCHED
+verdict=PASS
