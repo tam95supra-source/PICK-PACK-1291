@@ -11,7 +11,7 @@ if MARK in s:
     print('S52 Beta46 already applied');raise SystemExit(0)
 
 hs=s.find('    private fun historyScreen(){')
-he=s.find('\n    private fun historyTimelineScreen(',hs)
+he=s.find('\n    private fun historyTimeline(',hs)
 if hs<0 or he<0: raise SystemExit('S52 final History block anchors missing')
 h=s[hs:he]
 
@@ -66,8 +66,8 @@ loop=r'''            for(g in visible){
                     setPadding(dp(13),dp(11),dp(13),dp(11));background=outlineBg(tint,17)
                     val top=row(tint).apply{gravity=Gravity.CENTER_VERTICAL
                         if(isSuper()&&deletable.isNotEmpty()){val c=CheckBox(this@OperationsActivity).apply{isChecked=deletable.all{it in selectedHistoryIds};setOnCheckedChangeListener{_,on->if(on)selectedHistoryIds.addAll(deletable)else selectedHistoryIds.removeAll(deletable.toSet());updateSelectedCount()}};pageChecks.add(c);addView(c,size(dp(42),dp(42)))}
-                        addView(txt(listOf(mnv,full).filter{it.isNotBlank()}.joinToString(" – ").ifBlank{"Thao tác hệ thống"},12.5f,ink,true),LinearLayout.LayoutParams(0,-2,1f));addView(badge(label,when(state){"FAILED"->red;"PENDING"->Color.rgb(217,119,6);else->teal}))
-                    };addView(top,matchWrap());addView(txt("${last.optString("label")} • ${formatIso(last.optString("at_iso"))} • ${last.optString("actor").ifBlank{"Hệ thống"}}",10f,muted,false));if(last.optString("detail").isNotBlank())addView(txt(last.optString("detail"),9.5f,muted,false).apply{maxLines=2});if(isSuper()&&deletable.isEmpty())addView(txt("Mục chưa đồng bộ nên chưa thể xóa.",9.1f,orange,false));setOnClickListener{historyTimelineScreen(mnv,items.toMutableList())}
+                        addView(txt(listOf(mnv,full).filter{it.isNotBlank()}.joinToString(" – ").ifBlank{"Thao tác hệ thống"},12.5f,ink,true),LinearLayout.LayoutParams(0,-2,1f));addView(txt(label,9f,when(state){"FAILED"->red;"PENDING"->Color.rgb(217,119,6);else->teal},true).apply{setPadding(dp(7),dp(4),dp(7),dp(4));background=round(Color.WHITE,9)})
+                    };addView(top,matchWrap());addView(txt("${last.optString("label")} • ${formatIso(last.optString("at_iso"))} • ${last.optString("actor").ifBlank{"Hệ thống"}}",10f,muted,false));if(last.optString("detail").isNotBlank())addView(txt(last.optString("detail"),9.5f,muted,false).apply{maxLines=2});if(isSuper()&&deletable.isEmpty())addView(txt("Mục chưa đồng bộ nên chưa thể xóa.",9.1f,orange,false));setOnClickListener{historyTimeline(items)}
                 };box.addView(card,matchWrap());box.addView(gap(6))
             }
             updateSelectedCount()
@@ -76,7 +76,7 @@ h=h[:loop_start]+loop+h[loop_end:]
 
 s=s[:hs]+h+s[he:]
 
-anchor='    private fun historyTimelineScreen('
+anchor='    private fun historyTimeline('
 idx=s.find(anchor)
 if idx<0: raise SystemExit('S52 timeline helper insertion anchor missing')
 helper=r'''    private fun deleteHistoryBulk(ids:List<String>){
@@ -108,7 +108,7 @@ a=a.replace(action,'''"service_connections","account_delete","history_delete")''
 API.write_text(a,encoding='utf-8')
 
 out=OPS.read_text(encoding='utf-8');api=API.read_text(encoding='utf-8')
-checks=[(MARK in out,'marker'),('deleteHistoryBulk' in out,'delete helper'),('CHỌN TRANG' in out,'page multi-select'),('XÓA ĐÃ CHỌN' in out,'bulk delete button'),('verifyDeletePassword("xóa ${clean.size} lịch sử")' in out,'password gate'),('HISTORY_DELETE' in out and 'target_event_ids' in out,'tombstone filter'),('/v1/history/delete' in api,'service route'),('"history_delete"' in api,'direct action')]
+checks=[(MARK in out,'marker'),('deleteHistoryBulk' in out,'delete helper'),('CHỌN TRANG' in out,'page multi-select'),('XÓA ĐÃ CHỌN' in out,'bulk delete button'),('verifyDeletePassword("xóa ${clean.size} lịch sử")' in out,'password gate'),('HISTORY_DELETE' in out and 'target_event_ids' in out,'tombstone filter'),('/v1/history/delete' in api,'service route'),('"history_delete"' in api,'direct action'),('badge(label,' not in out,'no unresolved status chip'),('historyTimelineScreen(mnv,items.toMutableList())' not in out,'final detail route')]
 for ok,label in checks:
     if not ok: raise SystemExit('S52 contract missing: '+label)
-print('Applied S52 Beta46: SUPERADMIN password-gated single/page bulk logical History delete + tombstone filtering')
+print('Applied S52 Beta46: SUPERADMIN password-gated page/bulk logical History delete + tombstone filtering')
