@@ -1,0 +1,7 @@
+requested_at=2026-08-22T08:49:00+07:00
+mode=MANUAL_CHECK_ONLY
+target=0.4.2-beta.46
+from=0.4.2-beta.45
+automatic_check=DISABLED
+stable=FORBIDDEN
+merge_pr38=FORBIDDEN
