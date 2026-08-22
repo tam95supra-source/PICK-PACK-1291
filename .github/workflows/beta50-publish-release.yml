@@ -1,0 +1,192 @@
+name: Beta50 Publish Release
+
+on:
+  push:
+    branches:
+      - stabilization/beta48-golden-reset-beta50-20260822
+    paths:
+      - '.github/workflows/beta50-publish-release.yml'
+
+permissions:
+  contents: write
+  actions: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: beta50-publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SIGNED_RUN_ID: '32567143831'
+      SOURCE_SHA: 39efa0a6bf1f7d1b3d93d104e3a2395a3ddb2440
+      VERSION: 0.4.2-beta.50
+      VERSION_CODE: '56'
+      TAG: v0.4.2-beta.50-publicbeta
+      APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.50.apk
+      ARTIFACT_NAME: pick-pack-1291-public-beta-0.4.2-beta.50-signed-candidate
+      BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+      EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - name: Announce publish run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_PUBLISH_RUN start run=${GITHUB_RUN_ID} signed_run=${SIGNED_RUN_ID} source_sha=${SOURCE_SHA}"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 0
+
+      - name: Wait for and download exact signed candidate
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_ID=""
+          for n in $(seq 1 60); do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SIGNED_RUN_ID}/artifacts?per_page=100" > /tmp/artifacts.json || true
+            ARTIFACT_ID=$(python3 - <<'PY'
+          import json,os
+          try:j=json.load(open('/tmp/artifacts.json'))
+          except Exception: print(''); raise SystemExit
+          want=os.environ['ARTIFACT_NAME']
+          a=[x for x in j.get('artifacts',[]) if x.get('name')==want and not x.get('expired')]
+          print(a[0]['id'] if a else '')
+          PY
+          )
+            if [[ -n "$ARTIFACT_ID" ]]; then break; fi
+            sleep 10
+          done
+          [[ -n "$ARTIFACT_ID" ]] || { echo SIGNED_ARTIFACT_NOT_AVAILABLE; exit 42; }
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > /tmp/candidate.zip
+          rm -rf /tmp/candidate && mkdir -p /tmp/candidate
+          unzip -q /tmp/candidate.zip -d /tmp/candidate
+          APK=$(find /tmp/candidate -type f -name "$APK_NAME" -print -quit)
+          MANIFEST=$(find /tmp/candidate -type f -name CANDIDATE_MANIFEST.txt -print -quit)
+          SUM=$(find /tmp/candidate -type f -name 'SHA256SUMS-*.txt' -print -quit)
+          [[ -s "$APK" && -s "$MANIFEST" && -s "$SUM" ]]
+          grep -qx "source_sha=$SOURCE_SHA" "$MANIFEST"
+          grep -qx "version=$VERSION" "$MANIFEST"
+          grep -qx "version_code=$VERSION_CODE" "$MANIFEST"
+          grep -qx "package=$EXPECTED_PACKAGE" "$MANIFEST"
+          grep -qx "signer_sha256=$EXPECTED_SIGNER_SHA256" "$MANIFEST"
+          grep -qx 'stable=UNTOUCHED' "$MANIFEST"
+          grep -qx 'beta49=ABANDONED' "$MANIFEST"
+          grep -qx 'verdict=PASS' "$MANIFEST"
+          SHA=$(sed -n 's/^apk_sha256=//p' "$MANIFEST")
+          SIZE=$(sed -n 's/^apk_size=//p' "$MANIFEST")
+          [[ "$SHA" =~ ^[0-9a-f]{64}$ && "$SIZE" =~ ^[0-9]+$ ]]
+          [[ "$(sha256sum "$APK"|awk '{print $1}')" == "$SHA" ]]
+          [[ "$(stat -c '%s' "$APK")" == "$SIZE" ]]
+          grep -qx "$SHA  $APK_NAME" "$SUM"
+          echo "artifact_id=$ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "apk=$APK" >> "$GITHUB_OUTPUT"
+          echo "manifest=$MANIFEST" >> "$GITHUB_OUTPUT"
+          echo "sum=$SUM" >> "$GITHUB_OUTPUT"
+
+      - name: Publish or verify GitHub prerelease exact bytes
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.candidate.outputs.apk }}
+          MANIFEST: ${{ steps.candidate.outputs.manifest }}
+          SUM: ${{ steps.candidate.outputs.sum }}
+          EXPECTED_SHA: ${{ steps.candidate.outputs.sha }}
+          EXPECTED_SIZE: ${{ steps.candidate.outputs.size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/tmp/release-view 2>/dev/null; then
+            gh release download "$TAG" -p "$APK_NAME" -D /tmp/release-existing --clobber
+            [[ "$(sha256sum /tmp/release-existing/$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+            [[ "$(stat -c '%s' /tmp/release-existing/$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          else
+            gh release create "$TAG" "$APK#$APK_NAME" "$SUM#$(basename "$SUM")" "$MANIFEST#CANDIDATE_MANIFEST.txt" \
+              --target "$SOURCE_SHA" --title "Pick Pack 1291 $VERSION" --prerelease \
+              --notes "Beta50: thêm Quản lý biên bản (chờ xây dựng); bỏ Người dùng đang kết nối và headline còn xx mục chờ gửi; phân tách Đồng bộ theo PDA/Service/Google Sheet/thông tin khác; chuyển Thông tin ứng dụng vào Cài đặt. Canonical source, không còn build-time Sxx mutation. Stable untouched; Beta49 abandoned."
+          fi
+          rm -rf /tmp/release-check && mkdir -p /tmp/release-check
+          gh release download "$TAG" -p "$APK_NAME" -D /tmp/release-check --clobber
+          [[ "$(sha256sum /tmp/release-check/$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          [[ "$(stat -c '%s' /tmp/release-check/$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > /tmp/release.json
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('/tmp/release.json'))
+          assert j.get('prerelease') is True,j
+          assert j.get('draft') is False,j
+          assert j.get('tag_name')==os.environ['TAG'],j
+          a=[x for x in j.get('assets',[]) if x.get('name')==os.environ['APK_NAME']]
+          assert len(a)==1,a
+          print('release_id='+str(j['id']))
+          print('published_at='+str(j.get('published_at') or ''))
+          PY
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload exact APK backup to Beta Drive and verify bytes
+        id: drive
+        env:
+          APK: ${{ steps.candidate.outputs.apk }}
+          EXPECTED_SHA: ${{ steps.candidate.outputs.sha }}
+          EXPECTED_SIZE: ${{ steps.candidate.outputs.size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do [[ -n "${!v:-}" ]] || { echo "MISSING_GOOGLE_OAUTH:$v"; exit 43; }; done
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" \
+            --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' | jq -r '.access_token // empty')
+          [[ -n "$TOKEN" ]]; echo "::add-mask::$TOKEN"
+          q=$(python3 - <<'PY'
+          import os,urllib.parse
+          n=os.environ['APK_NAME'].replace("'","\\'"); f=os.environ['BETA_FOLDER_ID']
+          print(urllib.parse.quote("'%s' in parents and trashed=false and name='%s'"%(f,n)))
+          PY
+          )
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name,size)&pageSize=100" > /tmp/list.json
+          COUNT=$(jq '.files|length' /tmp/list.json); [[ "$COUNT" -le 1 ]]
+          if [[ "$COUNT" == 1 ]]; then
+            ID=$(jq -r '.files[0].id' /tmp/list.json)
+          else
+            META=$(jq -nc --arg n "$APK_NAME" --arg p "$BETA_FOLDER_ID" '{name:$n,parents:[$p],mimeType:"application/vnd.android.package-archive"}')
+            curl -fsS -D /tmp/hdr -o /tmp/init -X POST 'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size' \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json; charset=UTF-8' \
+              -H 'X-Upload-Content-Type: application/vnd.android.package-archive' -H "X-Upload-Content-Length: $EXPECTED_SIZE" --data "$META"
+            LOC=$(awk 'BEGIN{IGNORECASE=1}/^location:/{sub(/\r$/,"");sub(/^location:[[:space:]]*/,"");print;exit}' /tmp/hdr)
+            [[ -n "$LOC" ]]
+            curl -fsSL -X PUT "$LOC" -H 'Content-Type: application/vnd.android.package-archive' --data-binary @"$APK" > /tmp/upload.json
+            ID=$(jq -r '.id // empty' /tmp/upload.json)
+          fi
+          [[ -n "$ID" ]]; echo "::add-mask::$ID"
+          curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files/$ID?alt=media" -o /tmp/drive.apk
+          [[ "$(sha256sum /tmp/drive.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
+          [[ "$(stat -c '%s' /tmp/drive.apk)" == "$EXPECTED_SIZE" ]]
+          echo "file_id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Report publish result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.candidate.outputs.artifact_id }}
+          APK_SHA: ${{ steps.candidate.outputs.sha }}
+          APK_SIZE: ${{ steps.candidate.outputs.size }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          DRIVE_ID: ${{ steps.drive.outputs.file_id }}
+        shell: bash
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA50_PUBLISH_RUN finish run=${GITHUB_RUN_ID} job=${{ job.status }} signed_artifact=${ARTIFACT_ID:-NONE} sha256=${APK_SHA:-NONE} size=${APK_SIZE:-NONE} release=${RELEASE_URL:-NONE} drive_backup=${DRIVE_ID:+VERIFIED}"
