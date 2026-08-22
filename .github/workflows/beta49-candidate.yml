@@ -88,19 +88,29 @@ jobs:
           lg=Path('app/src/main/java/vn/pickpack1291/app/beta/LocalLogManager.kt').read_text()
           required={
             's56':'S56_BETA49_FIELD_ACCEPTANCE' in ops,
-            'live_master_options':'api.call("master_options",JSONObject().put("mnv",mnv))' in ops,
-            'no_stale_entry_cache':'MasterDataCache.resourceOptions(this@OperationsActivity)' not in ops,
-            'pack_composite':'packUsers' in ops and '.put("user_pack",user)' in ops,
-            'pack_no_shift_filter':'optString("shift")!=selectedShift' not in ops and 'optString("shift")!=s.optString("shift")' not in ops,
-            'no_presence_ui':'NGƯỜI DÙNG ĐANG KẾT NỐI' not in ops and 'service_connections' not in ops,
-            'no_presence_transport':'service_connections' not in tr,
+            'live_entry':'api.call("master_options",JSONObject().put("mnv",mnv))' in ops,
+            'live_editor':'sessionWorkEditorWithOptions(ctx,r.json)' in ops,
+            'enter_revalidate':'ĐANG KIỂM TRA TÀI NGUYÊN' in ops and 'freshCtx.optString("state")!="NOT_ENTERED"' in ops,
+            'pack_composite':'packSelection' in ops and 'payload.put("pack_table",row.optString("table")).put("user_pack",row.optString("user_pack"))' in ops,
+            'pack_two_shift':'User Pack theo bàn — cả hai ca' in ops,
             'selected_pda':'SERI PDA ĐÃ CHỌN' in ops,
             'log_accounting':'S56_BETA49_LOG_ACCOUNTING_V1' in lg and 'KEY_GENERATED_BYTES' in lg and 'KEY_SENT_BYTES' in lg,
             'cache_size':'Dung lượng cache' in ops,
             'pick_label':'Không dùng User hy1.outbound' in ops,
           }
-          bad=[k for k,v in required.items() if not v]
-          for k,v in required.items(): print('CONTRACT',k,'PASS' if v else 'FAIL')
+          forbidden={
+            'stale_entry_cache':'MasterDataCache.resourceOptions(this@OperationsActivity)' in ops,
+            'stale_editor_cache':'PdaLocalProjection.resourceOptions(this,mnv)' in ops,
+            'pack_shift_filter_1':'optString("shift")!=selectedShift' in ops,
+            'pack_shift_filter_2':'optString("shift")!=s.optString("shift")' in ops,
+            'pack_shift_filter_3':'optString("shift")!=ses.optString("shift")' in ops,
+            'presence_ui':'NGƯỜI DÙNG ĐANG KẾT NỐI' in ops or 'service_connections' in ops,
+            'presence_transport':'service_connections' in tr,
+            'duplicate_reissue':'PHÁT LẠI USER ĐANG DÙNG' in ops or 'duplicate_user' in ops or 'TRÙNG USER' in ops,
+          }
+          bad=[]
+          for k,v in required.items(): print('REQUIRED',k,'PASS' if v else 'FAIL'); bad += ([] if v else [k])
+          for k,v in forbidden.items(): print('FORBIDDEN',k,'PASS' if not v else 'FAIL'); bad += ([k] if v else [])
           if bad: raise SystemExit('CONTRACT_FAIL:'+','.join(bad))
           PY
       - name: Build Beta and validate Stable
@@ -117,18 +127,12 @@ jobs:
           BETA_CODE: ${{ steps.meta.outputs.beta_code }}
         run: |
           set -euo pipefail
-          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
-          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"; BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk; STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
           test -s "$BETA"; test -s "$STABLE"
-          "$BT/aapt" dump badging "$BETA" > /tmp/beta.txt
-          "$BT/aapt" dump badging "$STABLE" > /tmp/stable.txt
+          "$BT/aapt" dump badging "$BETA" > /tmp/beta.txt; "$BT/aapt" dump badging "$STABLE" > /tmp/stable.txt
           grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta.txt
-          grep -q "versionCode='$BETA_CODE'" /tmp/beta.txt
-          grep -q "versionName='$BETA_NAME'" /tmp/beta.txt
-          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt
-          grep -q "versionCode='1'" /tmp/stable.txt
-          grep -q "versionName='0.1.0-stable'" /tmp/stable.txt
+          grep -q "versionCode='$BETA_CODE'" /tmp/beta.txt; grep -q "versionName='$BETA_NAME'" /tmp/beta.txt
+          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt; grep -q "versionCode='1'" /tmp/stable.txt; grep -q "versionName='0.1.0-stable'" /tmp/stable.txt
       - name: Sign Beta49 and verify locked signer
         id: sign
         shell: bash
@@ -137,15 +141,12 @@ jobs:
         run: |
           set -euo pipefail
           for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]]; done
-          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
-          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"; printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
           mkdir -p dist/beta; OUT="dist/beta/pick-pack-1291-public-beta-${BETA_NAME}.apk"; BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
           "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          "$BT/apksigner" verify --verbose --print-certs "$OUT" > /tmp/cert.txt
-          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" > /tmp/cert.txt; grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
           sha=$(sha256sum "$OUT"|awk '{print $1}'); size=$(stat -c '%s' "$OUT"); file=$(basename "$OUT")
-          printf '%s  %s\n' "$sha" "$file" > "dist/beta/SHA256SUMS-${BETA_NAME}.txt"
-          "$BT/aapt" dump badging "$OUT" > "dist/beta/APK_BADGING-${BETA_NAME}.txt"
+          printf '%s  %s\n' "$sha" "$file" > "dist/beta/SHA256SUMS-${BETA_NAME}.txt"; "$BT/aapt" dump badging "$OUT" > "dist/beta/APK_BADGING-${BETA_NAME}.txt"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "size=$size" >> "$GITHUB_OUTPUT"; echo "file=$file" >> "$GITHUB_OUTPUT"
       - name: Upload exact signed Beta49 candidate
         id: upload
@@ -170,8 +171,7 @@ jobs:
           APK_FILE: ${{ steps.sign.outputs.file }}
         run: |
           set -euo pipefail
-          verdict=FAIL
-          [[ "$MATERIALIZE" == success && "$CONTRACT" == success && "$BUILD" == success && "$PACKAGE" == success && "$SIGN" == success && "$UPLOAD" == success && -n "${ARTIFACT_ID:-}" ]] && verdict=PASS
+          verdict=FAIL; [[ "$MATERIALIZE" == success && "$CONTRACT" == success && "$BUILD" == success && "$PACKAGE" == success && "$SIGN" == success && "$UPLOAD" == success && -n "${ARTIFACT_ID:-}" ]] && verdict=PASS
           git reset --hard "$GITHUB_SHA"
           cat > ops/beta-release-candidate-result.txt <<EOF
           checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -197,12 +197,8 @@ jobs:
           stable_publish=FORBIDDEN
           verdict=$verdict
           EOF
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ops/beta-release-candidate-result.txt
-          git commit -m "ops: record Beta49 candidate $verdict" || true
-          git pull --rebase origin agent/service-migration-m2
-          git push origin HEAD:agent/service-migration-m2
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/beta-release-candidate-result.txt; git commit -m "ops: record Beta49 candidate $verdict" || true; git pull --rebase origin agent/service-migration-m2; git push origin HEAD:agent/service-migration-m2
           [[ "$verdict" == PASS ]]
       - name: Cleanup signing material
         if: always()
