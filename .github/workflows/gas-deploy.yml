@@ -40,6 +40,9 @@ jobs:
           python3 tools/apply_s46_gas_auth.py
           python3 tools/apply_github_ota_canonical.py
           grep -q 'PP_GITHUB_RELEASE_OTA_CANONICAL_V1' google-apps-script/PICK_PACK_API.gs
+          grep -q 'PP_GITHUB_OTA_STATIC_V1' google-apps-script/ZZZ_GITHUB_OTA_OVERRIDE.gs
+          ! grep -q 'function ppUpdateCheck_' google-apps-script/ZZZ_GITHUB_OTA_OVERRIDE.gs
+          ! grep -R -q 'api.github.com/.*/releases' google-apps-script
           cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
           cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
           node --check /tmp/PICK_PACK_API.js
@@ -47,9 +50,10 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_ENV"
           import json,re
           m=json.load(open('ops/beta-ota-current.json'))
-          v=str(m['version_name']);sha=str(m['sha256']).lower();code=int(m['version_code'])
+          assert m.get('source')=='GITHUB_RELEASE',m
+          v=str(m['version_name']);sha=str(m['sha256']).lower();code=int(m['version_code']);size=int(m['size'])
           n=int(re.search(r'beta\.(\d+)$',v).group(1)); prev=re.sub(r'beta\.\d+$',f'beta.{max(0,n-1)}',v)
-          print('TARGET_BETA='+v);print('TARGET_BETA_SHA256='+sha);print('TARGET_BETA_CODE='+str(code));print('FROM_BETA='+prev)
+          print('TARGET_BETA='+v);print('TARGET_BETA_SHA256='+sha);print('TARGET_BETA_CODE='+str(code));print('TARGET_BETA_SIZE='+str(size));print('FROM_BETA='+prev)
           PY
 
       - name: Exchange OAuth and deploy Apps Script
@@ -103,7 +107,7 @@ jobs:
           import json,os
           try:j=json.load(open('/tmp/update.json'))
           except:raise SystemExit(1)
-          ok=j.get('ok') is True and j.get('available') is True and j.get('source')=='GITHUB_RELEASE' and j.get('version_name')==os.environ['TARGET_BETA'] and str(j.get('sha256','')).lower()==os.environ['TARGET_BETA_SHA256'] and str(j.get('apk_url','')).startswith('https://github.com/')
+          ok=(j.get('ok') is True and j.get('available') is True and j.get('source')=='GITHUB_RELEASE' and j.get('version_name')==os.environ['TARGET_BETA'] and int(j.get('version_code',-1))==int(os.environ['TARGET_BETA_CODE']) and int(j.get('size',-1))==int(os.environ['TARGET_BETA_SIZE']) and str(j.get('sha256','')).lower()==os.environ['TARGET_BETA_SHA256'] and str(j.get('apk_url','')).startswith('https://github.com/'))
           raise SystemExit(0 if ok else 1)
           PY
             then good=true; break; fi
@@ -113,6 +117,7 @@ jobs:
           URL=$(python3 -c 'import json;print(json.load(open("/tmp/update.json"))["apk_url"])')
           curl -fL --retry 6 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 180 "$URL" -o /tmp/ota.apk
           [[ "$(sha256sum /tmp/ota.apk | awk '{print $1}')" == "$TARGET_BETA_SHA256" ]]
+          [[ "$(stat -c '%s' /tmp/ota.apk)" == "$TARGET_BETA_SIZE" ]]
           post "{\"action\":\"update_check\",\"channel\":\"BETA\",\"current_version\":\"$TARGET_BETA\"}" > /tmp/self.json
           post '{"action":"update_check","channel":"STABLE","current_version":"0.1.0-stable"}' > /tmp/stable.json
           python3 - <<'PY'
@@ -128,6 +133,7 @@ jobs:
         if: always()
         shell: bash
         env:
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
           GAS_VERSION: ${{ steps.deploy.outputs.version }}
           VERIFY_OUTCOME: ${{ steps.verify.outcome }}
           DOWNLOAD_SHA: ${{ steps.verify.outputs.download_sha }}
@@ -135,21 +141,28 @@ jobs:
         run: |
           set -euo pipefail
           verdict=FAIL
-          [[ "$VERIFY_OUTCOME" == success ]] && verdict=PASS
+          [[ "$DEPLOY_OUTCOME" == success && "$VERIFY_OUTCOME" == success ]] && verdict=PASS
+          git reset --hard "$GITHUB_SHA"
           cat > ops/gas-deploy-result.txt <<EOF
           checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           source_sha=$GITHUB_SHA
           run_id=$GITHUB_RUN_ID
           gas_version=${GAS_VERSION:-}
+          deploy=${DEPLOY_OUTCOME:-}
+          verify=${VERIFY_OUTCOME:-}
           ota_source=GITHUB_RELEASE
+          ota_metadata=STATIC_CANONICAL
+          runtime_github_releases_api=DISABLED
           from_version=${FROM_BETA:-}
           beta_target=${TARGET_BETA:-}
           beta_code=${TARGET_BETA_CODE:-}
           beta_sha256=${TARGET_BETA_SHA256:-}
+          beta_size=${TARGET_BETA_SIZE:-}
           download_sha256=${DOWNLOAD_SHA:-}
           download_size=${DOWNLOAD_SIZE:-}
           manual_check=PASS
           automatic_check=DISABLED_IN_APP
+          target_self_update=FALSE
           stable=UNTOUCHED
           pr38_merge=FORBIDDEN
           verdict=$verdict
