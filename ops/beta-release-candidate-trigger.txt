@@ -1,10 +1,10 @@
-build=2026-08-22T09:35:30+07:00
-target=0.4.2-beta.47
-version_code=53
-base=Beta46
-change=Sheet operational model alignment, readable full audit, pending history delete, concise sync, APP+WEB connections, catalog realtime
-retry_seq=6
-retry_reason=bind candidate to frozen final Service source
+build=2026-08-22T10:51:00+07:00
+target=0.4.2-beta.48
+version_code=54
+base=Beta47
+change=OWNER 10 fixes: User Pack both shifts/reuse, rolling History, current-day sync, APP+WEB connections, compact UI, device/cache/log/serial clarity, User hy1.outbound copy
+retry_seq=7
+retry_reason=registered metadata-driven candidate workflow
 source_frozen=YES
 publish_ota=AFTER_PASS_MANUAL_CHECK_ONLY
 drive_backup=REQUIRED_BETA47_PLUS
