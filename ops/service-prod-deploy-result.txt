@@ -1,0 +1,14 @@
+checked_at=2026-08-22T07:23:36Z
+source_sha=740278ea2363c62a49d36544f701b2e8a2bca836
+run_id=32559463667
+target=pick-pack-1291-service
+d1=pick-pack-1291-service-prod
+service_materializer=S56_BETA49_FIELD_FIXES
+materialize=failure
+prehealth=skipped
+config=skipped
+deploy=skipped
+probe=skipped
+stable=UNTOUCHED
+pr38_merge=FORBIDDEN
+verdict=FAIL
