@@ -1,0 +1,130 @@
+name: Beta51 Signed Candidate
+on:
+  push:
+    branches: [stabilization/beta48-golden-reset-beta50-20260822]
+    paths: ['.github/workflows/beta51-signed-candidate.yml']
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+concurrency:
+  group: beta51-signed-candidate
+  cancel-in-progress: false
+jobs:
+  build-sign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SOURCE_SHA: ad533975be4f38009b02e1adb7ea552b6850a244
+      EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+      EXPECTED_VERSION: 0.4.2-beta.51
+      EXPECTED_CODE: '57'
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+      SIGNING_KEY_B64: ${{ secrets.ANDROID_SIGNING_KEY_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
+    steps:
+      - name: Start receipt
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_SIGNED_RUN start run=${GITHUB_RUN_ID} source_sha=${SOURCE_SHA}"
+      - uses: actions/checkout@v4
+        with: {ref: '${{ env.SOURCE_SHA }}', fetch-depth: 0}
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.4.1', cache-read-only: true}
+      - name: Resolve Firebase config silently
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os
+          j=json.load(open('app/google-services.json',encoding='utf-8')); pi=j.get('project_info') or {}; cs=j.get('client') or []; c=cs[0] if cs else {}; ci=c.get('client_info') or {}; ks=c.get('api_key') or []
+          vals={'FIREBASE_PROJECT_ID':str(pi.get('project_id') or '').strip(),'FIREBASE_GOOGLE_APP_ID':str(ci.get('mobilesdk_app_id') or '').strip(),'FIREBASE_API_KEY':str((ks[0] if ks else {}).get('current_key') or '').strip(),'FIREBASE_GCM_SENDER_ID':str(pi.get('project_number') or '').strip()}
+          assert all(vals.values()),'FIREBASE_CLIENT_CONFIG_INCOMPLETE'
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for k,v in vals.items(): print(f'::add-mask::{v}'); f.write(f'{k}={v}\n')
+          PY
+      - name: Beta51 contract gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 57' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.51"' app/build.gradle.kts
+          f=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Phát lại user pick' "$f"
+          grep -q 'Phát lại user pack' "$f"
+          grep -q 'User Pick hy1.outbound' "$f"
+          grep -q 'mutableListOf("Không dùng")' "$f"
+          grep -q 'naturalUserCompare' "$f"
+          grep -q 'pdaSelectedPanel(pdas,pdaField' "$f"
+          ! grep -q 'Chọn gợi ý để hiện đầy đủ Seri PDA' "$f"
+          ! grep -q 'Không dùng User hy1.outbound' "$f"
+          ! grep -q 'PHÁT LẠI USER ĐÃ DÙNG' "$f"
+          ! grep -q 'ẨN USER TRÙNG' "$f"
+          python3 - <<'PY'
+          from pathlib import Path
+          s=Path('app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt').read_text()
+          assert 'var allowPickReissue=false;var allowPackReissue=false' in s
+          assert 'o.optString("shift")!=shiftValue' not in s
+          assert 'o.optString("shift")!=ses.optString("shift")' not in s
+          assert s.count('compactReissueButton("Phát lại user pick"')>=2
+          assert s.count('compactReissueButton("Phát lại user pack"')>=2
+          print('BETA51_ANDROID_CONTRACT=PASS')
+          PY
+      - name: Build Beta51 only
+        run: |
+          gradle --no-daemon :app:assembleBetaRelease
+          git diff --exit-code
+      - name: Firebase BuildConfig gate
+        run: |
+          python3 - <<'PY'
+          import pathlib,re
+          t='\n'.join(p.read_text(errors='ignore') for p in list(pathlib.Path('app/build/generated').rglob('BuildConfig.java'))+list(pathlib.Path('app/build/generated').rglob('BuildConfig.kt')))
+          for k in ('FIREBASE_PROJECT_ID','FIREBASE_GOOGLE_APP_ID','FIREBASE_API_KEY','FIREBASE_GCM_SENDER_ID'):
+            m=re.search(r'\b'+re.escape(k)+r'\b[^\n]*?[= ]+\s*"([^"]*)"',t); assert m and m.group(1).strip(),k
+          print('firebase_buildconfig=CONFIGURED')
+          PY
+      - name: Resolve build tools
+        run: |
+          BT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools/36.0.0"; if [[ ! -x "$BT/aapt" || ! -x "$BT/apksigner" ]]; then BT=$(dirname "$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -type f -name apksigner -perm -u+x | sort -V | tail -1)"); fi
+          test -x "$BT/aapt"; test -x "$BT/apksigner"; echo "BT=$BT" >> "$GITHUB_ENV"
+      - name: Verify unsigned identity
+        run: |
+          APK=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk; test -s "$APK"; "$BT/aapt" dump badging "$APK" >/tmp/badging
+          grep -q "package: name='$EXPECTED_PACKAGE'" /tmp/badging; grep -q "versionCode='$EXPECTED_CODE'" /tmp/badging; grep -q "versionName='$EXPECTED_VERSION'" /tmp/badging
+      - name: Sign exact Beta51
+        id: sign
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do test -n "${!v:-}"; done
+          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64"|base64 -d >"$KS"; printf '%s' "$SIGNING_STORE_PASSWORD">"$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD">"$RUNNER_TEMP/key.pass"
+          mkdir -p dist/beta51; OUT="dist/beta51/pick-pack-1291-public-beta-${EXPECTED_VERSION}.apk"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" >/tmp/certs; grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/certs
+          SHA=$(sha256sum "$OUT"|awk '{print $1}'); SIZE=$(stat -c '%s' "$OUT"); NAME=$(basename "$OUT")
+          printf '%s  %s\n' "$SHA" "$NAME">"dist/beta51/SHA256SUMS-${EXPECTED_VERSION}.txt"
+          printf 'source_sha=%s\nversion=%s\nversion_code=%s\npackage=%s\nsigner_sha256=%s\napk_name=%s\napk_sha256=%s\napk_size=%s\nstable=UNTOUCHED\nbeta49=ABANDONED\nverdict=PASS\n' "$SOURCE_SHA" "$EXPECTED_VERSION" "$EXPECTED_CODE" "$EXPECTED_PACKAGE" "$EXPECTED_SIGNER_SHA256" "$NAME" "$SHA" "$SIZE" >dist/beta51/CANDIDATE_MANIFEST.txt
+          echo "sha=$SHA" >>"$GITHUB_OUTPUT"; echo "size=$SIZE" >>"$GITHUB_OUTPUT"; echo "name=$NAME" >>"$GITHUB_OUTPUT"
+      - name: Upload immutable signed candidate
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: pick-pack-1291-public-beta-0.4.2-beta.51-signed-candidate
+          path: dist/beta51/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Finish receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_SHA: ${{ steps.sign.outputs.sha }}
+          APK_SIZE: ${{ steps.sign.outputs.size }}
+          APK_NAME: ${{ steps.sign.outputs.name }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_SIGNED_RUN finish run=${GITHUB_RUN_ID} source_sha=${SOURCE_SHA} job=${{ job.status }} artifact=${ARTIFACT_ID:-NONE} apk=${APK_NAME:-NONE} sha256=${APK_SHA:-NONE} size=${APK_SIZE:-NONE}"
+      - name: Cleanup signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
