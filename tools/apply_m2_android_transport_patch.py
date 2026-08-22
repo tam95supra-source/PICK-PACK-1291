@@ -25,6 +25,7 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s50b_beta44_compile_hotfix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s51_beta45_manual_update_sync_detail_vi.py"), run_name="__main__")
+    runpy.run_path(str(ROOT / "tools/apply_s51b_beta45_compile_guard.py"), run_name="__main__")
     raise SystemExit(0)
 
 anchor = "    private val executor = Executors.newSingleThreadExecutor()\n"
@@ -89,4 +90,5 @@ runpy.run_path(str(ROOT / "tools/apply_s31_service_first_hotpath.py"), run_name=
 runpy.run_path(str(ROOT / "tools/apply_s31b_preserve_admin_audit.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s50b_beta44_compile_hotfix.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s51_beta45_manual_update_sync_detail_vi.py"), run_name="__main__")
-print(f"Applied M2 dynamic Service transport + Beta44 chain + clean Beta45 S51: {path}")
+runpy.run_path(str(ROOT / "tools/apply_s51b_beta45_compile_guard.py"), run_name="__main__")
+print(f"Applied M2 dynamic Service transport + Beta44 chain + clean Beta45 S51/S51B: {path}")
