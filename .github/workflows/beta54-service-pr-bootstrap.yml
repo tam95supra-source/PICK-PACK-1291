@@ -1,0 +1,53 @@
+name: Beta54 Service PR Bootstrap
+
+on:
+  pull_request:
+    branches:
+      - agent/service-migration-m2
+
+permissions:
+  contents: write
+
+jobs:
+  apply-check-commit:
+    if: ${{ github.event.pull_request.head.ref == 'fix/beta54-service-exit-20260822' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+      - name: Apply canonical exit repairs
+        run: |
+          python3 -m py_compile tools/apply_beta54_service_exit_resilience.py
+          python3 tools/apply_beta54_service_exit_resilience.py
+      - name: Install and typecheck Service
+        working-directory: service
+        run: |
+          npm ci
+          npm run check
+      - name: Static guards
+        run: |
+          grep -Fq 'PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST' service/src/core.ts
+          grep -Fq 'PDA_EXIT_STATUS_REQUIRED' service/src/core.ts
+          grep -Fq 'SESSION_ACTIVE_AMBIGUOUS' service/src/session_hotfix.ts
+          grep -Fq 'SESSION_EMPLOYEE_MISMATCH' service/src/session_hotfix.ts
+          grep -Fq 'sheet_replication_outbox' service/src/core.ts
+          git diff --check
+      - name: Commit canonical repaired Service source to PR head
+        env:
+          TARGET_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add service/src/core.ts service/src/session_hotfix.ts
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(service): canonical exit resolution and PDA guards [beta54-service-applied]'
+            git push origin HEAD:"$TARGET_BRANCH"
+          fi
