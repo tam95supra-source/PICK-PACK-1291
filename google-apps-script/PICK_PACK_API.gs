@@ -109,15 +109,16 @@ function ppOtaSha256_(file) {
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
+// PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 function ppUpdateCheck_(body) {
   const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
   const current=String(body.current_version||body._app_version||'').trim();
   if(channel==='STABLE') return {ok:true,source:'GITHUB_RELEASE',channel:'STABLE',available:false,reason:'NO_RELEASE'};
-  const version="0.4.2-beta.48", available=ppOtaCompare_(version,current)>0;
-  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:54,size:12995067,published_at:"2026-08-22T05:12:20Z",notes:"User Pack theo bàn hiển thị mapping cả hai ca trong ngày, vẫn ẩn tài nguyên đang được giữ và cho phép phát lại sau khi phiên kết thúc. Lịch sử dùng cửa sổ 7 ngày trượt theo ngày hiện tại, kể cả ngày mới chưa có dữ liệu. Sửa triệt để lỗi đồng bộ BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW và tự gửi lại đúng event cũ. Người dùng đang kết nối lấy đúng phiên App/PDA và Web. Loại bỏ text giải thích nội bộ không cần thiết, thu gọn khoảng cách giao diện khoảng 10%, chuyển tên thiết bị vào mục Ứng dụng, bổ sung thông tin dung lượng nhật ký và cache trên thiết bị, làm nổi bật seri PDA đã chọn, và đổi nhãn thành Không dùng User hy1.outbound.",mandatory:false};
+  const version="0.4.2-beta.50", available=ppOtaCompare_(version,current)>0;
+  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:56,size:12995123,published_at:"2026-08-22T10:18:31Z",notes:"Thêm Quản lý biên bản trong Nghiệp vụ ở trạng thái chờ xây dựng; bỏ Người dùng đang kết nối và headline còn xx mục chờ gửi; tách Đồng bộ thành thông tin trên PDA, Service, Google Sheet và thông tin đồng bộ khác; chuyển Thông tin ứng dụng vào Cài đặt. Canonical source không còn build-time Sxx mutation. Beta49 bị bỏ qua; Stable không thay đổi.",mandatory:false};
   if(!available)return out;
-  out.sha256="cfca4a83b3a69c554afabecae83ff150e9f0b66639360ea013e24bf4b08d996f";
-  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.48-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.48.apk";
+  out.sha256="712350b17d2ed1a54069cf3bf30cb1be492d6df131b2ad1ce5393278501bc93c";
+  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.50-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.50.apk";
   return out;
 }
 
