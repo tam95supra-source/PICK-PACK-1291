@@ -1,0 +1,68 @@
+name: Beta51 Resource Logic Materialize
+
+on:
+  push:
+    branches:
+      - stabilization/beta48-golden-reset-beta50-20260822
+    paths:
+      - '.github/workflows/beta51-materialize.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: beta51-resource-materialize
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: stabilization/beta48-golden-reset-beta50-20260822
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.4.1'
+      - name: Apply deterministic Beta51 patch
+        run: python3 tools/apply_beta51_resource_logic.py
+      - name: Contract gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 57' app/build.gradle.kts
+          grep -q 'versionName = "0.4.2-beta.51"' app/build.gradle.kts
+          grep -q 'Phát lại user pick' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'Phát lại user pack' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'User Pick hy1.outbound' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'ĐÃ DÙNG HÔM NAY' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -q 'naturalUserCompare' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'Chọn gợi ý để hiện đầy đủ Seri PDA' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'Không dùng User hy1.outbound' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -q 'PHÁT LẠI USER ĐÃ DÙNG' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+      - name: Compile Beta51 only
+        run: gradle --no-daemon :app:assembleBetaRelease
+      - name: Commit canonical materialized source and remove bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f tools/apply_beta51_resource_logic.py .github/workflows/beta51-materialize.yml
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'fix(beta51): user resource reuse logic and compact UI'
+          git push origin HEAD:stabilization/beta48-golden-reset-beta50-20260822
+      - name: Report result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_RESOURCE_MATERIALIZE run=${GITHUB_RUN_ID} status=${{ job.status }} trigger=${GITHUB_SHA}"
