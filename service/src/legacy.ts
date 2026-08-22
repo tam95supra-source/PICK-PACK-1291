@@ -1,6 +1,6 @@
 import type { AuthContext, CanonicalMutationRequest } from "./domain";
 import { commitMutation, CoreError, currentAuthority } from "./core";
-import { ensureCurrentBangkokBusinessDate } from "./business_date";
+import { bangkokToday, ensureCurrentBangkokBusinessDate } from "./business_date";
 import { nowIso } from "./util";
 
 export interface LegacyMutationInput {
@@ -17,8 +17,8 @@ interface LaborVersionRow { labor_id:string; state:string; version:number; }
 function text(v:unknown,max=240):string{return String(v??"").trim().slice(0,max);}
 
 async function currentBusinessDate(db:D1Database):Promise<string>{
-  try{return await ensureCurrentBangkokBusinessDate(db);}catch(e){
-    if(e instanceof CoreError)throw e;
+  const date=bangkokToday();
+  try{await ensureCurrentBangkokBusinessDate(db,date);return date;}catch{
     throw new CoreError("BUSINESS_DATE_NOT_BOOTSTRAPPED","INTEGRITY",503,true);
   }
 }
@@ -37,18 +37,16 @@ async function releaseEndedUserPackConsumption(db:D1Database,date:string,userPac
   if(active?.ok)return;
   // resource_daily_consumption is an exclusivity guard/projection, not the immutable Event Ledger.
   // Clearing only a stale USER_PACK guard lets a completed session's mapped user be issued again
-  // in the same day; the original assignment remains fully preserved in canonical events/history.
+  // in the same day; the original assignment remains preserved in canonical events/history.
   await db.prepare("DELETE FROM resource_daily_consumption WHERE business_date=?1 AND resource_type='USER_PACK' AND resource_id=?2").bind(date,userPack).run();
 }
 
 export async function legacyCanonical(db:D1Database,input:LegacyMutationInput,auth:AuthContext):Promise<CanonicalMutationRequest>{
   const payload=input.payload&&typeof input.payload==="object"?input.payload:{},mnv=text(payload.mnv,80);
   if(!mnv)throw new CoreError("MNV_REQUIRED","VALIDATION",400);
+  const today=await currentBusinessDate(db);
   const explicit=text(input.business_date||payload.business_date,10);
-  const businessDate=explicit||await currentBusinessDate(db);
-  // An explicit current-day payload can arrive from a durable local outbox. Ensure the current row
-  // exists before Core validates the PDA write window; this closes the midnight rollover reject.
-  if(!explicit)await currentBusinessDate(db);
+  const businessDate=explicit||today;
   const a=await currentAuthority(db),device=text(input.device_id||payload._device_id||auth.device_id,180)||auth.device_id;
   const eventId=text(input.event_id||payload.event_id,180)||crypto.randomUUID();
   let eventType:CanonicalMutationRequest["event_type"],entityType:string,entityId:string,baseVersion=0,canonicalPayload:Record<string,unknown>={...payload,mnv};
