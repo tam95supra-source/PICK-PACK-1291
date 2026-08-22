@@ -9,6 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
@@ -21,6 +22,9 @@ import java.util.concurrent.ConcurrentHashMap
  * prunes day snapshots to the exact Service business sequence while leaving pending mutations intact.
  */
 class OperationalDataStore(context: Context) {
+    // S54_BETA48_OWNER_10_FIXES
+    private val app = context.applicationContext
+    // S32_LOCAL_HISTORY_FLUSH_FIX: persistent local event ledger + canonical merge support.
     private val helper = helper(context.applicationContext)
 
     data class PendingMutation(
@@ -91,6 +95,17 @@ class OperationalDataStore(context: Context) {
         val out = ArrayList<String>()
         readableDb().query("day_snapshot", arrayOf("business_date"), null, null, null, null, "business_date DESC").use { c -> while (c.moveToNext()) out += c.getString(0) }
         out
+    }
+
+    fun historyWindowDates():List<String>{
+        val cal=Calendar.getInstance(TimeZone.getTimeZone(TZ));val out=ArrayList<String>(7)
+        repeat(7){out+=isoDate(cal.time);cal.add(Calendar.DAY_OF_MONTH,-1)}
+        return out
+    }
+
+    fun storageBytes():Long{
+        val main=app.getDatabasePath(DB_NAME);val base=main.absolutePath
+        return listOf(main,java.io.File(base+"-wal"),java.io.File(base+"-shm"),java.io.File(base+"-journal")).filter{it.exists()}.sumOf{it.length()}
     }
 
     fun revisions(): Map<String, Long> = withDbLock {
@@ -164,7 +179,7 @@ class OperationalDataStore(context: Context) {
         val eventId = event.optString("event_id").trim()
         require(eventId.isNotBlank()) { "EVENT_ID_REQUIRED" }
         val now = System.currentTimeMillis()
-        val values = ContentValues().apply {
+        val outboxValues = ContentValues().apply {
             put("event_id", eventId)
             put("body_json", event.toString())
             put("exclusive", if (exclusive) 1 else 0)
@@ -174,7 +189,37 @@ class OperationalDataStore(context: Context) {
             put("queued_at", now)
             put("updated_at", now)
         }
-        writableDb().insertWithOnConflict("mutation_outbox", null, values, SQLiteDatabase.CONFLICT_IGNORE)
+        val historyValues = ContentValues().apply {
+            put("event_id", eventId)
+            put("body_json", event.toString())
+            put("status", "LOCAL_PENDING")
+            put("last_error", "")
+            put("queued_at", now)
+            put("updated_at", now)
+        }
+        val db = writableDb()
+        db.beginTransaction()
+        try {
+            db.insertWithOnConflict("mutation_outbox", null, outboxValues, SQLiteDatabase.CONFLICT_IGNORE)
+            db.insertWithOnConflict("local_history", null, historyValues, SQLiteDatabase.CONFLICT_IGNORE)
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
+
+    // S40_OWNER_LOCAL_FIRST_REPAIR: worker sees all unresolved events; WorkManager owns retry backoff.
+    fun unresolvedMutations(limit: Int = 500): List<PendingMutation> = withDbLock {
+        val out=ArrayList<PendingMutation>()
+        readableDb().query(
+            "mutation_outbox",
+            arrayOf("event_id","body_json","exclusive","status","attempt_count","queued_at"),
+            "status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL')",
+            null,null,null,"queued_at ASC",limit.coerceIn(1,500).toString(),
+        ).use { c ->
+            while(c.moveToNext()) runCatching{JSONObject(c.getString(1))}.getOrNull()?.let{body->
+                out+=PendingMutation(c.getString(0),body,c.getInt(2)==1,c.getString(3),c.getInt(4),c.getLong(5))
+            }
+        }
+        out
     }
 
     fun pendingMutations(limit: Int = 100): List<PendingMutation> = withDbLock {
@@ -183,7 +228,7 @@ class OperationalDataStore(context: Context) {
         readableDb().query(
             "mutation_outbox",
             arrayOf("event_id", "body_json", "exclusive", "status", "attempt_count", "queued_at"),
-            "status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') AND next_attempt_at <= ?",
+            "(status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR (status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW')) AND next_attempt_at <= ?",
             arrayOf(now), null, null, "queued_at ASC", limit.coerceIn(1, 500).toString(),
         ).use { c ->
             while (c.moveToNext()) {
@@ -195,31 +240,149 @@ class OperationalDataStore(context: Context) {
         out
     }
 
+    /**
+     * S27_PROJECTION_ACK_GAP: visible local projection includes ordinary pending writes plus
+     * CONFIRMED writes whose ACK is newer than the currently stored day snapshot. This closes the
+     * ACK-to-next-snapshot gap without ever making a confirmed write eligible for network resend.
+     * Once reconcile saves a snapshot after the ACK, the confirmed overlay disappears.
+     */
+    fun projectionMutations(limit: Int = 500): List<PendingMutation> = withDbLock {
+        val out = ArrayList<PendingMutation>()
+        val now = System.currentTimeMillis().toString()
+        readableDb().query(
+            "mutation_outbox",
+            arrayOf("event_id", "body_json", "exclusive", "status", "attempt_count", "queued_at", "updated_at"),
+            "status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR status='CONFIRMED'",
+            null, null, null, "queued_at ASC", limit.coerceIn(1, 1000).toString(),
+        ).use { c ->
+            while (c.moveToNext()) {
+                val body = runCatching { JSONObject(c.getString(1)) }.getOrNull() ?: continue
+                val status = c.getString(3)
+                if (status == "CONFIRMED") {
+                    val payload = body.optJSONObject("payload") ?: body
+                    val date = payload.optString("business_date").ifBlank { body.optString("business_date") }
+                    if (date.isBlank()) continue
+                    val ackAt = c.getLong(6)
+                    val snapshotSavedAt = readableDb().query(
+                        "day_snapshot", arrayOf("saved_at"), "business_date=?", arrayOf(date), null, null, null, "1"
+                    ).use { sc -> if (sc.moveToFirst()) sc.getLong(0) else 0L }
+                    if (snapshotSavedAt >= ackAt) continue
+                }
+                out += PendingMutation(c.getString(0), body, c.getInt(2) == 1, status, c.getInt(4), c.getLong(5))
+            }
+        }
+        out
+    }
+
+    /** Persistent local actions, including pending/retry/rejected/reviewed rows. */
+    fun localHistory(limit: Int = 500): List<JSONObject> = withDbLock {
+        val out = ArrayList<JSONObject>()
+        readableDb().query(
+            "local_history",
+            arrayOf("event_id", "body_json", "status", "last_error", "queued_at", "updated_at"),
+            null, null, null, null, "queued_at DESC", limit.coerceIn(1, 2000).toString(),
+        ).use { c ->
+            while (c.moveToNext()) {
+                val body = runCatching { JSONObject(c.getString(1)) }.getOrNull() ?: JSONObject()
+                out += JSONObject()
+                    .put("event_id", c.getString(0))
+                    .put("body", body)
+                    .put("status", c.getString(2))
+                    .put("error", c.getString(3) ?: "")
+                    .put("queued_at", c.getLong(4))
+                    .put("updated_at", c.getLong(5))
+            }
+        }
+        out
+    }
+
+    // S34_OWNER_SIX_REQUESTS: full durable local History for global search/filter.
+    fun localHistoryAll(): List<JSONObject> = withDbLock {
+        val out = ArrayList<JSONObject>()
+        readableDb().query(
+            "local_history",
+            arrayOf("event_id", "body_json", "status", "last_error", "queued_at", "updated_at"),
+            null, null, null, null, "queued_at DESC", null,
+        ).use { c ->
+            while (c.moveToNext()) {
+                val body = runCatching { JSONObject(c.getString(1)) }.getOrNull() ?: JSONObject()
+                out += JSONObject()
+                    .put("event_id", c.getString(0))
+                    .put("body", body)
+                    .put("status", c.getString(2))
+                    .put("error", c.getString(3) ?: "")
+                    .put("queued_at", c.getLong(4))
+                    .put("updated_at", c.getLong(5))
+            }
+        }
+        out
+    }
+
+    fun retryDateWindowRejects():Int=withDbLock{
+        val db=writableDb();val now=System.currentTimeMillis();var count=0
+        db.rawQuery("SELECT COUNT(*) FROM mutation_outbox WHERE status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW'",null).use{c->if(c.moveToFirst())count=c.getInt(0)}
+        if(count>0)db.execSQL("UPDATE mutation_outbox SET status='RETRY',next_attempt_at=?,updated_at=? WHERE status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW'",arrayOf(now,now))
+        count
+    }
+
     fun markMutationSynced(eventId: String) = markMutationResolved(eventId, "CONFIRMED", "")
     fun markMutationRejected(eventId: String, error: String) = markMutationResolved(eventId, "REJECTED", error)
     fun markMutationReviewRequired(eventId: String, error: String) = markMutationResolved(eventId, "REVIEW_REQUIRED", error)
 
     private fun markMutationResolved(eventId: String, status: String, error: String) = withDbLock {
         val now = System.currentTimeMillis()
-        writableDb().execSQL(
-            "UPDATE mutation_outbox SET status=?,last_error=?,updated_at=? WHERE event_id=?",
-            arrayOf(status, error.take(1200), now, eventId),
-        )
+        val db = writableDb()
+        db.beginTransaction()
+        try {
+            db.execSQL(
+                "UPDATE mutation_outbox SET status=?,last_error=?,updated_at=? WHERE event_id=?",
+                arrayOf(status, error.take(1200), now, eventId),
+            )
+            db.execSQL(
+                "UPDATE local_history SET status=?,last_error=?,updated_at=? WHERE event_id=?",
+                arrayOf(status, error.take(1200), now, eventId),
+            )
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     fun markMutationRetry(eventId: String, error: String, delayMs: Long) = withDbLock {
         val now = System.currentTimeMillis()
-        writableDb().execSQL(
-            "UPDATE mutation_outbox SET status='RETRY',attempt_count=attempt_count+1,next_attempt_at=?,last_error=?,updated_at=? WHERE event_id=?",
-            arrayOf(now + delayMs.coerceIn(1_000L, 15 * 60_000L), error.take(600), now, eventId),
-        )
+        val db = writableDb()
+        db.beginTransaction()
+        try {
+            db.execSQL(
+                "UPDATE mutation_outbox SET status='RETRY',attempt_count=attempt_count+1,next_attempt_at=?,last_error=?,updated_at=? WHERE event_id=?",
+                arrayOf(now + delayMs.coerceIn(1_000L, 15 * 60_000L), error.take(600), now, eventId),
+            )
+            db.execSQL(
+                "UPDATE local_history SET status='RETRY',last_error=?,updated_at=? WHERE event_id=?",
+                arrayOf(error.take(1200), now, eventId),
+            )
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
     }
 
     /** Compatibility mapping: old CONFLICT becomes the owner-visible REVIEW_REQUIRED state. */
     fun markMutationConflict(eventId: String, error: String) = markMutationReviewRequired(eventId, error)
 
+    // S44: bounded safe diagnostics; body payload is intentionally NOT emitted.
+    fun diagnosticOutbox(limit:Int=50): JSONArray = withDbLock {
+        val out=JSONArray()
+        readableDb().query("mutation_outbox",arrayOf("event_id","body_json","exclusive","status","attempt_count","next_attempt_at","queued_at","updated_at","last_error"),null,null,null,null,"queued_at ASC",limit.coerceIn(1,100).toString()).use{c->
+            while(c.moveToNext()){
+                val body=runCatching{JSONObject(c.getString(1))}.getOrDefault(JSONObject())
+                out.put(JSONObject()
+                    .put("event_id",c.getString(0)).put("action",body.optString("action")).put("exclusive",c.getInt(2)!=0)
+                    .put("status",c.getString(3)).put("attempt_count",c.getInt(4)).put("next_attempt_at",c.getLong(5))
+                    .put("queued_at",c.getLong(6)).put("updated_at",c.getLong(7)).put("last_error",c.getString(8)?:""))
+            }
+        }
+        out
+    }
+
     fun pendingMutationCount(): Int = withDbLock {
-        readableDb().rawQuery("SELECT COUNT(*) FROM mutation_outbox WHERE status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL')", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+        readableDb().rawQuery("SELECT COUNT(*) FROM mutation_outbox WHERE status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR (status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW')", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
     }
 
     fun conflicts(limit: Int = 100): List<JSONObject> = withDbLock {
@@ -263,10 +426,11 @@ class OperationalDataStore(context: Context) {
 
     private class DbHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         init { setWriteAheadLoggingEnabled(false) }
-        override fun onCreate(db: SQLiteDatabase) { createV1(db); createV2(db) }
+        override fun onCreate(db: SQLiteDatabase) { createV1(db); createV2(db); createV3(db) }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // Never drop day_snapshot or mutation_outbox during an installed-Beta upgrade.
+            // Never drop day_snapshot, mutation_outbox, or local_history during an installed-Beta upgrade.
             if (oldVersion < 2) createV2(db)
+            if (oldVersion < 3) createV3(db)
         }
         private fun createV1(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE IF NOT EXISTS day_snapshot(
@@ -295,13 +459,29 @@ class OperationalDataStore(context: Context) {
             )""".trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_mutation_outbox_due ON mutation_outbox(status,next_attempt_at,queued_at)")
         }
+        private fun createV3(db: SQLiteDatabase) {
+            db.execSQL("""CREATE TABLE IF NOT EXISTS local_history(
+                event_id TEXT PRIMARY KEY NOT NULL,
+                body_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                last_error TEXT,
+                queued_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )""".trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_local_history_queued ON local_history(queued_at DESC)")
+            // Preserve all already-existing outbox rows when upgrading Beta27 -> Beta28.
+            db.execSQL("""INSERT OR IGNORE INTO local_history(event_id,body_json,status,last_error,queued_at,updated_at)
+                SELECT event_id,body_json,status,COALESCE(last_error,''),queued_at,updated_at FROM mutation_outbox
+            """.trimIndent())
+        }
+
     }
 
     companion object {
         // Legacy filename retained intentionally for in-place migration; semantics are exact N..N-6.
         private const val DB_NAME = "pp_operational_45d.db"
-        private const val DB_VERSION = 2
-        private const val TZ = "Asia/Bangkok"
+        private const val DB_VERSION = 3
+        private const val TZ = "Asia/Ho_Chi_Minh"
         private val DB_LOCK = Any()
         private val MEMORY = ConcurrentHashMap<String, JSONObject>()
         @Volatile private var HELPER: DbHelper? = null

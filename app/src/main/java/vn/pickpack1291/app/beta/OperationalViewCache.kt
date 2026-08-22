@@ -15,7 +15,7 @@ import java.util.TimeZone
  */
 object OperationalViewCache {
     private const val PREFS = "pp_operational_view_cache_v1"
-    private const val TZ = "Asia/Bangkok"
+    private const val TZ = "Asia/Ho_Chi_Minh"
 
     private fun businessDate(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
         timeZone = TimeZone.getTimeZone(TZ)

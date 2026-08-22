@@ -71,6 +71,22 @@ object MasterDataCache {
         return staffByMnv[mnv.trim()]?.let { JSONObject(it.toString()) }
     }
 
+    // S39_EMPLOYEE_SESSION_HISTORY: scanner payloads may include prefix/suffix/control bytes.
+    // Resolve only against the actual cached master. Never guess an unknown employee code.
+    fun resolveEmployeeMnv(context: Context, raw: String): String {
+        snapshot(context)
+        val cleaned = raw.replace(Regex("[\\p{Cc}\\p{Cf}]"), "").trim()
+        if (cleaned.isBlank()) return ""
+        if (staffByMnv.containsKey(cleaned)) return cleaned
+        var match: String? = null
+        for (candidate in staffByMnv.keys) {
+            if (!cleaned.contains(candidate)) continue
+            if (match != null && match != candidate) return cleaned
+            match = candidate
+        }
+        return match ?: cleaned
+    }
+
     fun resourceOptions(context: Context): JSONObject {
         val s = snapshot(context) ?: return JSONObject()
         return JSONObject().apply {

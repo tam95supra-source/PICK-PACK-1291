@@ -25,11 +25,19 @@ import java.util.UUID
  * Password plaintext never leaves the Android process: authentication uses PBKDF2 + challenge/HMAC proof.
  */
 class BetaApiClient(context: Context) {
+    // S31A_NORMALIZED_API_CALL_ANCHOR
     data class Result(val ok: Boolean, val code: Int, val json: JSONObject?, val error: String?)
 
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val executor = Executors.newSingleThreadExecutor()
+    private val authExecutor = Executors.newSingleThreadExecutor() // S44_SESSION_SINGLEFLIGHT_OBSERVABILITY
+    private val localExecutor = Executors.newSingleThreadExecutor() // S31_SERVICE_FIRST_HOTPATH
+    private val adminAuditTransport by lazy { M2ServiceTransport(appContext) } // S30_CANONICAL_ADMIN_AUDIT
+    // M2_SERVICE_TRANSPORT_APPLIED: dynamic Service primary + GAS fallback.
+    private val m2Transport = M2ServiceTransport(appContext)
+    // S19_M2_RUNTIME_FIX_APPLIED: honest runtime route + inherited-session exchange.
+    private val m2Runtime = M2RuntimeBridge(appContext)
     private val deviceId: String by lazy {
         val androidId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID).orEmpty()
         if (androidId.isNotBlank() && androidId != "9774d56d682e549c") {
@@ -45,6 +53,8 @@ class BetaApiClient(context: Context) {
         synchronized(sessionLock) {
             if (sharedToken == null) sharedToken = prefs.getString(KEY_TOKEN, null)
         }
+        M2ConnectivityMonitor.start(appContext)
+        M2WorkScheduler.schedule(appContext)
     }
 
     val token: String?
@@ -53,9 +63,14 @@ class BetaApiClient(context: Context) {
     fun clearToken() = clearSession()
 
     fun clearSession() {
+        // S24_FCM_LOGOUT_REVOKE_APPLIED: capture current Service session before clearing auth.
+        M2PushRegistration.revoke(appContext)
         synchronized(sessionLock) { sharedToken = null }
         prefs.edit().remove(KEY_TOKEN).remove(KEY_LOGIN).remove(KEY_NAME).remove(KEY_ROLE).remove(KEY_POSITION).remove(KEY_EMAIL).apply()
+        m2Runtime.clear()
     }
+
+    fun runtimeStatus(): JSONObject = m2Runtime.status()
 
     fun restoredAccount(): JSONObject? {
         if (token.isNullOrBlank()) return null
@@ -88,7 +103,7 @@ class BetaApiClient(context: Context) {
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     fun login(loginId: String, password: String, callback: (Result) -> Unit) {
-        executor.execute {
+        authExecutor.execute {
             try {
                 val login = loginId.trim()
                 val challenge = post(JSONObject().apply {
@@ -117,6 +132,7 @@ class BetaApiClient(context: Context) {
                 if (result.ok) {
                     val newToken = result.json?.optString("token")?.takeIf { it.isNotBlank() }
                     if (newToken != null) persistSession(newToken, result.json.optJSONObject("account"))
+                    m2Transport.loginFromPassword(login, password)
                 }
                 callback(result)
             } catch (t: Throwable) {
@@ -126,27 +142,77 @@ class BetaApiClient(context: Context) {
     }
 
     fun call(action: String, payload: JSONObject = JSONObject(), callback: (Result) -> Unit) {
+        if(action in M2ServiceTransport.OPERATIONAL){
+            localExecutor.execute {
+                try {      if (action in setOf("resource_master_list","resource_master_upsert","resource_master_delete","history_correction","session_work_update","session_exit_guarded","attendance_time_correct","attendance_exit_delete","service_connections","account_delete","history_delete")) {
+          val result=serviceOwnerCall(action,payload)
+          if(result.code==401) clearSession()
+          if(action in setOf("resource_master_upsert","resource_master_delete","history_correction")) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())
+          callback(result)
+          return@execute
+      }
+
+                    val m2=m2Transport.operational(action,payload)
+                    val result=Result(m2.ok,m2.code,m2.json,m2.error)
+                    AppHistory.record(appContext,action,result.ok,result.error.orEmpty(),payload)
+                    callback(result)
+                } catch(t:Throwable){
+                    val result=failure(t)
+                    AppHistory.record(appContext,action,false,result.error.orEmpty(),payload)
+                    callback(result)
+                }
+            }
+            return
+        }
         executor.execute {
-  try {
-      val result = when (action) {
+        val trackUpload = SyncDirectionTracker.isUploadAction(action)
+        if (trackUpload) SyncDirectionTracker.beginUpload()
+
+            try {
+                val gasSession = token
+      var m2: M2ServiceTransport.TransportResult? = when {
+          action in M2RuntimeBridge.DIRECT_READS -> m2Runtime.directRead(action, payload, gasSession)
+          action in M2ServiceTransport.OPERATIONAL -> m2Transport.operational(action, payload)
+          action in M2ServiceTransport.SYNC_ACTIONS -> {
+              m2Runtime.ensureServiceSession(gasSession)
+              m2Transport.sync(action, payload)
+          }
+          else -> null
+      }
+      if (m2?.handled == true && m2?.code == 401 && !gasSession.isNullOrBlank()) {
+          m2 = when {
+              action in M2RuntimeBridge.DIRECT_READS -> m2Runtime.directRead(action, payload, gasSession)
+              action in M2ServiceTransport.OPERATIONAL -> m2Runtime.recoverAndRetryOperational(action, payload, gasSession)
+              action in M2ServiceTransport.SYNC_ACTIONS -> m2Runtime.recoverAndRetrySync(action, payload, gasSession)
+              else -> m2
+          }
+      }
+      val usedService = m2?.handled == true
+      val result = if (usedService) {
+          Result(m2!!.ok, m2.code, m2.json, m2.error)
+      } else when (action) {
           "change_password" -> changePassword(payload)
           "account_upsert" -> accountUpsert(payload)
           else -> post(JSONObject(payload.toString()).apply { put("action", action) }, authenticated = true)
       }
+      if (!usedService && action in M2ServiceTransport.OPERATIONAL) m2Transport.acknowledgeFallback(payload.optString("event_id"), result.ok, result.error)
+      if (usedService && result.ok && result.code != 202) m2Runtime.recordDirect()
+      else if (!usedService && (action in M2RuntimeBridge.DIRECT_READS || action in M2ServiceTransport.OPERATIONAL || action in M2ServiceTransport.SYNC_ACTIONS)) m2Runtime.recordFallback(m2?.error)
       if (result.ok) {
-          val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
-          if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
-      }
+                    val refreshed = result.json?.optString("token")?.takeIf { it.isNotBlank() }
+                    if (refreshed != null) persistSession(refreshed, result.json.optJSONObject("account") ?: restoredAccount())
+                }
+                if (result.ok && action in M2ServiceTransport.ADMIN_AUDIT_ACTIONS) adminAuditTransport.audit(action,payload)
       if (result.code == 401) clearSession()
-      val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
-      if(action in tracked) AppHistory.record(appContext,action,result.ok,result.error.orEmpty())
-      callback(result)
-  } catch (t: Throwable) {
-      val result=failure(t)
-      val tracked=setOf("enter","exit","resource_change","labor_start","labor_finish","change_password","change_email","account_upsert","account_status","staff_upsert","staff_delete","diagnostic_log")
-      if(action in tracked) AppHistory.record(appContext,action,false,result.error.orEmpty())
-      callback(result)
-  }
+                // S13 shared history is server-authoritative; no local mutation history.
+                callback(result)
+            } catch (t: Throwable) {
+                val result=failure(t)
+                // Failed requests do not create shared business history.
+                callback(result)
+            } finally {
+                if (trackUpload) SyncDirectionTracker.endUpload()
+            }
         }
     }
 
@@ -199,6 +265,16 @@ class BetaApiClient(context: Context) {
         }, authenticated = true)
     }
 
+    // S33_OWNER_UI_SYNC_RESOURCES: owner resource/correction calls go to current Service authority only.
+    private fun serviceOwnerCall(action:String,payload:JSONObject):Result{
+        val d=m2Transport.discoverySnapshot()?:return Result(false,503,null,"SERVICE_DISCOVERY_UNAVAILABLE")
+        if(d.optString("authority_mode")!="SERVICE_PRIMARY")return Result(false,409,d,"SERVICE_NOT_WRITE_AUTHORITY")
+        val base=d.optString("service_url").trimEnd('/');if(!base.startsWith("https://"))return Result(false,503,d,"SERVICE_URL_INVALID")
+        val bearer=appContext.getSharedPreferences("pp_m2_service_transport",Context.MODE_PRIVATE).getString("service_token",null).orEmpty();if(bearer.isBlank())return Result(false,401,null,"UNAUTHORIZED")
+        val path=when(action){"history_correction"->"/v1/corrections";"session_work_update"->"/v1/session/work";"session_exit_guarded"->"/v1/session/exit";"attendance_time_correct"->"/v1/session/time-correction";"attendance_exit_delete"->"/v1/session/delete-exit";"service_connections"->"/v1/service/connections";"account_delete"->"/v1/admin/accounts/delete";"history_delete"->"/v1/history/delete";else->"/v1/admin/resources"};val method=if(action in setOf("resource_master_list","service_connections"))"GET" else "POST";val body=JSONObject(payload.toString());if(action=="resource_master_upsert")body.put("operation","UPSERT");if(action=="resource_master_delete")body.put("operation","DELETE")
+        var conn:HttpURLConnection?=null;return try{conn=(URL(base+path).openConnection() as HttpURLConnection).apply{requestMethod=method;connectTimeout=6_000;readTimeout=12_000;setRequestProperty("Accept","application/json");setRequestProperty("Authorization","Bearer $bearer");if(method=="POST"){doOutput=true;setRequestProperty("Content-Type","application/json; charset=utf-8")}};if(method=="POST")conn!!.outputStream.use{it.write(body.toString().toByteArray(Charsets.UTF_8))};val http=conn!!.responseCode;val stream=if(http in 200..299)conn!!.inputStream else conn!!.errorStream;val text=stream?.bufferedReader(Charsets.UTF_8)?.use{it.readText()}.orEmpty();val j=if(text.isBlank())JSONObject() else JSONObject(text);val ok=http in 200..299&&j.optBoolean("ok",false);Result(ok,http,j,if(ok)null else (j.optJSONObject("error")?.optString("code")?.takeIf{it.isNotBlank()}?:j.optString("error","HTTP_$http")))}catch(t:Throwable){Result(false,-1,null,t.message?:"SERVICE_OWNER_CALL_FAILED")}finally{conn?.disconnect()}
+    }
+
     private fun accountUpsert(payload: JSONObject): Result {
         val copy = JSONObject(payload.toString()).apply { put("action", "account_upsert") }
         val password = copy.optString("password")
@@ -237,10 +313,12 @@ class BetaApiClient(context: Context) {
                 setRequestProperty("Accept", "application/json")
                 setRequestProperty("User-Agent", "PickPack1291/${BuildConfig.VERSION_NAME}")
             }
-            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val requestBytes=body.toString().toByteArray(Charsets.UTF_8);SyncDirectionTracker.recordUploadBytes(requestBytes.size.toLong())
+            conn.outputStream.use { it.write(requestBytes) }
             val http = conn.responseCode
             val stream = if (http in 200..299) conn.inputStream else conn.errorStream
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+            SyncDirectionTracker.recordDownloadBytes(text.toByteArray(Charsets.UTF_8).size.toLong())
             val json = if (text.isBlank()) JSONObject() else JSONObject(text)
             val ok = http in 200..299 && json.optBoolean("ok", false)
             val error = if (ok) null else json.optString("error", "HTTP_$http")

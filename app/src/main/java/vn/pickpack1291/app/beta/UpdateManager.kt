@@ -14,57 +14,77 @@ import android.provider.Settings
 import android.widget.Toast
 import java.security.MessageDigest
 
+// S51_BETA45_MANUAL_UPDATE_SYNC_DETAIL_VI
 object UpdateManager {
-    private var lastCheckAt = 0L
-    private var dialogVisible = false
-    private const val CHECK_INTERVAL_MS = 2 * 60_000L
+    private var busy = false
 
-    fun check(activity: Activity, force: Boolean = false) {
-        val now = System.currentTimeMillis()
-        if (!force && now - lastCheckAt < CHECK_INTERVAL_MS) return
-        lastCheckAt = now
+    fun openManual(activity: Activity) {
+        if (busy || activity.isFinishing || activity.isDestroyed) return
+        busy = true
+        Toast.makeText(activity, "Đang kiểm tra phiên bản mới...", Toast.LENGTH_SHORT).show()
         BetaApiClient(activity.applicationContext).updateCheck(BuildConfig.CHANNEL, BuildConfig.VERSION_NAME) { result ->
             activity.runOnUiThread {
-                if (activity.isFinishing || activity.isDestroyed || !result.ok) return@runOnUiThread
-                val j = result.json ?: return@runOnUiThread
-                if (!j.optBoolean("available", false) || dialogVisible) return@runOnUiThread
-                val version = j.optString("version_name")
-                val url = j.optString("apk_url")
-                val sha = j.optString("sha256")
-                val notes = j.optString("notes").take(1200)
-                val mandatory = j.optBoolean("mandatory", false)
-                if (version.isBlank() || url.isBlank()) return@runOnUiThread
-                showUpdate(activity, version, url, sha, notes, mandatory)
+                busy = false
+                if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+                if (!result.ok) {
+                    AlertDialog.Builder(activity)
+                        .setTitle("Không kiểm tra được cập nhật")
+                        .setMessage("Không lấy được thông tin phiên bản mới. Vui lòng kiểm tra mạng và thử lại.\n\nChi tiết: ${result.error ?: "Không xác định"}")
+                        .setPositiveButton("OK", null)
+                        .show()
+                    return@runOnUiThread
+                }
+                val j = result.json ?: run {
+                    AlertDialog.Builder(activity).setTitle("Không có dữ liệu cập nhật").setMessage("Hệ thống không trả về thông tin phiên bản.").setPositiveButton("OK", null).show()
+                    return@runOnUiThread
+                }
+                if (!j.optBoolean("available", false)) {
+                    AlertDialog.Builder(activity)
+                        .setTitle("Đang dùng phiên bản mới nhất")
+                        .setMessage("Phiên bản hiện tại: ${BuildConfig.VERSION_NAME}\nKhông có bản cập nhật mới cho ${channelLabel()}.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                    return@runOnUiThread
+                }
+                val version = j.optString("version_name").trim()
+                val url = j.optString("apk_url").trim()
+                val sha = j.optString("sha256").trim()
+                val notes = j.optString("notes").trim().take(4000)
+                if (version.isBlank() || url.isBlank()) {
+                    AlertDialog.Builder(activity).setTitle("Thông tin cập nhật chưa đầy đủ").setMessage("Bản phát hành chưa có đủ phiên bản hoặc đường dẫn tải APK.").setPositiveButton("OK", null).show()
+                    return@runOnUiThread
+                }
+                showRelease(activity, version, url, sha, notes)
             }
         }
     }
 
-    private fun showUpdate(activity: Activity, version: String, url: String, sha: String, notes: String, mandatory: Boolean) {
-        dialogVisible = true
+    private fun channelLabel(): String = if (BuildConfig.CHANNEL == "BETA") "kênh Bản thử nghiệm" else "kênh Bản ổn định"
+
+    private fun showRelease(activity: Activity, version: String, url: String, sha: String, notes: String) {
         val message = buildString {
-            append("Có phiên bản mới: ").append(version)
-            append("\nChannel: ").append(BuildConfig.CHANNEL)
-            if (notes.isNotBlank()) append("\n\n").append(notes)
-            append("\n\nAPK sẽ được kiểm tra SHA-256 trước khi mở trình cài đặt Android.")
+            append("Phiên bản đang dùng: ").append(BuildConfig.VERSION_NAME)
+            append("\nPhiên bản mới: ").append(version)
+            append("\n\nNội dung cập nhật:\n")
+            append(notes.ifBlank { "Chưa có ghi chú chi tiết cho bản phát hành này." })
+            append("\n\nAPK chỉ được tải khi bạn bấm TẢI APK. Sau khi tải xong, ứng dụng kiểm tra SHA-256 rồi mở trình cài đặt Android để bạn tự xác nhận cài đặt.")
         }
-        val builder = AlertDialog.Builder(activity)
-            .setTitle("Cập nhật Pick Pack 1291")
+        AlertDialog.Builder(activity)
+            .setTitle("Có bản cập nhật $version")
             .setMessage(message)
-            .setPositiveButton("CẬP NHẬT") { _, _ ->
-                dialogVisible = false
-                ensureInstallPermissionThenDownload(activity, version, url, sha)
-            }
-        if (!mandatory) builder.setNegativeButton("ĐỂ SAU") { _, _ -> dialogVisible = false }
-        builder.setOnCancelListener { dialogVisible = false }
-        builder.setCancelable(!mandatory)
-        builder.show()
+            .setNegativeButton("ĐỂ SAU", null)
+            .setPositiveButton("TẢI APK") { _, _ -> ensureInstallPermissionThenDownload(activity, version, url, sha) }
+            .show()
     }
 
     private fun ensureInstallPermissionThenDownload(activity: Activity, version: String, url: String, sha: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !activity.packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(activity, "Cho phép cài ứng dụng từ nguồn này, sau đó quay lại app. App sẽ tự hiện cập nhật lại.", Toast.LENGTH_LONG).show()
-            activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}")))
-            lastCheckAt = 0L
+            AlertDialog.Builder(activity)
+                .setTitle("Cần quyền cài APK")
+                .setMessage("Android đang chặn cài APK từ Pick Pack 1291. Mở Cài đặt và cho phép nguồn này. Sau đó quay lại ứng dụng và bấm KIỂM TRA CẬP NHẬT lại; ứng dụng sẽ không tự kiểm tra.")
+                .setNegativeButton("HỦY", null)
+                .setPositiveButton("MỞ CÀI ĐẶT") { _, _ -> activity.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${activity.packageName}"))) }
+                .show()
             return
         }
         download(activity, version, url, sha)
@@ -75,14 +95,14 @@ object UpdateManager {
         val fileName = "pick-pack-1291-${BuildConfig.CHANNEL.lowercase()}-$version.apk"
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle("Pick Pack 1291 $version")
-            .setDescription("Đang tải bản cập nhật")
+            .setDescription("Đang tải APK cập nhật")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(false)
             .setMimeType("application/vnd.android.package-archive")
             .setDestinationInExternalFilesDir(activity, Environment.DIRECTORY_DOWNLOADS, fileName)
         val id = manager.enqueue(request)
-        Toast.makeText(activity, "Đang tải bản cập nhật $version", Toast.LENGTH_SHORT).show()
+        Toast.makeText(activity, "Đang tải APK $version...", Toast.LENGTH_SHORT).show()
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -90,14 +110,14 @@ object UpdateManager {
                 try { activity.unregisterReceiver(this) } catch (_: Throwable) {}
                 val uri = manager.getUriForDownloadedFile(id)
                 if (uri == null) {
-                    AlertDialog.Builder(activity).setTitle("Cập nhật thất bại").setMessage("Không lấy được file APK đã tải.").setPositiveButton("OK", null).show()
+                    AlertDialog.Builder(activity).setTitle("Tải APK thất bại").setMessage("Không lấy được file APK sau khi tải.").setPositiveButton("OK", null).show()
                     return
                 }
                 Thread {
                     val actual = sha256(activity, uri)
                     activity.runOnUiThread {
                         if (expectedSha.isNotBlank() && !actual.equals(expectedSha, ignoreCase = true)) {
-                            AlertDialog.Builder(activity).setTitle("APK không hợp lệ").setMessage("SHA-256 không khớp. File cập nhật sẽ không được cài.").setPositiveButton("OK", null).show()
+                            AlertDialog.Builder(activity).setTitle("APK không hợp lệ").setMessage("SHA-256 không khớp. Ứng dụng sẽ không mở file cài đặt.").setPositiveButton("OK", null).show()
                             return@runOnUiThread
                         }
                         val install = Intent(Intent.ACTION_VIEW).apply {
@@ -110,9 +130,8 @@ object UpdateManager {
                 }.start()
             }
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            activity.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_NOT_EXPORTED)
-        } else {
+        if (Build.VERSION.SDK_INT >= 33) activity.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_NOT_EXPORTED)
+        else {
             @Suppress("DEPRECATION")
             activity.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
         }

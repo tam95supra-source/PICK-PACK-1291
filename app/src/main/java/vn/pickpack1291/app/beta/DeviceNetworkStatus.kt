@@ -14,7 +14,7 @@ object DeviceNetworkStatus {
         fun header(latencyMs: Long?): String {
             if (!hasInternet) return "Không mạng"
             val ms = latencyMs?.takeIf { it >= 0 }
-            return if (ms != null) "$transport • ${ms}ms" else transport
+            return if (ms != null) "$transport • Service ${ms}ms" else transport
         }
     }
 

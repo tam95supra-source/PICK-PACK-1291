@@ -31,6 +31,7 @@ class ForegroundSyncCoordinator(
         val masterRevision: Long,
         val masterChanged: Boolean,
         val latencyMs: Long? = null,
+        val syncE2eMs: Long? = null,
         val error: String? = null,
         val businessDate: String = "",
         val retentionFloor: String = "",
@@ -120,7 +121,8 @@ class ForegroundSyncCoordinator(
         val requestGeneration = generation
         val startedAt = SystemClock.elapsedRealtime()
         api.call("sync_status", JSONObject()) { result ->
-            val latencyMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+            val syncE2eMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+            val serviceRttMs = result.json?.optLong("_service_rtt_ms", -1L)?.takeIf { it >= 0L }
             main.post {
                 inFlight = false
 
@@ -164,9 +166,11 @@ class ForegroundSyncCoordinator(
                                 changed = changed,
                                 masterRevision = masterRevision,
                                 masterChanged = masterChanged,
-                                latencyMs = latencyMs,
+                                latencyMs = serviceRttMs,
+                                syncE2eMs = syncE2eMs,
                                 businessDate = businessDate,
-                                retentionFloor = body.optString("retention_floor"),
+                                // S25_FALLBACK_RETENTION_COMPAT: legacy GAS may blank retention_floor.
+                                retentionFloor = body.optString("retention_floor").ifBlank { body.optString("server_retention_floor") },
                                 retentionEpoch = body.optLong("retention_epoch", 0L),
                                 dayRevisions = body.optJSONObject("day_revisions") ?: JSONObject(),
                             )
@@ -182,7 +186,8 @@ class ForegroundSyncCoordinator(
                             changed = false,
                             masterRevision = lastMasterRevision,
                             masterChanged = false,
-                            latencyMs = latencyMs,
+                            latencyMs = serviceRttMs,
+                            syncE2eMs = syncE2eMs,
                             error = result.error ?: "SYNC_FAILED",
                         )
                     )

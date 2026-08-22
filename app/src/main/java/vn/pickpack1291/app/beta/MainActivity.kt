@@ -676,7 +676,7 @@ class MainActivity : Activity() {
     private fun formatIso(value: String): String {
         if (value.isBlank() || value == "null") return "—"
         return try {
-            Instant.parse(value).atZone(ZoneId.of("Asia/Bangkok")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))
+            Instant.parse(value).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(DateTimeFormatter.ofPattern("HH:mm:ss dd/MM/yyyy"))
         } catch (_: Throwable) { value }
     }
 

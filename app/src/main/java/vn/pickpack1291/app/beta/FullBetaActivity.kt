@@ -52,7 +52,6 @@ class FullBetaActivity : Activity() {
     private val foregroundSync by lazy {
         ForegroundSyncCoordinator(this, syncApi, object : ForegroundSyncCoordinator.Listener {
             override fun onStatus(status: ForegroundSyncCoordinator.Status) {
-                UpdateManager.check(this@FullBetaActivity)
                 if (status.connected) {
                     syncText?.text = "✓ Kết nối tốt"
                     syncText?.setTextColor(green)
@@ -82,7 +81,6 @@ class FullBetaActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
-        UpdateManager.check(this, force = true)
         if (api.token != null) foregroundSync.start()
     }
 
@@ -117,8 +115,9 @@ class FullBetaActivity : Activity() {
         val card = column(surface).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(24), dp(24), dp(24), dp(24))
-            background = outlineBg(surface, 20)
-            elevation = dp(8).toFloat()
+            background = round(surface, 20) // S34_OWNER_SIX_REQUESTS: clean solid rounded login card
+            elevation = 0f
+            clipToOutline = true
         }
         card.addView(ImageView(this).apply { setImageResource(R.drawable.owner_launcher); scaleType = ImageView.ScaleType.CENTER_CROP }, size(dp(92), dp(92)))
         card.addView(gap(9))
@@ -174,7 +173,7 @@ class FullBetaActivity : Activity() {
         }, matchWrap())
 
         val holder = FrameLayout(this).apply {
-            setBackgroundColor(bg)
+            setBackgroundColor(surface)
             minimumHeight = (resources.displayMetrics.heightPixels - dp(70)).coerceAtLeast(dp(560))
             setPadding(dp(18), dp(18), dp(18), dp(18))
             addView(card, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
@@ -461,7 +460,7 @@ class FullBetaActivity : Activity() {
     private fun sessionExpired(){api.clearSession();AlertDialog.Builder(this).setTitle("Phiên đăng nhập đã được thay thế").setMessage("Tài khoản này đã đăng nhập ở thiết bị khác hoặc quyền tài khoản đã thay đổi. Đăng nhập lại để tiếp tục.").setCancelable(false).setPositiveButton("ĐĂNG NHẬP"){_,_->login()}.show()}
     private fun showError(raw:String){val msg=when{raw.contains("INVALID_CREDENTIALS")->"Sai tài khoản hoặc mật khẩu.";raw.contains("LOGIN_TEMP_LOCKED")->"Tài khoản tạm khóa 15 phút do đăng nhập sai nhiều lần.";raw.contains("EMPLOYEE_NOT_FOUND")->"Không tìm thấy MNV.";raw.contains("PP_RESOURCE_CONFLICT")->"Tài nguyên vừa được người khác nhận. Kiểm tra lại.";raw.contains("PP_USER_PICK_USED_TODAY")->"User Pick đã được dùng trong ngày.";raw.contains("PP_USER_PACK_USED_TODAY")->"User Pack đã được dùng trong ngày.";raw.contains("UNAUTHORIZED")->"Phiên đăng nhập đã hết hạn.";else->raw};TopNotice.show(this,msg,TopNotice.Kind.ERROR)}
     private fun roleText(r:String)=when(r){"SUPERADMIN"->"Superadmin";"ADMIN"->"Admin";"USER"->"Điều phối";else->BuildConfig.CHANNEL}
-    private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Bangkok")).format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"))}catch(_:Throwable){v}}
+    private fun formatIso(v:String):String{if(v.isBlank()||v=="null")return "—";return try{Instant.parse(v).atZone(ZoneId.of("Asia/Ho_Chi_Minh")).format(DateTimeFormatter.ofPattern("HH:mm:ss dd/MM/yyyy"))}catch(_:Throwable){v}}
     private fun dash(v:String)=v.takeIf{it.isNotBlank()&&it!="null"}?:"—"
     private fun txt(v:String,s:Float,c:Int,b:Boolean)=TextView(this).apply{text=v;textSize=s;setTextColor(c);typeface=if(b)Typeface.DEFAULT_BOLD else Typeface.DEFAULT}
     private fun TextView.center()=apply{gravity=Gravity.CENTER}

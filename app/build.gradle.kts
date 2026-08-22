@@ -12,75 +12,6 @@ val firebaseAppId = quotedConfig(configValue("FIREBASE_GOOGLE_APP_ID"))
 val firebaseApiKey = quotedConfig(configValue("FIREBASE_API_KEY"))
 val firebaseSenderId = quotedConfig(configValue("FIREBASE_GCM_SENDER_ID"))
 
-val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/AppHistory.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalViewCache.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/OperationalSyncEngine.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/SyncDirectionTracker.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PdaLocalProjection.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/DeviceNetworkStatus.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2RealtimeClient.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/M2Firebase.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PdaImportActivity.kt"))
-    inputs.file(rootProject.file("app/src/main/java/vn/pickpack1291/app/beta/PpForegroundGate.kt"))
-    inputs.file(rootProject.file("tools/apply_s10_ui_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s10_ui_patch_in_place.py"))
-    inputs.file(rootProject.file("tools/apply_s11_compact_report_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s12_real_pda_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s12_compile_hotfix.py"))
-    inputs.file(rootProject.file("tools/apply_s13_shared_history_ui_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s14_device_cache_scan_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s15_local_first_ui_patch_wrapper.py"))
-    inputs.file(rootProject.file("tools/apply_s17_sqlite_recovery_ui_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s18_sync_navigation_patch.py"))
-    inputs.file(rootProject.file("tools/apply_m2_android_transport_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s19_m2_runtime_fix.py"))
-    inputs.file(rootProject.file("tools/apply_s20_pack_identity_fix.py"))
-    inputs.file(rootProject.file("tools/apply_s21_labor_shift_fix.py"))
-    inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability.py"))
-    inputs.file(rootProject.file("tools/apply_s22_pda_local_first_observability_wrapper.py"))
-    inputs.file(rootProject.file("tools/apply_s23_pda_import_ui.py"))
-    inputs.file(rootProject.file("tools/apply_s24_fcm_logout_patch.py"))
-    inputs.file(rootProject.file("tools/apply_s25_cache_sync_web_pda_fixes.py"))
-    inputs.file(rootProject.file("tools/apply_s27_projection_ack_gap_fix.py"))
-    inputs.file(rootProject.file("tools/apply_s29_owner_localfirst_history.py"))
-    inputs.file(rootProject.file("tools/apply_s30_canonical_admin_audit.py"))
-    inputs.file(rootProject.file("tools/apply_s31_service_first_hotpath.py"))
-    inputs.file(rootProject.file("tools/apply_s32_local_history_flush_fix.py"))
-    inputs.file(rootProject.file("tools/apply_s33_owner_ui_sync_resources.py"))
-    inputs.file(rootProject.file("tools/apply_s34_owner_six_requests.py"))
-    inputs.file(rootProject.file("tools/apply_s35_owner_ui_history_consistency.py"))
-    inputs.file(rootProject.file("tools/apply_s35_owner_ui_history_consistency_wrapper.py"))
-    inputs.file(rootProject.file("tools/apply_s36_perf_history_report_service.py"))
-    inputs.file(rootProject.file("tools/apply_s36b_compile_hotfix.py"))
-    inputs.file(rootProject.file("tools/apply_s37_move_service_telemetry_to_sync.py"))
-    inputs.file(rootProject.file("tools/apply_s38_attendance_ui.py"))
-    inputs.file(rootProject.file("tools/apply_s39_employee_session_history.py"))
-    inputs.file(rootProject.file("tools/apply_s40_owner_local_first_repair.py"))
-    inputs.file(rootProject.file("tools/apply_s43_foreground_outbox_wake.py"))
-    inputs.file(rootProject.file("tools/apply_s44_session_singleflight_observability.py"))
-    inputs.file(rootProject.file("tools/apply_s44b_compile_hotfix.py"))
-    inputs.file(rootProject.file("tools/apply_s45_beta40_owner_fixes.py"))
-    inputs.file(rootProject.file("tools/apply_s47_beta41_owner_fixes.py"))
-    inputs.file(rootProject.file("tools/apply_s47b_compile_hotfix.py"))
-    inputs.file(rootProject.file("tools/apply_s48_beta42_shift_work_summary.py"))
-    inputs.file(rootProject.file("tools/apply_s49_beta43_session_admin_corrections.py"))
-    inputs.file(rootProject.file("tools/apply_s49b_compile_hotfix.py"))
-    inputs.file(rootProject.file("tools/apply_s49c_kotlin_syntax_hotfix.py"))
-    inputs.file(rootProject.file("tools/apply_s50_beta44_owner_user_projection_admin_bulk_sync_vi.py"))
-    inputs.file(rootProject.file("tools/apply_s51_beta45_manual_update_sync_detail_vi.py"))
-    inputs.file(rootProject.file("tools/apply_s52_beta46_superadmin_history_delete.py"))
-    inputs.file(rootProject.file("tools/apply_s53_beta47_sheet_logic_ui.py"))
-    inputs.file(rootProject.file("tools/apply_s54_beta48_owner_10_fixes.py"))
-    outputs.upToDateWhen { false }
-    workingDir(rootProject.projectDir)
-    commandLine("python3", "tools/apply_m2_android_transport_patch.py")
-}
-
 android {
     namespace = "vn.pickpack1291.app.beta"
     compileSdk = 36
@@ -101,8 +32,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 54
-            versionName = "0.4.2-beta.48"
+            versionCode = 56
+            versionName = "0.4.2-beta.50"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -136,7 +67,6 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
 }
 
-tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 
 // M2 target: Android/PWA <-> Service <-> D1, with GAS as controlled fallback/legacy bridge.
 // Firebase is owner-approved only for FCM wake/invalidation; no Firebase Auth/DB/Storage dependency is present.

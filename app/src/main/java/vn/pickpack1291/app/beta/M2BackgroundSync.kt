@@ -41,7 +41,7 @@ object M2BackgroundSync {
             if (day.handled && day.ok) day.json?.optJSONObject("day")?.let(store::saveDay)
         }
 
-        refreshMasterIfChanged(app, transport.discoverySnapshot())
+        refreshMasterIfChanged(app, transport.cachedDiscoverySnapshot())
         return true
     }
 

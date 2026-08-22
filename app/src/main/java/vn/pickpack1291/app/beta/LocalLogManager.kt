@@ -11,6 +11,7 @@ import java.util.Locale
 import java.util.UUID
 
 object LocalLogManager {
+    // S44_SESSION_SINGLEFLIGHT_OBSERVABILITY
     private const val PREFS = "pp1291_log_state"
     private const val KEY_DAILY = "last_daily_log"
 
@@ -57,6 +58,14 @@ object LocalLogManager {
     }
 
     fun pendingCount(context: Context): Int = logDir(context).listFiles()?.count { it.isFile } ?: 0
+
+    // S54_BETA48_OWNER_10_FIXES
+    fun summary(context:Context):String{
+        val files=logDir(context).listFiles()?.filter{it.isFile}.orEmpty();val bytes=files.sumOf{it.length()};val latest=files.maxOfOrNull{it.lastModified()}?:0L
+        fun size(v:Long)=when{v<1024L->"$v B";v<1024L*1024L->String.format(Locale.US,"%.1f KB",v/1024.0);else->String.format(Locale.US,"%.1f MB",v/(1024.0*1024.0))}
+        val at=if(latest<=0L)"—" else SimpleDateFormat("HH:mm:ss dd/MM/yyyy",Locale.US).format(Date(latest))
+        return "${files.size} tệp • ${size(bytes)} • mới nhất $at"
+    }
 
     fun sendManualReport(context: Context, api: BetaApiClient, screen: String, syncState: String, callback: (BetaApiClient.Result) -> Unit) {
         val file = write(context, "MANUAL_REPORT", buildString {
@@ -106,6 +115,26 @@ object LocalLogManager {
         appendLine("android=${safe(Build.VERSION.RELEASE)}")
         appendLine("api=${Build.VERSION.SDK_INT}")
         appendLine("device=${safe(Build.DEVICE)}")
+        appendLine("diagnostics_begin=S44_V1")
+        runCatching { M2TransportDiagnostics.snapshotLines(context).forEach { appendLine(it) } }
+            .onFailure { appendLine("transport_diag_error=${safe(it.javaClass.simpleName+":"+(it.message?:""))}") }
+        runCatching {
+            val arr=OperationalDataStore(context).diagnosticOutbox(50)
+            appendLine("outbox_rows=${arr.length()}")
+            for(i in 0 until arr.length()){
+                val x=arr.optJSONObject(i)?:continue
+                appendLine("outbox[$i].event_id=${safe(x.optString("event_id"))}")
+                appendLine("outbox[$i].action=${safe(x.optString("action"))}")
+                appendLine("outbox[$i].status=${safe(x.optString("status"))}")
+                appendLine("outbox[$i].exclusive=${x.optBoolean("exclusive")}")
+                appendLine("outbox[$i].attempt_count=${x.optInt("attempt_count")}")
+                appendLine("outbox[$i].next_attempt_at=${x.optLong("next_attempt_at")}")
+                appendLine("outbox[$i].queued_at=${x.optLong("queued_at")}")
+                appendLine("outbox[$i].updated_at=${x.optLong("updated_at")}")
+                appendLine("outbox[$i].last_error=${safe(x.optString("last_error"))}")
+            }
+        }.onFailure { appendLine("outbox_diag_error=${safe(it.javaClass.simpleName+":"+(it.message?:""))}") }
+        appendLine("diagnostics_end=S44_V1")
     }
 
     private fun logDir(context: Context) = File(context.filesDir, "diagnostic_logs").apply { mkdirs() }
