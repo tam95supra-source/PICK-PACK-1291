@@ -1,9 +1,10 @@
-build=2026-08-22T07:58:00+07:00
+build=2026-08-22T08:02:00+07:00
 target=0.4.2-beta.45
 version_code=51
 base=Beta44 finalized source 3a1832e87117d8c2a4448d3838330237918b10f3
 change=manual-only version check + detailed Vietnamese Sync UI
-retry_reason=fix deterministic S51 network helper and enforce global no-auto-update gate
+retry_reason=S51B compile guard; second trigger to ensure candidate workflow registration
+retry_seq=2
 publish_ota=NO
 manual_apk=YES
 stable_publish=FORBIDDEN
