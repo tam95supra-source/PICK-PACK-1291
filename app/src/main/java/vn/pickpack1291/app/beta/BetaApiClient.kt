@@ -188,8 +188,11 @@ class BetaApiClient(context: Context) {
           }
       }
       val usedService = m2?.handled == true
+      val runtimeDataAction = action in M2RuntimeBridge.DIRECT_READS || action in M2ServiceTransport.OPERATIONAL || action in M2ServiceTransport.SYNC_ACTIONS
       val result = if (usedService) {
           Result(m2!!.ok, m2.code, m2.json, m2.error)
+      } else if(runtimeDataAction && ServiceFaultInjection.googleDisabled(appContext)) {
+          Result(false,-1,null,"TEST_GOOGLE_DISABLED")
       } else when (action) {
           "change_password" -> changePassword(payload)
           "account_upsert" -> accountUpsert(payload)
@@ -267,6 +270,7 @@ class BetaApiClient(context: Context) {
 
     // S33_OWNER_UI_SYNC_RESOURCES: owner resource/correction calls go to current Service authority only.
     private fun serviceOwnerCall(action:String,payload:JSONObject):Result{
+        if(ServiceFaultInjection.cloudflareDisabled(appContext))return Result(false,-1,null,"TEST_CLOUDFLARE_DISABLED")
         val d=m2Transport.discoverySnapshot()?:return Result(false,503,null,"SERVICE_DISCOVERY_UNAVAILABLE")
         if(d.optString("authority_mode")!="SERVICE_PRIMARY")return Result(false,409,d,"SERVICE_NOT_WRITE_AUTHORITY")
         val base=d.optString("service_url").trimEnd('/');if(!base.startsWith("https://"))return Result(false,503,d,"SERVICE_URL_INVALID")

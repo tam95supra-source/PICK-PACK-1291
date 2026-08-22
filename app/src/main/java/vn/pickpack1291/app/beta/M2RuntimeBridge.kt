@@ -19,6 +19,7 @@ class M2RuntimeBridge(context: Context) {
 
     // S44_SESSION_SINGLEFLIGHT_OBSERVABILITY: no independent session exchange lane.
     fun ensureServiceSession(gasToken:String?,force:Boolean=false):Boolean {
+        if(ServiceFaultInjection.cloudflareDisabled(app)){recordServicePending("TEST_CLOUDFLARE_DISABLED");return false}
         val d=transport.cachedDiscoverySnapshot() ?: transport.discoverySnapshot() ?: return false
         val mode=d.optString("authority_mode");val base=d.optString("service_url").trimEnd('/')
         prefs.edit().putString(KEY_AUTHORITY_MODE,mode).putString(KEY_SERVICE_URL,base).apply()
@@ -150,6 +151,7 @@ class M2RuntimeBridge(context: Context) {
             .put("label", label)
             .put("provider", if (mode == "GOOGLE_FALLBACK") "Google dự phòng" else if (url.isNotBlank()) "Cloudflare" else "—")
             .put("last_error", prefs.getString(KEY_LAST_ERROR, "").orEmpty())
+            .put("test_mode",ServiceFaultInjection.mode(app).stored)
     }
 
     fun clear() {
@@ -164,6 +166,7 @@ class M2RuntimeBridge(context: Context) {
     )
 
     private fun httpJson(endpoint: String, payload: JSONObject, bearer: String?): HttpResult {
+        if(ServiceFaultInjection.cloudflareDisabled(app))return HttpResult(false,-1,null,"TEST_CLOUDFLARE_DISABLED")
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {

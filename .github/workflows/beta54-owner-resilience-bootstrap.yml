@@ -1,0 +1,49 @@
+name: Beta54 Owner Resilience Bootstrap
+
+on:
+  push:
+    branches:
+      - fix/beta54-owner-resilience-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-check:
+    if: ${{ !contains(github.event.head_commit.message, '[beta54-app-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/beta54-owner-resilience-20260822
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Apply Beta54 owner repairs
+        run: python3 tools/apply_s57_beta54_owner_resilience.py
+      - name: Static guards
+        run: |
+          grep -Fq 'S57_BETA54_OWNER_RESILIENCE_FIX' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -Fq 'api.call("exit"' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          ! grep -Fq 'Mạng thể hiện khả năng' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -Fq 'MutationStatusCounts' app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt
+          grep -Fq 'fun retryDateWindowRejects():Int = 0' app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt
+          grep -Fq 'TEST_CLOUDFLARE_DISABLED' app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
+          grep -Fq 'THỬ NGHIỆM LỖI SERVICE' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          grep -Fq 'ServiceFaultInjection' app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
+          git diff --check
+      - name: Assemble Beta and Stable debug
+        run: ./gradlew :app:assembleBetaDebug :app:assembleStableDebug --no-daemon
+      - name: Commit canonical Android source
+        run: |
+          if git diff --quiet -- app/src/main/java/vn/pickpack1291/app/beta; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git config user.name 'pick-pack-1291-release-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/src/main/java/vn/pickpack1291/app/beta
+          git commit -m 'Apply Beta54 sync exit and fault-test repairs [beta54-app-applied]'
+          git push origin HEAD:fix/beta54-owner-resilience-20260822

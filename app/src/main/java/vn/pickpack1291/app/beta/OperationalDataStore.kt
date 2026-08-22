@@ -228,7 +228,7 @@ class OperationalDataStore(context: Context) {
         readableDb().query(
             "mutation_outbox",
             arrayOf("event_id", "body_json", "exclusive", "status", "attempt_count", "queued_at"),
-            "(status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR (status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW')) AND next_attempt_at <= ?",
+            "status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') AND next_attempt_at <= ?",
             arrayOf(now), null, null, "queued_at ASC", limit.coerceIn(1, 500).toString(),
         ).use { c ->
             while (c.moveToNext()) {
@@ -318,12 +318,8 @@ class OperationalDataStore(context: Context) {
         out
     }
 
-    fun retryDateWindowRejects():Int=withDbLock{
-        val db=writableDb();val now=System.currentTimeMillis();var count=0
-        db.rawQuery("SELECT COUNT(*) FROM mutation_outbox WHERE status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW'",null).use{c->if(c.moveToFirst())count=c.getInt(0)}
-        if(count>0)db.execSQL("UPDATE mutation_outbox SET status='RETRY',next_attempt_at=?,updated_at=? WHERE status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW'",arrayOf(now,now))
-        count
-    }
+    /** Permanently rejected out-of-window rows are audit/history, never network backlog. */
+    fun retryDateWindowRejects():Int = 0
 
     fun markMutationSynced(eventId: String) = markMutationResolved(eventId, "CONFIRMED", "")
     fun markMutationRejected(eventId: String, error: String) = markMutationResolved(eventId, "REJECTED", error)
@@ -381,9 +377,25 @@ class OperationalDataStore(context: Context) {
         out
     }
 
-    fun pendingMutationCount(): Int = withDbLock {
-        readableDb().rawQuery("SELECT COUNT(*) FROM mutation_outbox WHERE status IN ('LOCAL_PENDING','PENDING','RETRY','OFFLINE_PROVISIONAL') OR (status='REJECTED' AND last_error='BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW')", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+    data class MutationStatusCounts(val pending:Int,val review:Int,val rejected:Int,val confirmed:Int)
+
+    fun mutationStatusCounts():MutationStatusCounts = withDbLock {
+        var pending=0;var review=0;var rejected=0;var confirmed=0
+        readableDb().rawQuery("SELECT status,COUNT(*) FROM mutation_outbox GROUP BY status",null).use { c ->
+            while(c.moveToNext()){
+                val count=c.getInt(1)
+                when(c.getString(0)){
+                    "LOCAL_PENDING","PENDING","RETRY","OFFLINE_PROVISIONAL"->pending+=count
+                    "REVIEW_REQUIRED"->review+=count
+                    "REJECTED"->rejected+=count
+                    "CONFIRMED"->confirmed+=count
+                }
+            }
+        }
+        MutationStatusCounts(pending,review,rejected,confirmed)
     }
+
+    fun pendingMutationCount(): Int = mutationStatusCounts().pending
 
     fun conflicts(limit: Int = 100): List<JSONObject> = withDbLock {
         val out = ArrayList<JSONObject>()
