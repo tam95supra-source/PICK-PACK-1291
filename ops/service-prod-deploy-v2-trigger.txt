@@ -4,5 +4,7 @@ source=Beta46 SUPERADMIN logical history deletion
 feature=HISTORY_DELETE_TOMBSTONE_V1
 expected_route=/v1/history/delete
 expected_authority=SERVICE_PRIMARY
+retry_seq=2
+retry_reason=route probe added to observable deploy gate
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
