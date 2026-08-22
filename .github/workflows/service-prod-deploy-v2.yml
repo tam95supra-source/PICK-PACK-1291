@@ -152,8 +152,9 @@ jobs:
           r3=$(probe_post /v1/session/exit)
           r4=$(probe_post /v1/session/time-correction)
           r5=$(probe_post /v1/session/delete-exit)
-          printf 'resource_route=%s\nsession_work_route=%s\nsession_exit_route=%s\ntime_correction_route=%s\ndelete_exit_route=%s\n' "$r1" "$r2" "$r3" "$r4" "$r5" > /tmp/routes.txt
-          [[ "$r1" == 401 && "$r2" == 401 && "$r3" == 401 && "$r4" == 401 && "$r5" == 401 ]]
+          r6=$(probe_post /v1/history/delete)
+          printf 'resource_route=%s\nsession_work_route=%s\nsession_exit_route=%s\ntime_correction_route=%s\ndelete_exit_route=%s\nhistory_delete_route=%s\n' "$r1" "$r2" "$r3" "$r4" "$r5" "$r6" > /tmp/routes.txt
+          [[ "$r1" == 401 && "$r2" == 401 && "$r3" == 401 && "$r4" == 401 && "$r5" == 401 && "$r6" == 401 ]]
 
       - name: Persist observable deploy receipt
         id: receipt
