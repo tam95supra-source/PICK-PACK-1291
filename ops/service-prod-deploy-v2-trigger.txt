@@ -1,12 +1,11 @@
-deploy=2026-08-22T09:38:00+07:00
+deploy=2026-08-22T10:48:00+07:00
 target=pick-pack-1291-service
-source=Beta47 frozen final source after candidate PASS
-features=CATALOG_GOOGLE_SOURCE_ONLY_REALTIME,RA_SESSION_AGGREGATE,USER_PER_ROW,HISTORY_AUDIT_APP_WEB,APP_WEB_CONNECTIONS,ADMIN_HISTORY_VISIBLE,PENDING_HISTORY_DELETE
+source=Beta48 OWNER 10-fix service source
+features=CURRENT_DAY_ROLLOVER,PDA_7_DAY_WINDOW_REPAIR,USER_PACK_BOTH_SHIFTS,USER_PACK_REUSE_AFTER_END,APP_WEB_CONNECTIONS
 expected_route=/v1/service/connections
 expected_authority=SERVICE_PRIMARY
-retry_seq=7
+retry_seq=8
 source_frozen=YES
-candidate_artifact=9468742176
-candidate_version=0.4.2-beta.47
+candidate_version=0.4.2-beta.48
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
