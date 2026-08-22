@@ -1,5 +1,6 @@
 name: Beta50 One-Time Canonical Commit R2
 
+# R4: syntax-boundary Gradle cleanup
 on:
   push:
     branches:
