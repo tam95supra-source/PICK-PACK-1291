@@ -1,4 +1,4 @@
-name: Beta48 Signed Candidate Carrier
+name: Service Production Deploy V2 Observable
 
 on:
   push:
@@ -11,10 +11,145 @@ permissions:
   contents: write
 
 concurrency:
-  group: beta48-signed-candidate-carrier
+  group: service-prod-deploy-v2
   cancel-in-progress: false
 
 jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install and typecheck Service
+        id: check
+        continue-on-error: true
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npx wrangler --version
+          npm run check
+      - name: Pre-deploy live health
+        id: prehealth
+        if: steps.check.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --retry 4 --retry-delay 2 --connect-timeout 15 --max-time 45 -o /tmp/pre-health.json -w '%{http_code}' "$SERVICE_URL/health")
+          [[ "$code" == 200 ]]
+          python3 - <<'PY'
+          import json
+          j=json.load(open('/tmp/pre-health.json')); a=j.get('authority') or {}
+          assert j.get('ok') is True and a.get('mode')=='SERVICE_PRIMARY' and a.get('scope')=='PRODUCTION',j
+          PY
+      - name: Generate locked production Wrangler config
+        id: config
+        if: steps.prehealth.outcome == 'success'
+        continue-on-error: true
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > wrangler.prod.generated.jsonc <<'EOF'
+          {
+            "$schema": "./node_modules/wrangler/config-schema.json",
+            "name": "pick-pack-1291-service",
+            "main": "src/entry_product.ts",
+            "compatibility_date": "2026-08-08",
+            "compatibility_flags": ["nodejs_compat"],
+            "workers_dev": true,
+            "placement": { "mode": "smart" },
+            "vars": {
+              "SERVICE_GENERATION": "m2-prod-20260819-001",
+              "GOOGLE_SOURCE_SHEET_ID": "1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78"
+            },
+            "d1_databases": [{"binding":"DB","database_name":"pick-pack-1291-service-prod","database_id":"b619df89-528d-4126-a948-de0425037b11","migrations_dir":"migrations"}],
+            "durable_objects": {"bindings":[{"name":"REALTIME_HUB","class_name":"RealtimeHub"}]},
+            "migrations": [{"tag":"v1","new_sqlite_classes":["RealtimeHub"]}],
+            "assets": {"directory":"./public","binding":"ASSETS","not_found_handling":"single-page-application","run_worker_first":["/health","/v1/*","/internal/*"]},
+            "triggers": {"crons":["*/1 * * * *"]},
+            "observability": {"enabled":true,"head_sampling_rate":1}
+          }
+          EOF
+          npx wrangler deploy --config wrangler.prod.generated.jsonc --dry-run >/tmp/dry-run.log 2>&1
+      - name: Deploy exact Service source to production Worker
+        id: deploy
+        if: steps.config.outcome == 'success'
+        continue-on-error: true
+        working-directory: service
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" && -n "${CLOUDFLARE_ACCOUNT_ID:-}" ]]
+          npx wrangler deploy --config wrangler.prod.generated.jsonc --keep-vars 2>&1 | tee /tmp/deploy.log
+      - name: Post-deploy health and route probes
+        id: probe
+        if: steps.deploy.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=false
+          for n in 1 2 3 4 5; do
+            code=$(curl -sS --connect-timeout 15 --max-time 45 -o /tmp/post-health.json -w '%{http_code}' "$SERVICE_URL/health" || true)
+            if [[ "$code" == 200 ]] && python3 - <<'PY'
+          import json
+          try:
+              j=json.load(open('/tmp/post-health.json'));a=j.get('authority') or {}
+              raise SystemExit(0 if j.get('ok') is True and a.get('mode')=='SERVICE_PRIMARY' and a.get('scope')=='PRODUCTION' else 1)
+          except Exception: raise SystemExit(1)
+          PY
+            then ok=true; break; fi
+            sleep 2
+          done
+          [[ "$ok" == true ]]
+          get(){ curl -sS -o /tmp/probe.json -w '%{http_code}' "$SERVICE_URL$1"; }
+          post(){ curl -sS -o /tmp/probe.json -w '%{http_code}' -H 'content-type: application/json' -d '{}' "$SERVICE_URL$1"; }
+          r1=$(get /v1/admin/resources); r2=$(post /v1/session/work); r3=$(post /v1/session/exit); r4=$(post /v1/session/time-correction); r5=$(post /v1/session/delete-exit); r6=$(post /v1/history/delete)
+          printf 'resource_route=%s\nsession_work_route=%s\nsession_exit_route=%s\ntime_correction_route=%s\ndelete_exit_route=%s\nhistory_delete_route=%s\n' "$r1" "$r2" "$r3" "$r4" "$r5" "$r6" >/tmp/routes.txt
+          [[ "$r1" == 401 && "$r2" == 401 && "$r3" == 401 && "$r4" == 401 && "$r5" == 401 && "$r6" == 401 ]]
+      - name: Persist observable deploy receipt
+        if: always()
+        shell: bash
+        env:
+          CHECK_OUTCOME: ${{ steps.check.outcome }}
+          PREHEALTH_OUTCOME: ${{ steps.prehealth.outcome }}
+          CONFIG_OUTCOME: ${{ steps.config.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          PROBE_OUTCOME: ${{ steps.probe.outcome }}
+        run: |
+          set -euo pipefail
+          verdict=FAIL
+          if [[ "$CHECK_OUTCOME" == success && "$PREHEALTH_OUTCOME" == success && "$CONFIG_OUTCOME" == success && "$DEPLOY_OUTCOME" == success && "$PROBE_OUTCOME" == success ]]; then verdict=PASS; fi
+          version_id=''; [[ -f /tmp/deploy.log ]] && version_id=$(sed -n 's/.*Version ID: *//p' /tmp/deploy.log | tail -1 | tr -cd 'A-Za-z0-9_-')
+          mkdir -p ops
+          {
+            echo "checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; echo "source_sha=$GITHUB_SHA"; echo "run_id=$GITHUB_RUN_ID"
+            echo "service_check=$CHECK_OUTCOME"; echo "prehealth=$PREHEALTH_OUTCOME"; echo "config=$CONFIG_OUTCOME"; echo "deploy=$DEPLOY_OUTCOME"; echo "probe=$PROBE_OUTCOME"
+            [[ -n "$version_id" ]] && echo "worker_version_id=$version_id"; [[ -f /tmp/routes.txt ]] && cat /tmp/routes.txt
+            echo "stable=UNTOUCHED"; echo "pr38_merge=FORBIDDEN"; echo "verdict=$verdict"
+          } > ops/service-prod-deploy-v2-result.txt
+          git config user.name github-actions[bot]; git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/service-prod-deploy-v2-result.txt; git commit -m 'ops: record observable Service production deploy receipt' || true
+          git pull --rebase origin agent/service-migration-m2; git push origin HEAD:agent/service-migration-m2
+          [[ "$verdict" == PASS ]]
+      - name: Remove generated production config
+        if: always()
+        working-directory: service
+        run: rm -f wrangler.prod.generated.jsonc
+
   beta48-candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -24,165 +159,115 @@ jobs:
       SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
       SIGNING_ALIAS: ${{ secrets.ANDROID_SIGNING_ALIAS }}
       EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
-      BETA_NAME: 0.4.2-beta.48
-      BETA_CODE: '54'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
-
-      - name: Lock Beta48 metadata
+      - name: Lock Beta48 metadata and patch chain
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import re
           from pathlib import Path
-          t=Path('app/build.gradle.kts').read_text()
-          b=re.search(r'create\("beta"\)\s*\{(.*?)\n\s*\}',t,re.S).group(1)
-          s=re.search(r'create\("stable"\)\s*\{(.*?)\n\s*\}',t,re.S).group(1)
+          t=Path('app/build.gradle.kts').read_text(); b=re.search(r'create\("beta"\)\s*\{(.*?)\n\s*\}',t,re.S).group(1); s=re.search(r'create\("stable"\)\s*\{(.*?)\n\s*\}',t,re.S).group(1)
           one=lambda x,p:re.search(p,x).group(1)
-          assert one(b,r'versionName\s*=\s*"([^"]+)"')=='0.4.2-beta.48'
-          assert one(b,r'versionCode\s*=\s*(\d+)')=='54'
-          assert one(s,r'versionName\s*=\s*"([^"]+)"')=='0.1.0-stable'
-          assert one(s,r'versionCode\s*=\s*(\d+)')=='1'
+          bn=one(b,r'versionName\s*=\s*"([^"]+)"');bc=one(b,r'versionCode\s*=\s*(\d+)');sn=one(s,r'versionName\s*=\s*"([^"]+)"');sc=one(s,r'versionCode\s*=\s*(\d+)')
+          assert bn=='0.4.2-beta.48' and bc=='54',(bn,bc); assert sn=='0.1.0-stable' and sc=='1',(sn,sc)
+          print('beta_name='+bn);print('beta_code='+bc);print('stable_name='+sn);print('stable_code='+sc)
           PY
+          test -f tools/apply_s54_beta48_owner_10_fixes.py
           python3 -m py_compile tools/apply_s54_beta48_owner_10_fixes.py tools/apply_m2_android_transport_patch.py
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.4.1'
-          cache-read-only: true
-
       - name: Resolve Android SDK
-        id: sdk
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then
-            echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"; exit 0
-          fi
+          if [[ -n "${ANDROID_HOME:-}" && -f "$ANDROID_HOME/platforms/android-36/android.jar" && -x "$ANDROID_HOME/build-tools/36.0.0/apksigner" && -x "$ANDROID_HOME/build-tools/36.0.0/aapt" ]]; then echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"; exit 0; fi
           SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
           curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
           echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
           mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
-
-      - name: Build Beta and Stable validation APKs
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"; yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true; "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build Beta and Stable release validation candidates
         id: build
         shell: bash
         run: |
           set -euo pipefail
           gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
-
-      - name: Verify owner contracts and package identity
+      - name: Verify materialized owner contracts and package metadata
         id: package
         shell: bash
+        env:
+          BETA_NAME: ${{ steps.meta.outputs.beta_name }}
+          BETA_CODE: ${{ steps.meta.outputs.beta_code }}
         run: |
-          set -euxo pipefail
-          OPS=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt
-          TR=app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt
-          ST=app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt
-          grep -q 'S54_BETA48_OWNER_10_FIXES' "$OPS"
-          grep -q 'Không dùng User hy1.outbound' "$OPS"
-          ! grep -q 'Không dùng User Pick' "$OPS"
-          ! grep -q 'Quản trị cao nhất có thể chọn nhiều lịch sử' "$OPS"
-          grep -q 'SERI PDA ĐÃ CHỌN' "$OPS"
-          grep -q 'Dung lượng cache' "$OPS"
-          grep -q 'Tên thiết bị' "$OPS"
-          grep -q 'LocalLogManager.summary' "$OPS"
-          grep -q 'historyWindowDates' "$OPS"
-          ! grep -q 'optString("shift")!=selectedShift' "$OPS"
-          ! grep -q 'optString("shift")!=s.optString("shift")' "$OPS"
-          grep -q '/v1/service/connections' "$TR"
-          grep -q 'BUSINESS_DATE_OUTSIDE_PDA_7_DAY_WINDOW' "$ST"
-          grep -q 'fun historyWindowDates' "$ST"
-          grep -q 'fun storageBytes' "$ST"
-          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
-          BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
-          test -s "$BETA"; test -s "$STABLE"
-          "$BT/aapt" dump badging "$BETA" | tee /tmp/beta-badging.txt
-          "$BT/aapt" dump badging "$STABLE" | tee /tmp/stable-badging.txt
-          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta-badging.txt
-          grep -q "versionCode='54'" /tmp/beta-badging.txt
-          grep -q "versionName='0.4.2-beta.48'" /tmp/beta-badging.txt
-          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable-badging.txt
-          grep -q "versionCode='1'" /tmp/stable-badging.txt
-          grep -q "versionName='0.1.0-stable'" /tmp/stable-badging.txt
-
-      - name: Sign Beta48 and verify locked signer
+          set -euo pipefail
+          OPS=app/src/main/java/vn/pickpack1291/app/beta/OperationsActivity.kt; TR=app/src/main/java/vn/pickpack1291/app/beta/M2ServiceTransport.kt; ST=app/src/main/java/vn/pickpack1291/app/beta/OperationalDataStore.kt
+          grep -q 'S54_BETA48_OWNER_10_FIXES' "$OPS"; grep -q 'Không dùng User hy1.outbound' "$OPS"; ! grep -q 'Không dùng User Pick' "$OPS"; ! grep -q 'Quản trị cao nhất có thể chọn nhiều lịch sử' "$OPS"
+          grep -q 'SERI PDA ĐÃ CHỌN' "$OPS"; grep -q 'Dung lượng cache' "$OPS"; grep -q 'Tên thiết bị' "$OPS"; grep -q 'LocalLogManager.summary' "$OPS"; grep -q 'historyWindowDates' "$OPS"
+          ! grep -q 'optString("shift")!=selectedShift' "$OPS"; ! grep -q 'optString("shift")!=s.optString("shift")' "$OPS"; grep -q '/v1/service/connections' "$TR"; grep -q 'retryDateWindowRejects' "$TR"; grep -q 'fun historyWindowDates' "$ST"; grep -q 'fun storageBytes' "$ST"
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"; BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk; STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
+          "$BT/aapt" dump badging "$BETA" >/tmp/beta.txt; "$BT/aapt" dump badging "$STABLE" >/tmp/stable.txt
+          grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta.txt; grep -q "versionCode='$BETA_CODE'" /tmp/beta.txt; grep -q "versionName='$BETA_NAME'" /tmp/beta.txt
+          grep -q "package: name='vn.pickpack1291.app.stable'" /tmp/stable.txt; grep -q "versionCode='1'" /tmp/stable.txt; grep -q "versionName='0.1.0-stable'" /tmp/stable.txt
+      - name: Sign Beta and verify locked signer
         id: sign
         shell: bash
+        env:
+          BETA_NAME: ${{ steps.meta.outputs.beta_name }}
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           for v in SIGNING_KEY_B64 SIGNING_STORE_PASSWORD SIGNING_KEY_PASSWORD SIGNING_ALIAS; do [[ -n "${!v:-}" ]]; done
-          KS="$RUNNER_TEMP/release.jks"
-          printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"
-          printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"
-          printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
-          mkdir -p dist/beta
-          OUT="dist/beta/pick-pack-1291-public-beta-0.4.2-beta.48.apk"
-          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          KS="$RUNNER_TEMP/release.jks"; printf '%s' "$SIGNING_KEY_B64" | base64 -d > "$KS"; printf '%s' "$SIGNING_STORE_PASSWORD" > "$RUNNER_TEMP/store.pass"; printf '%s' "$SIGNING_KEY_PASSWORD" > "$RUNNER_TEMP/key.pass"
+          mkdir -p dist/beta; OUT="dist/beta/pick-pack-1291-public-beta-${BETA_NAME}.apk"; BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
           "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
-          "$BT/apksigner" verify --verbose --print-certs "$OUT" | tee /tmp/cert.txt
-          grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
-          sha=$(sha256sum "$OUT" | awk '{print $1}'); size=$(stat -c '%s' "$OUT"); file=$(basename "$OUT")
-          printf '%s  %s\n' "$sha" "$file" > dist/beta/SHA256SUMS-0.4.2-beta.48.txt
-          "$BT/aapt" dump badging "$OUT" > dist/beta/APK_BADGING-0.4.2-beta.48.txt
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "size=$size" >> "$GITHUB_OUTPUT"; echo "file=$file" >> "$GITHUB_OUTPUT"
-
-      - name: Upload exact signed Beta48 candidate
+          "$BT/apksigner" verify --verbose --print-certs "$OUT" >/tmp/cert.txt; grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
+          sha=$(sha256sum "$OUT"|awk '{print $1}');size=$(stat -c '%s' "$OUT");file=$(basename "$OUT");printf '%s  %s\n' "$sha" "$file" > "dist/beta/SHA256SUMS-${BETA_NAME}.txt"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT";echo "size=$size" >> "$GITHUB_OUTPUT";echo "file=$file" >> "$GITHUB_OUTPUT"
+      - name: Upload signed Beta48 candidate
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: pick-pack-1291-0.4.2-beta.48-signed
+          name: pick-pack-1291-${{ steps.meta.outputs.beta_name }}-signed-validation
           path: dist/beta/*
           retention-days: 14
-
-      - name: Persist candidate observer
+      - name: Persist candidate receipt
         if: always()
         shell: bash
         env:
-          META: ${{ steps.meta.outcome }}
-          SDK: ${{ steps.sdk.outcome }}
-          BUILD: ${{ steps.build.outcome }}
-          PACKAGE: ${{ steps.package.outcome }}
-          SIGN: ${{ steps.sign.outcome }}
-          UPLOAD: ${{ steps.upload.outcome }}
+          BETA_NAME: ${{ steps.meta.outputs.beta_name }}
+          BETA_CODE: ${{ steps.meta.outputs.beta_code }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          SIGN_OUTCOME: ${{ steps.sign.outcome }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
           APK_SHA: ${{ steps.sign.outputs.sha }}
           APK_SIZE: ${{ steps.sign.outputs.size }}
           APK_FILE: ${{ steps.sign.outputs.file }}
-          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
         run: |
           set -euo pipefail
-          verdict=FAIL
-          [[ "$META" == success && "$SDK" == success && "$BUILD" == success && "$PACKAGE" == success && "$SIGN" == success && "$UPLOAD" == success && -n "${ARTIFACT_ID:-}" ]] && verdict=PASS
-          git reset --hard HEAD
+          verdict=FAIL; if [[ "$BUILD_OUTCOME" == success && "$PACKAGE_OUTCOME" == success && "$SIGN_OUTCOME" == success && -n "${ARTIFACT_ID:-}" ]]; then verdict=PASS; fi
           mkdir -p ops
           cat > ops/beta-release-candidate-result.txt <<EOF
           checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           source_sha=$GITHUB_SHA
           run_id=$GITHUB_RUN_ID
-          beta_name=0.4.2-beta.48
-          beta_code=54
+          beta_name=${BETA_NAME:-0.4.2-beta.48}
+          beta_code=${BETA_CODE:-54}
           stable_name=0.1.0-stable
           stable_code=1
-          metadata=$META
-          sdk=$SDK
-          build=$BUILD
-          package=$PACKAGE
-          sign=$SIGN
-          upload=$UPLOAD
+          build=$BUILD_OUTCOME
+          package=$PACKAGE_OUTCOME
+          sign=$SIGN_OUTCOME
           artifact_id=${ARTIFACT_ID:-}
           apk_file=${APK_FILE:-}
           apk_sha256=${APK_SHA:-}
@@ -191,14 +276,10 @@ jobs:
           stable_publish=FORBIDDEN
           verdict=$verdict
           EOF
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ops/beta-release-candidate-result.txt
-          git commit -m "ops: observe Beta48 candidate $verdict" || true
-          git pull --rebase origin agent/service-migration-m2
-          git push origin HEAD:agent/service-migration-m2
+          git config user.name github-actions[bot];git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/beta-release-candidate-result.txt;git commit -m 'ops: record Beta48 signed candidate via service carrier' || true
+          git pull --rebase origin agent/service-migration-m2;git push origin HEAD:agent/service-migration-m2
           [[ "$verdict" == PASS ]]
-
       - name: Cleanup signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/store.pass" "$RUNNER_TEMP/key.pass"
