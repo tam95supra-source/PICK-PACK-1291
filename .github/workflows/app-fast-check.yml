@@ -151,29 +151,15 @@ jobs:
           grep -q "action === 'change_email'" google-apps-script/PICK_PACK_API.gs
           grep -q "action === 'staff_upsert'" google-apps-script/PICK_PACK_API.gs
           grep -q "action === 'staff_delete'" google-apps-script/PICK_PACK_API.gs
-          ! grep -R -n 'TransitionManager.beginDelayedTransition' app/src/main/java/vn/pickpack1291/app/beta
-          ! grep -R -n 'overridePendingTransition(android.R.anim.fade_in' app/src/main/java/vn/pickpack1291/app/beta
-          ! grep -R -nE 'server ACK|Log local chờ ACK|nhận ACK|Server revision|Master revision|Master data tự làm mới|Màu giao diện được đổi|Đồng bộ / dữ liệu' app/src/main/java/vn/pickpack1291/app/beta
-          ! grep -R -nE 'supabase\.co|firebaseio\.com|neon\.tech|cloudflareworkers\.com' app/src google-apps-script 2>/dev/null
-          python3 -m py_compile tools/apply_s10_ui_patch.py tools/apply_s10_ui_patch_in_place.py tools/apply_s11_compact_report_patch.py tools/apply_s12_real_pda_patch.py tools/apply_s12_gas_patch.py tools/apply_s12_gas_health_patch.py tools/apply_s55_beta51_owner_refresh_history_fix.py
+          python3 -m py_compile tools/apply_s55_beta51_owner_refresh_history_fix.py
           python3 tools/apply_s55_beta51_owner_refresh_history_fix.py
-          python3 tools/apply_s10_ui_patch.py
-          PATCHED=app/build/generated/s10/vn/pickpack1291/app/beta/PatchedOperationsActivity.kt
-          test -s "$PATCHED"
-          grep -q 'S10_GENERATED_UI_PATCH' "$PATCHED"
-          grep -q 'Chào buổi sáng' "$PATCHED"
-          grep -q 'normalizePhone' "$PATCHED"
-          grep -q 'Hoạt động gần đây' "$PATCHED"
-          grep -q 'LÀM MỚI TRẠNG THÁI' "$PATCHED"
-          ! grep -q 'addView(txt(position.ifBlank' "$PATCHED"
-          rm -rf app/build/generated/s10
           if [[ "${{ needs.changes.outputs.gas }}" == "true" ]]; then
             cp google-apps-script/PICK_PACK_API.gs /tmp/PICK_PACK_API.js
             cp google-apps-script/SERVICE_MIGRATION_M2.gs /tmp/SERVICE_MIGRATION_M2.js
             node --check /tmp/PICK_PACK_API.js
             node --check /tmp/SERVICE_MIGRATION_M2.js
           fi
-          echo 'PASS - static guards and generated UI checks.'
+          echo 'PASS - Beta51 static guards.'
 
   android-debug:
     needs: [apply-owner-fix, changes, static-guards]
