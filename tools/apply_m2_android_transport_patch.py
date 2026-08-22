@@ -28,6 +28,7 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s51b_beta45_compile_guard.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s52_beta46_superadmin_history_delete.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s53_beta47_sheet_logic_ui.py"), run_name="__main__")
+    runpy.run_path(str(ROOT / "tools/apply_s54a_beta48_history_anchor.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s54_beta48_owner_10_fixes.py"), run_name="__main__")
     raise SystemExit(0)
 
@@ -96,5 +97,6 @@ runpy.run_path(str(ROOT / "tools/apply_s51_beta45_manual_update_sync_detail_vi.p
 runpy.run_path(str(ROOT / "tools/apply_s51b_beta45_compile_guard.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s52_beta46_superadmin_history_delete.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s53_beta47_sheet_logic_ui.py"), run_name="__main__")
+runpy.run_path(str(ROOT / "tools/apply_s54a_beta48_history_anchor.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s54_beta48_owner_10_fixes.py"), run_name="__main__")
 print(f"Applied M2 dynamic Service transport + Beta44/Beta45/Beta46/Beta47/Beta48 S54 chain: {path}")
