@@ -110,15 +110,16 @@ function ppOtaSha256_(file) {
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
+// PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 function ppUpdateCheck_(body) {
   const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
   const current=String(body.current_version||body._app_version||'').trim();
   if(channel==='STABLE') return {ok:true,source:'GITHUB_RELEASE',channel:'STABLE',available:false,reason:'NO_RELEASE'};
-  const version="0.4.2-beta.50", available=ppOtaCompare_(version,current)>0;
-  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:56,size:12995123,published_at:"2026-08-22T10:18:31Z",notes:"Thêm Quản lý biên bản trong Nghiệp vụ ở trạng thái chờ xây dựng; bỏ Người dùng đang kết nối và headline còn xx mục chờ gửi; tách Đồng bộ thành thông tin trên PDA, Service, Google Sheet và thông tin đồng bộ khác; chuyển Thông tin ứng dụng vào Cài đặt. Canonical source không còn build-time Sxx mutation. Beta49 bị bỏ qua; Stable không thay đổi.",mandatory:false};
+  const version="0.4.2-beta.51", available=ppOtaCompare_(version,current)>0;
+  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:57,size:12995123,published_at:"2026-08-22T11:57:06Z",notes:"Tách Phát lại user pick và Phát lại user pack; User Pack không còn khóa theo ca; user đã dùng trong ngày chỉ hiện lại khi bấm phát lại và hiện không ACTIVE; PDA đã trả dùng lại bình thường; làm nổi bật Seri/Tình trạng PDA; đổi nhãn User Pick hy1.outbound, Không dùng và sort user theo số tự nhiên. Service replay contract đã triển khai production. Beta49 bị bỏ qua; Stable không thay đổi.",mandatory:false};
   if(!available)return out;
-  out.sha256="712350b17d2ed1a54069cf3bf30cb1be492d6df131b2ad1ce5393278501bc93c";
-  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.50-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.50.apk";
+  out.sha256="9714b96055a7025be4d2975021d751aeeb00dde36eb50be80ced3f930d209e06";
+  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.51-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.51.apk";
   return out;
 }
 
