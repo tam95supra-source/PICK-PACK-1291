@@ -1,0 +1,123 @@
+name: Beta51 Publish Release
+on:
+  push:
+    branches: [stabilization/beta48-golden-reset-beta50-20260822]
+    paths: ['.github/workflows/beta51-publish-release.yml']
+permissions:
+  contents: write
+  actions: read
+  issues: write
+  pull-requests: write
+concurrency:
+  group: beta51-publish-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SIGNED_RUN_ID: '32571479505'
+      SOURCE_SHA: ad533975be4f38009b02e1adb7ea552b6850a244
+      VERSION: 0.4.2-beta.51
+      VERSION_CODE: '57'
+      TAG: v0.4.2-beta.51-publicbeta
+      APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.51.apk
+      ARTIFACT_NAME: pick-pack-1291-public-beta-0.4.2-beta.51-signed-candidate
+      EXPECTED_SHA: 9714b96055a7025be4d2975021d751aeeb00dde36eb50be80ced3f930d209e06
+      EXPECTED_SIZE: '12995123'
+      BETA_FOLDER_ID: 1WMXI-8-Z1mbY2v11noYFHe_eoMNiNZXg
+      EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
+      EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+    steps:
+      - name: Start receipt
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_PUBLISH_RUN start run=${GITHUB_RUN_ID} signed_run=${SIGNED_RUN_ID} source_sha=${SOURCE_SHA}"
+      - uses: actions/checkout@v4
+        with: {ref: '${{ env.SOURCE_SHA }}', fetch-depth: 0}
+      - name: Download and prove exact signed candidate
+        id: candidate
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${SIGNED_RUN_ID}/artifacts?per_page=100" >/tmp/artifacts.json
+          ARTIFACT_ID=$(jq -r --arg n "$ARTIFACT_NAME" '.artifacts[]|select(.name==$n and .expired==false)|.id' /tmp/artifacts.json | head -1)
+          [[ "$ARTIFACT_ID" == '9475448387' ]]
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" >/tmp/candidate.zip
+          mkdir -p /tmp/candidate; unzip -q /tmp/candidate.zip -d /tmp/candidate
+          APK=/tmp/candidate/$APK_NAME; MANIFEST=/tmp/candidate/CANDIDATE_MANIFEST.txt; SUM=/tmp/candidate/SHA256SUMS-$VERSION.txt
+          [[ -s "$APK" && -s "$MANIFEST" && -s "$SUM" ]]
+          grep -qx "source_sha=$SOURCE_SHA" "$MANIFEST"; grep -qx "version=$VERSION" "$MANIFEST"; grep -qx "version_code=$VERSION_CODE" "$MANIFEST"; grep -qx "package=$EXPECTED_PACKAGE" "$MANIFEST"; grep -qx "signer_sha256=$EXPECTED_SIGNER_SHA256" "$MANIFEST"; grep -qx "apk_sha256=$EXPECTED_SHA" "$MANIFEST"; grep -qx "apk_size=$EXPECTED_SIZE" "$MANIFEST"; grep -qx 'stable=UNTOUCHED' "$MANIFEST"; grep -qx 'beta49=ABANDONED' "$MANIFEST"; grep -qx 'verdict=PASS' "$MANIFEST"
+          [[ "$(sha256sum "$APK"|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c '%s' "$APK")" == "$EXPECTED_SIZE" ]]; grep -qx "$EXPECTED_SHA  $APK_NAME" "$SUM"
+          echo artifact_id=$ARTIFACT_ID >>"$GITHUB_OUTPUT"; echo apk=$APK >>"$GITHUB_OUTPUT"; echo manifest=$MANIFEST >>"$GITHUB_OUTPUT"; echo sum=$SUM >>"$GITHUB_OUTPUT"
+      - name: Publish GitHub prerelease and read back exact APK
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK: ${{ steps.candidate.outputs.apk }}
+          MANIFEST: ${{ steps.candidate.outputs.manifest }}
+          SUM: ${{ steps.candidate.outputs.sum }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release download "$TAG" -p "$APK_NAME" -D /tmp/existing --clobber
+            [[ "$(sha256sum /tmp/existing/$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c '%s' /tmp/existing/$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          else
+            gh release create "$TAG" "$APK#$APK_NAME" "$SUM#$(basename "$SUM")" "$MANIFEST#CANDIDATE_MANIFEST.txt" --target "$SOURCE_SHA" --title "Pick Pack 1291 $VERSION" --prerelease --notes "Beta51: tách Phát lại user pick / Phát lại user pack; User Pack không còn khóa theo ca; user đã dùng chỉ phát lại khi hiện không ACTIVE; PDA đã trả dùng lại bình thường; làm nổi bật Seri/Tình trạng PDA; chuẩn hóa nhãn User Pick hy1.outbound, Không dùng và sort user tự nhiên. Service replay contract đã triển khai production. Stable untouched; Beta49 abandoned."
+          fi
+          rm -rf /tmp/release-check; mkdir /tmp/release-check; gh release download "$TAG" -p "$APK_NAME" -D /tmp/release-check --clobber
+          [[ "$(sha256sum /tmp/release-check/$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c '%s' /tmp/release-check/$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" >/tmp/release.json
+          jq -e --arg t "$TAG" --arg n "$APK_NAME" '.prerelease==true and .draft==false and .tag_name==$t and ([.assets[]|select(.name==$n)]|length)==1' /tmp/release.json >/dev/null
+          echo id=$(jq -r .id /tmp/release.json) >>"$GITHUB_OUTPUT"; echo published_at=$(jq -r .published_at /tmp/release.json) >>"$GITHUB_OUTPUT"; echo url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >>"$GITHUB_OUTPUT"
+      - name: OAuth Google
+        id: google
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_REFRESH_TOKEN; do test -n "${!v:-}"; done
+          TOKEN=$(curl -fsSL https://oauth2.googleapis.com/token --data-urlencode "client_id=$GOOGLE_OAUTH_CLIENT_ID" --data-urlencode "client_secret=$GOOGLE_OAUTH_CLIENT_SECRET" --data-urlencode "refresh_token=$GOOGLE_OAUTH_REFRESH_TOKEN" --data-urlencode grant_type=refresh_token|jq -r '.access_token//empty'); test -n "$TOKEN"; echo "::add-mask::$TOKEN"; echo token=$TOKEN >>"$GITHUB_OUTPUT"
+      - name: Backup APK checksum metadata to Drive and read back
+        id: drive
+        env:
+          TOKEN: ${{ steps.google.outputs.token }}
+          APK: ${{ steps.candidate.outputs.apk }}
+          SUM: ${{ steps.candidate.outputs.sum }}
+          MANIFEST: ${{ steps.candidate.outputs.manifest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          upload_one(){
+            local path="$1" name="$2" mime="$3" id
+            local q; q=$(python3 - "$BETA_FOLDER_ID" "$name" <<'PY'
+          import sys,urllib.parse
+          f,n=sys.argv[1:]; print(urllib.parse.quote("'%s' in parents and trashed=false and name='%s'"%(f,n.replace("'","\\'"))))
+          PY
+          )
+            curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files?q=$q&fields=files(id,name)&pageSize=100" >/tmp/list.json
+            local count; count=$(jq '.files|length' /tmp/list.json); [[ "$count" -le 1 ]]
+            if [[ "$count" == 1 ]]; then id=$(jq -r '.files[0].id' /tmp/list.json); else
+              local meta; meta=$(jq -nc --arg n "$name" --arg p "$BETA_FOLDER_ID" '{name:$n,parents:[$p]}')
+              curl -fsSL -X POST 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id' -H "Authorization: Bearer $TOKEN" -F "metadata=$meta;type=application/json;charset=UTF-8" -F "file=@$path;type=$mime" >/tmp/up.json; id=$(jq -r '.id//empty' /tmp/up.json)
+            fi
+            test -n "$id"; curl -fsSL -H "Authorization: Bearer $TOKEN" "https://www.googleapis.com/drive/v3/files/$id?alt=media" -o "/tmp/readback-$(basename "$path")"; [[ "$(sha256sum "$path"|awk '{print $1}')" == "$(sha256sum "/tmp/readback-$(basename "$path")"|awk '{print $1}')" ]]; [[ "$(stat -c '%s' "$path")" == "$(stat -c '%s' "/tmp/readback-$(basename "$path")")" ]]; printf '%s' "$id"
+          }
+          APK_ID=$(upload_one "$APK" "$APK_NAME" application/vnd.android.package-archive); SUM_ID=$(upload_one "$SUM" "SHA256SUMS-$VERSION.txt" text/plain); META_ID=$(upload_one "$MANIFEST" "CANDIDATE_MANIFEST-$VERSION.txt" text/plain)
+          [[ "$(sha256sum /tmp/readback-$APK_NAME|awk '{print $1}')" == "$EXPECTED_SHA" ]]; [[ "$(stat -c '%s' /tmp/readback-$APK_NAME)" == "$EXPECTED_SIZE" ]]
+          echo apk_id=$APK_ID >>"$GITHUB_OUTPUT"; echo sum_id=$SUM_ID >>"$GITHUB_OUTPUT"; echo metadata_id=$META_ID >>"$GITHUB_OUTPUT"
+      - name: Finish receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ steps.candidate.outputs.artifact_id }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          APK_ID: ${{ steps.drive.outputs.apk_id }}
+          SUM_ID: ${{ steps.drive.outputs.sum_id }}
+          META_ID: ${{ steps.drive.outputs.metadata_id }}
+        shell: bash
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/52/comments" -f body="BETA51_PUBLISH_RUN finish run=${GITHUB_RUN_ID} job=${{ job.status }} signed_artifact=${ARTIFACT:-NONE} sha256=${EXPECTED_SHA} size=${EXPECTED_SIZE} release_id=${RELEASE_ID:-NONE} release=${RELEASE_URL:-NONE} drive_apk=${APK_ID:-NONE} drive_checksum=${SUM_ID:-NONE} drive_metadata=${META_ID:-NONE} stable=UNTOUCHED beta49=ABANDONED"
