@@ -1,5 +1,6 @@
 name: Beta50 Canonical Source Verify
 
+# Final canonical checkpoint: no build-time Sxx mutation.
 on:
   push:
     branches:
