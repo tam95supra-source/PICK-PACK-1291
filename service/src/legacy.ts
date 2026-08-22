@@ -1,5 +1,6 @@
 import type { AuthContext, CanonicalMutationRequest } from "./domain";
 import { commitMutation, CoreError, currentAuthority } from "./core";
+import { ensureCurrentBangkokBusinessDate } from "./business_date";
 import { nowIso } from "./util";
 
 export interface LegacyMutationInput {
@@ -15,10 +16,11 @@ interface LaborVersionRow { labor_id:string; state:string; version:number; }
 
 function text(v:unknown,max=240):string{return String(v??"").trim().slice(0,max);}
 
-async function latestBusinessDate(db:D1Database):Promise<string>{
-  const row=await db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 1").first<{business_date:string}>();
-  if(!row?.business_date)throw new CoreError("BUSINESS_DATE_NOT_BOOTSTRAPPED","INTEGRITY",503,true);
-  return row.business_date;
+async function currentBusinessDate(db:D1Database):Promise<string>{
+  try{return await ensureCurrentBangkokBusinessDate(db);}catch(e){
+    if(e instanceof CoreError)throw e;
+    throw new CoreError("BUSINESS_DATE_NOT_BOOTSTRAPPED","INTEGRITY",503,true);
+  }
 }
 
 async function attendance(db:D1Database,mnv:string,date:string):Promise<AttendanceVersionRow|null>{
@@ -29,20 +31,36 @@ async function activeLabor(db:D1Database,mnv:string,date:string):Promise<LaborVe
   return db.prepare("SELECT labor_id,state,version FROM labor_sessions WHERE mnv=?1 AND business_date=?2 AND state='OPEN' ORDER BY start_at DESC LIMIT 1").bind(mnv,date).first<LaborVersionRow>();
 }
 
+async function releaseEndedUserPackConsumption(db:D1Database,date:string,userPack:string):Promise<void>{
+  if(!userPack)return;
+  const active=await db.prepare("SELECT 1 AS ok FROM resource_leases WHERE resource_type='USER_PACK' AND resource_id=?1 AND business_date=?2 LIMIT 1").bind(userPack,date).first<{ok:number}>();
+  if(active?.ok)return;
+  // resource_daily_consumption is an exclusivity guard/projection, not the immutable Event Ledger.
+  // Clearing only a stale USER_PACK guard lets a completed session's mapped user be issued again
+  // in the same day; the original assignment remains fully preserved in canonical events/history.
+  await db.prepare("DELETE FROM resource_daily_consumption WHERE business_date=?1 AND resource_type='USER_PACK' AND resource_id=?2").bind(date,userPack).run();
+}
+
 export async function legacyCanonical(db:D1Database,input:LegacyMutationInput,auth:AuthContext):Promise<CanonicalMutationRequest>{
   const payload=input.payload&&typeof input.payload==="object"?input.payload:{},mnv=text(payload.mnv,80);
   if(!mnv)throw new CoreError("MNV_REQUIRED","VALIDATION",400);
-  const businessDate=text(input.business_date||payload.business_date,10)||await latestBusinessDate(db);
+  const explicit=text(input.business_date||payload.business_date,10);
+  const businessDate=explicit||await currentBusinessDate(db);
+  // An explicit current-day payload can arrive from a durable local outbox. Ensure the current row
+  // exists before Core validates the PDA write window; this closes the midnight rollover reject.
+  if(!explicit)await currentBusinessDate(db);
   const a=await currentAuthority(db),device=text(input.device_id||payload._device_id||auth.device_id,180)||auth.device_id;
   const eventId=text(input.event_id||payload.event_id,180)||crypto.randomUUID();
   let eventType:CanonicalMutationRequest["event_type"],entityType:string,entityId:string,baseVersion=0,canonicalPayload:Record<string,unknown>={...payload,mnv};
 
   if(input.action==="enter"){
     const old=await attendance(db,mnv,businessDate);
+    const pack=text(payload.user_pack||payload.userPack,180);await releaseEndedUserPackConsumption(db,businessDate,pack);
     eventType="ATTENDANCE_ENTER";entityType="ATTENDANCE_SESSION";entityId=old?.session_id||crypto.randomUUID();baseVersion=old?.version??0;
-    canonicalPayload={mnv,shift:text(payload.shift,80),work_choice:text(payload.work_choice,40),pda_serial:text(payload.pda_serial||payload.pda,180),user_pick:text(payload.user_pick||payload.userPick,180),pack_table:text(payload.pack_table||payload.packTable,180),user_pack:text(payload.user_pack||payload.userPack,180),pda_enter_status:text(payload.pda_enter_status||payload.pda_status_at_enter,180),resource_note:text(payload.resource_note,500),duplicate_user:Boolean(payload.duplicate_user),note:text(payload.note,500)}; // S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE
+    canonicalPayload={mnv,shift:text(payload.shift,80),work_choice:text(payload.work_choice,40),pda_serial:text(payload.pda_serial||payload.pda,180),user_pick:text(payload.user_pick||payload.userPick,180),pack_table:text(payload.pack_table||payload.packTable,180),user_pack:pack,pda_enter_status:text(payload.pda_enter_status||payload.pda_status_at_enter,180),resource_note:text(payload.resource_note,500),duplicate_user:Boolean(payload.duplicate_user),note:text(payload.note,500)}; // S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE
   }else if(input.action==="exit"||input.action==="resource_change"){
     const old=await attendance(db,mnv,businessDate);if(!old)throw new CoreError("ATTENDANCE_NOT_ENTERED","CONFLICT",409);
+    if(input.action==="resource_change")await releaseEndedUserPackConsumption(db,businessDate,text(payload.user_pack||payload.userPack,180));
     eventType=input.action==="exit"?"ATTENDANCE_EXIT":"RESOURCE_CHANGE";entityType="ATTENDANCE_SESSION";entityId=old.session_id;baseVersion=old.version;
     canonicalPayload=input.action==="exit"?{mnv,pda_exit_status:text(payload.pda_exit_status,180),note:text(payload.note,500)}:{mnv,work_choice:text(payload.work_choice,40),pda_serial:text(payload.pda_serial||payload.pda,180),user_pick:text(payload.user_pick||payload.userPick,180),pack_table:text(payload.pack_table||payload.packTable,180),user_pack:text(payload.user_pack||payload.userPack,180),resource_note:text(payload.resource_note,500),duplicate_user:Boolean(payload.duplicate_user),note:text(payload.note,500)};
   }else if(input.action==="labor_start"){
