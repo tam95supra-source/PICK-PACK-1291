@@ -1,0 +1,10 @@
+requested_at=2026-08-22T10:49:00+07:00
+target=0.4.2-beta.48
+version_code=54
+base=0.4.2-beta.47
+owner_scope=10_FIXES_20260822
+service_gate=REQUIRED_PASS
+drive_backup=REQUIRED
+ota=MANUAL_CHECK_STATIC_GAS_GITHUB_RELEASE
+stable_publish=FORBIDDEN
+merge_pr38=FORBIDDEN
