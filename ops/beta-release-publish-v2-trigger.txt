@@ -1,9 +1,9 @@
-requested_at=2026-08-22T09:40:00+07:00
-from_version=0.4.2-beta.46
-target_version=0.4.2-beta.47
-artifact_id=9468742176
+requested_at=2026-08-22T12:14:00+07:00
+from_version=0.4.2-beta.47
+target_version=0.4.2-beta.48
+artifact_id=9470768572
 mode=GITHUB_RELEASE
 beta_retention=10
-candidate_sha256=6884b295d0c55ab030a86c74f52ffda33443cead4b0de4c1885dfe84c12aadb6
+candidate_sha256=cfca4a83b3a69c554afabecae83ff150e9f0b66639360ea013e24bf4b08d996f
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
