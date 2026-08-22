@@ -1,4 +1,4 @@
-deploy=2026-08-22T12:20:00+07:00
+deploy=2026-08-22T12:22:00+07:00
 reason=publish-Beta48-static-canonical-manual-OTA-observable
 scope=gas-current-manual-ota-static-canonical
 beta_from=0.4.2-beta.47
@@ -7,7 +7,7 @@ beta_release_tag=v0.4.2-beta.48-publicbeta
 beta_sha256=cfca4a83b3a69c554afabecae83ff150e9f0b66639360ea013e24bf4b08d996f
 beta_size=12995067
 runtime_github_api=DISABLED
-retry_seq=4
+retry_seq=5
 automatic_check=DISABLED
 stable=FORBIDDEN
 merge_pr38=FORBIDDEN
