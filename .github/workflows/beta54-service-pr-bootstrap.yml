@@ -21,8 +21,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: service/package-lock.json
       - name: Apply canonical exit repairs
         run: |
           python3 -m py_compile tools/apply_beta54_service_exit_resilience.py
@@ -30,7 +28,7 @@ jobs:
       - name: Install and typecheck Service
         working-directory: service
         run: |
-          npm ci
+          npm install --ignore-scripts --no-audit --no-fund
           npm run check
       - name: Static guards
         run: |
