@@ -1,3 +1,4 @@
+# Beta54 Service canonical repair patcher; rerun after CI bootstrap correction.
 from pathlib import Path
 
 CORE = Path('service/src/core.ts')
