@@ -5,6 +5,7 @@ import { resourceAdminList, resourceAdminMutate } from "./resource_admin";
 import { attendanceExitDelete, attendanceTimeCorrect, flushSessionSpecialProjections, sessionExitGuarded, sessionWorkUpdate } from "./session_hotfix";
 import { superadminDeleteAccounts } from "./beta44_owner";
 import { serviceConnectionsV47 } from "./beta47_connections";
+import { backfillAllHistoryAudit } from "./beta47_history_audit";
 import { reconcileBeta47OperationalProjection } from "./beta47_projection";
 import { historyDelete } from "./history_delete";
 import { apiError, json } from "./util";
@@ -43,5 +44,7 @@ export default {
     await flushSessionSpecialProjections(env);
     try{const r=await reconcileBeta47OperationalProjection(env);console.log(JSON.stringify({level:"info",kind:"beta47_projection",...r}));}
     catch(e){console.log(JSON.stringify({level:"error",kind:"beta47_projection_failed",error:String(e).slice(0,500)}));}
+    try{const historyRows=await backfillAllHistoryAudit(env);console.log(JSON.stringify({level:"info",kind:"beta47_history_audit",history_rows:historyRows}));}
+    catch(e){console.log(JSON.stringify({level:"error",kind:"beta47_history_audit_failed",error:String(e).slice(0,500)}));}
   },
 } satisfies ExportedHandler<Env>;
