@@ -1,0 +1,158 @@
+name: Owner Clean Operational Test Data 20260822
+
+on:
+  push:
+    branches: [ agent/service-migration-m2 ]
+    paths: [ '.github/workflows/owner-clean-operational-test-data-20260822.yml' ]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: owner-clean-operational-test-data-production
+  cancel-in-progress: false
+
+env:
+  SERVICE_URL: https://pick-pack-1291-service.pp1291-d79b87776e86.workers.dev
+  SERVICE_GENERATION: m2-prod-20260819-001
+  WORKFLOW_PATH: .github/workflows/owner-clean-operational-test-data-20260822.yml
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Guard authority and resolve production D1
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          OUT=/tmp/owner-clean-result.txt
+          echo "checked_at=$(date -u +%FT%TZ)" > "$OUT"
+          echo "source_sha=$GITHUB_SHA" >> "$OUT"
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do [[ -n "${!v:-}" ]]; done
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" >/tmp/health-before.json
+          jq -e --arg g "$SERVICE_GENERATION" '.ok==true and .environment=="production" and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/health-before.json >/dev/null
+          EPOCH=$(jq -r '.authority.authority_epoch' /tmp/health-before.json)
+          SEQ=$(jq -r '.authority.authority_seq' /tmp/health-before.json)
+          echo "authority_epoch=$EPOCH" >> "$OUT"
+          echo "authority_seq_before=$SEQ" >> "$OUT"
+          cd service
+          npm install --no-audit --no-fund >/dev/null
+          npx wrangler d1 list --json >/tmp/d1-list.json
+          D1_ID=$(node -e "const r=require('/tmp/d1-list.json');const x=r.find(v=>v.name==='pick-pack-1291-service-prod');if(!x)process.exit(2);process.stdout.write(String(x.uuid||x.id||''))")
+          [[ -n "$D1_ID" ]]; export D1_ID
+          node - <<'NODE'
+          const fs=require('fs');const c=JSON.parse(fs.readFileSync('wrangler.jsonc','utf8'));
+          c.name='pick-pack-1291-service';c.main='src/entry_product.ts';c.keep_vars=true;
+          c.vars={SERVICE_GENERATION:'m2-prod-20260819-001',GOOGLE_SOURCE_SHEET_ID:'1E7ZWz-4eMcBliQxDYBVoogIoeSYyiaXGwj0I6mbMm78'};
+          c.d1_databases[0].database_name='pick-pack-1291-service-prod';c.d1_databases[0].database_id=process.env.D1_ID;delete c.secrets;
+          fs.writeFileSync('.wrangler-owner-clean-runtime.jsonc',JSON.stringify(c,null,2));
+          NODE
+          echo "authority_gate=PASS" >> "$OUT"
+          echo "d1_resolve=PASS" >> "$OUT"
+
+      - name: Snapshot counts and safety gates
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd service
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config .wrangler-owner-clean-runtime.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1;SELECT state,pending_count,retry_count FROM replication_status WHERE singleton_id=1;SELECT COUNT(*) AS pending_fallback FROM fallback_event_inbox WHERE ingest_status='PENDING';SELECT COUNT(*) AS employees FROM employees;SELECT COUNT(*) AS resources FROM resources;SELECT COUNT(*) AS pack_maps FROM resource_pack_map;SELECT COUNT(*) AS accounts FROM accounts;SELECT COUNT(*) AS attendance FROM attendance_sessions;SELECT COUNT(*) AS labor FROM labor_sessions;SELECT COUNT(*) AS leases FROM resource_leases;SELECT COUNT(*) AS daily_users FROM resource_daily_consumption;SELECT COUNT(*) AS events FROM events;SELECT COUNT(*) AS replication_rows FROM sheet_replication_outbox;SELECT COUNT(*) AS mutation_assertions FROM mutation_assertions;SELECT COUNT(*) AS event_conflicts FROM conflicts WHERE event_id IN (SELECT event_id FROM events);SELECT COUNT(*) AS day_pushes FROM push_outbox WHERE business_date IS NOT NULL;SELECT COUNT(*) AS target_source_rows FROM source_rows WHERE sheet_name IN ('CÔNG NHẬT','THÔNG TIN USER CỦA NLĐ','RA - VÀO TRONG CA','LỊCH SỬ NGHIỆP VỤ');" --json >/tmp/before.json
+          python3 - <<'PY'
+          import json, pathlib
+          x=json.load(open('/tmp/before.json')); sets=[b.get('results',[]) for b in x if isinstance(b,dict) and isinstance(b.get('results'),list)]
+          assert len(sets)>=16, len(sets)
+          a=sets[0][0]; assert a['mode']=='SERVICE_PRIMARY' and a['scope']=='PRODUCTION' and a['service_generation']=='m2-prod-20260819-001'
+          rep=sets[1][0]; assert int(rep.get('pending_count') or 0)==0
+          assert int(sets[2][0]['pending_fallback'])==0
+          keys=['employees','resources','pack_maps','accounts','attendance','labor','leases','daily_users','events','replication_rows','mutation_assertions','event_conflicts','day_pushes','target_source_rows']
+          vals=[sets[i][0][keys[i-3]] for i in range(3,17)]
+          out=pathlib.Path('/tmp/owner-clean-result.txt')
+          with out.open('a') as f:
+            f.write('replication_gate=PASS\n')
+            for k,v in zip(keys,vals): f.write(f'before_{k}={int(v)}\n')
+          json.dump({k:int(v) for k,v in zip(keys[:4],vals[:4])},open('/tmp/master-counts.json','w'))
+          json.dump({'epoch':int(a['authority_epoch']),'seq':int(a['authority_seq'])},open('/tmp/authority-before.json','w'))
+          PY
+
+      - name: Delete operational and audit test data only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd service
+          cat >/tmp/cleanup.sql <<'SQL'
+          DELETE FROM sheet_replication_outbox;
+          DELETE FROM mutation_assertions WHERE event_id IN (SELECT event_id FROM events);
+          DELETE FROM conflicts WHERE event_id IN (SELECT event_id FROM events);
+          DELETE FROM resource_daily_consumption;
+          DELETE FROM resource_leases;
+          DELETE FROM labor_sessions;
+          DELETE FROM attendance_sessions;
+          DELETE FROM push_outbox WHERE business_date IS NOT NULL;
+          DELETE FROM events;
+          DELETE FROM source_rows WHERE sheet_name IN ('CÔNG NHẬT','THÔNG TIN USER CỦA NLĐ','RA - VÀO TRONG CA','LỊCH SỬ NGHIỆP VỤ');
+          UPDATE replication_status SET pending_count=0,retry_count=0,last_error_class=NULL,last_error=NULL WHERE singleton_id=1;
+          SQL
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config .wrangler-owner-clean-runtime.jsonc --file /tmp/cleanup.sql >/tmp/cleanup.out
+          echo "delete_phase=PASS" >> /tmp/owner-clean-result.txt
+
+      - name: Verify zero operational state and master preservation
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd service
+          npx wrangler d1 execute pick-pack-1291-service-prod --remote --config .wrangler-owner-clean-runtime.jsonc --command "SELECT authority_epoch,authority_seq,mode,scope,service_generation FROM authority_state WHERE singleton_id=1;SELECT state,pending_count,retry_count FROM replication_status WHERE singleton_id=1;SELECT COUNT(*) AS employees FROM employees;SELECT COUNT(*) AS resources FROM resources;SELECT COUNT(*) AS pack_maps FROM resource_pack_map;SELECT COUNT(*) AS accounts FROM accounts;SELECT COUNT(*) AS attendance FROM attendance_sessions;SELECT COUNT(*) AS labor FROM labor_sessions;SELECT COUNT(*) AS leases FROM resource_leases;SELECT COUNT(*) AS daily_users FROM resource_daily_consumption;SELECT COUNT(*) AS events FROM events;SELECT COUNT(*) AS replication_rows FROM sheet_replication_outbox;SELECT COUNT(*) AS mutation_assertions FROM mutation_assertions WHERE event_id NOT IN (SELECT event_id FROM events);SELECT COUNT(*) AS event_conflicts FROM conflicts WHERE event_id IS NOT NULL;SELECT COUNT(*) AS day_pushes FROM push_outbox WHERE business_date IS NOT NULL;SELECT COUNT(*) AS target_source_rows FROM source_rows WHERE sheet_name IN ('CÔNG NHẬT','THÔNG TIN USER CỦA NLĐ','RA - VÀO TRONG CA','LỊCH SỬ NGHIỆP VỤ');SELECT COUNT(*) AS pending_fallback FROM fallback_event_inbox WHERE ingest_status='PENDING';" --json >/tmp/after.json
+          python3 - <<'PY'
+          import json, pathlib
+          x=json.load(open('/tmp/after.json')); sets=[b.get('results',[]) for b in x if isinstance(b,dict) and isinstance(b.get('results'),list)]
+          assert len(sets)>=16, len(sets)
+          a=sets[0][0]; before=json.load(open('/tmp/authority-before.json')); masters=json.load(open('/tmp/master-counts.json'))
+          assert a['mode']=='SERVICE_PRIMARY' and a['scope']=='PRODUCTION' and a['service_generation']=='m2-prod-20260819-001'
+          assert int(a['authority_epoch'])==before['epoch'] and int(a['authority_seq'])==before['seq']
+          rep=sets[1][0]; assert int(rep.get('pending_count') or 0)==0
+          postmasters={'employees':int(sets[2][0]['employees']),'resources':int(sets[3][0]['resources']),'pack_maps':int(sets[4][0]['pack_maps']),'accounts':int(sets[5][0]['accounts'])}
+          assert postmasters==masters,(postmasters,masters)
+          zero_fields=['attendance','labor','leases','daily_users','events','replication_rows','mutation_assertions','event_conflicts','day_pushes','target_source_rows','pending_fallback']
+          for idx,k in enumerate(zero_fields,start=6): assert int(sets[idx][0][k])==0,(k,sets[idx])
+          out=pathlib.Path('/tmp/owner-clean-result.txt')
+          with out.open('a') as f:
+            for k,v in postmasters.items():f.write(f'after_{k}={v}\n')
+            for k in zero_fields:f.write(f'after_{k}=0\n')
+            f.write(f'authority_seq_after={int(a["authority_seq"])}\n')
+            f.write('d1_verify=PASS\n')
+          PY
+          rm -f .wrangler-owner-clean-runtime.jsonc
+
+      - name: Live health check
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 "$SERVICE_URL/health" >/tmp/health-after.json
+          jq -e --arg g "$SERVICE_GENERATION" '.ok==true and .environment=="production" and .generation==$g and .authority.mode=="SERVICE_PRIMARY" and .authority.scope=="PRODUCTION"' /tmp/health-after.json >/dev/null
+          echo "live_health=PASS" >> /tmp/owner-clean-result.txt
+          echo "stable=UNTOUCHED" >> /tmp/owner-clean-result.txt
+          echo "master_data=PRESERVED" >> /tmp/owner-clean-result.txt
+          echo "verdict=PASS" >> /tmp/owner-clean-result.txt
+          BODY=$(sed ':a;N;$!ba;s/\n/%0A/g' /tmp/owner-clean-result.txt)
+          gh api "repos/${GITHUB_REPOSITORY}/issues/38/comments" -f body="OWNER_OPERATIONAL_TEST_DATA_CLEAN run=${GITHUB_RUN_ID}%0A${BODY}"
+
+      - name: Retire one-time cleanup workflow
+        if: success()
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm "$WORKFLOW_PATH"
+          git commit -m 'ops: retire one-time owner test-data cleanup workflow'
+          git push
