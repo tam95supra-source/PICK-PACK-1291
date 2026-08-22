@@ -194,6 +194,12 @@ async function commitAttendanceExit(db:D1Database, auth:AuthContext, req:Canonic
   if(current.version!==req.base_version) throw new CoreError("STALE_BASE_VERSION","CONFLICT",409,false,{current_version:current.version});
   const open=(checks[1]?.results?.[0]??null) as {n?:number}|null;if((open?.n??0)>0) throw new CoreError("OPEN_LABOR_BLOCKS_EXIT","CONFLICT",409);
   const pdaExitStatus=text(p,"pda_exit_status",180);
+  if(current.pda_serial){
+    let expected=text({v:current.pda_enter_status??""},"v",180);
+    if(!expected){const row=await db.prepare("SELECT status_label FROM resources WHERE resource_type='PDA' AND resource_id=?1").bind(current.pda_serial).first<{status_label:string}>();expected=String(row?.status_label??"").trim().slice(0,180);}
+    if(!pdaExitStatus)throw new CoreError("PDA_EXIT_STATUS_REQUIRED","VALIDATION",400);
+    if(expected&&pdaExitStatus!==expected)throw new CoreError("PDA_STATUS_MISMATCH_NOTIFY_SPECIALIST","CONFLICT",409,false,{expected_status:expected,current_status:pdaExitStatus,pda_serial:current.pda_serial});
+  }
   const event=await buildEvent(req,auth,a,current.version+1),stmts=eventStatements(db,event,a.authority_seq);
   stmts.push(db.prepare("UPDATE attendance_sessions SET state='ENDED',exit_at=?1,exited_by=?2,version=?3,updated_at=?1 WHERE session_id=?4 AND version=?5 AND state='ACTIVE'").bind(event.committed_at,auth.login_id,event.new_version,current.session_id,current.version));
   stmts.push(db.prepare("UPDATE attendance_sessions SET pda_exit_status=?1 WHERE session_id=?2").bind(pdaExitStatus||null,current.session_id));
