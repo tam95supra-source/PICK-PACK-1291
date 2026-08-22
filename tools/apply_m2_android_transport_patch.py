@@ -9,7 +9,7 @@ path = ROOT / "app/src/main/java/vn/pickpack1291/app/beta/BetaApiClient.kt"
 s = path.read_text()
 marker = "M2_SERVICE_TRANSPORT_APPLIED"
 if marker in s:
-    print("M2 Android transport already applied; composing S19..S54 runtime fixes.")
+    print("M2 Android transport already applied; composing S19..S55 runtime fixes.")
     runpy.run_path(str(ROOT / "tools/apply_s19_m2_runtime_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s20_pack_identity_fix.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s21_labor_shift_fix.py"), run_name="__main__")
@@ -30,6 +30,7 @@ if marker in s:
     runpy.run_path(str(ROOT / "tools/apply_s53_beta47_sheet_logic_ui.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s54a_beta48_history_anchor.py"), run_name="__main__")
     runpy.run_path(str(ROOT / "tools/apply_s54_beta48_owner_10_fixes.py"), run_name="__main__")
+    runpy.run_path(str(ROOT / "tools/apply_s55_beta48_log_summary_ui.py"), run_name="__main__")
     raise SystemExit(0)
 
 anchor = "    private val executor = Executors.newSingleThreadExecutor()\n"
@@ -41,11 +42,6 @@ anchor = "    init {\n        synchronized(sessionLock) {\n            if (share
 if s.count(anchor) != 1:
     raise SystemExit(f"M2 patch init anchor mismatch: {s.count(anchor)}")
 s = s.replace(anchor, "    init {\n        synchronized(sessionLock) {\n            if (sharedToken == null) sharedToken = prefs.getString(KEY_TOKEN, null)\n        }\n        M2ConnectivityMonitor.start(appContext)\n        M2WorkScheduler.schedule(appContext)\n    }\n", 1)
-
-anchor = "                    if (newToken != null) persistSession(newToken, result.json.optJSONObject(\"account\"))\n"
-if s.count(anchor) != 1:
-    raise SystemExit(f"M2 patch login anchor mismatch: {s.count(anchor)}")
-s = s.replace(anchor, anchor + "                    m2Transport.loginFromPassword(login, password)\n", 1)
 
 old = '''      val result = when (action) {
           "change_password" -> changePassword(payload)
@@ -99,4 +95,5 @@ runpy.run_path(str(ROOT / "tools/apply_s52_beta46_superadmin_history_delete.py")
 runpy.run_path(str(ROOT / "tools/apply_s53_beta47_sheet_logic_ui.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s54a_beta48_history_anchor.py"), run_name="__main__")
 runpy.run_path(str(ROOT / "tools/apply_s54_beta48_owner_10_fixes.py"), run_name="__main__")
-print(f"Applied M2 dynamic Service transport + Beta44/Beta45/Beta46/Beta47/Beta48 S54 chain: {path}")
+runpy.run_path(str(ROOT / "tools/apply_s55_beta48_log_summary_ui.py"), run_name="__main__")
+print(f"Applied M2 dynamic Service transport + Beta44/Beta45/Beta46/Beta47/Beta48 S55 chain: {path}")
