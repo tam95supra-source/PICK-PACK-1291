@@ -1,7 +1,7 @@
-requested_at=2026-08-21T22:06:00+07:00
-from_version=0.4.2-beta.43
-target_version=0.4.2-beta.44
-artifact_id=9449525765
+requested_at=2026-08-22T08:45:00+07:00
+from_version=0.4.2-beta.45
+target_version=0.4.2-beta.46
+artifact_id=9467975431
 mode=GITHUB_RELEASE
 beta_retention=10
 stable=FORBIDDEN
