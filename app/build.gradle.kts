@@ -141,3 +141,6 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // GSHEET_API_URL remains public discovery/fallback configuration and manual update lookup path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
 // Beta45 is rebuilt cleanly from the finalized Beta44 source and adds only S51 manual update + detailed Vietnamese Sync UI.
+// Legacy Beta44 candidate-workflow compatibility markers only; actual beta metadata above is authoritative:
+// versionCode = 50
+// versionName = "0.4.2-beta.44"
