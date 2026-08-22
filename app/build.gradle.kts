@@ -75,6 +75,7 @@ val generateS10Operations = tasks.register<Exec>("generateS10Operations") {
     inputs.file(rootProject.file("tools/apply_s51_beta45_manual_update_sync_detail_vi.py"))
     inputs.file(rootProject.file("tools/apply_s52_beta46_superadmin_history_delete.py"))
     inputs.file(rootProject.file("tools/apply_s53_beta47_sheet_logic_ui.py"))
+    inputs.file(rootProject.file("tools/apply_s54_beta48_owner_10_fixes.py"))
     outputs.upToDateWhen { false }
     workingDir(rootProject.projectDir)
     commandLine("python3", "tools/apply_m2_android_transport_patch.py")
@@ -100,8 +101,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 53
-            versionName = "0.4.2-beta.47"
+            versionCode = 54
+            versionName = "0.4.2-beta.48"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -142,7 +143,7 @@ tasks.named("preBuild").configure { dependsOn(generateS10Operations) }
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and manual update lookup path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// Beta47 aligns Android History/Sync/update UI with the revised Google Sheet operational model and pending-history deletion.
+// Beta48: rolling current-day history, current-day sync repair, APP/WEB presence, reusable ended User Pack and owner UI density/clarity fixes.
 // Legacy Beta44 candidate-workflow compatibility markers only; actual beta metadata above is authoritative:
 // versionCode = 50
 // versionName = "0.4.2-beta.44"
