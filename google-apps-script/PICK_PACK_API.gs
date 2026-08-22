@@ -111,15 +111,16 @@ function ppOtaSha256_(file) {
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 // PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
+// PP_GITHUB_RELEASE_OTA_CANONICAL_V1: metadata is canonical in ops/beta-ota-current.json; APK bytes are GitHub Release assets.
 function ppUpdateCheck_(body) {
   const channel=ppFold_(body.channel||body._app_channel)==='STABLE'?'STABLE':'BETA';
   const current=String(body.current_version||body._app_version||'').trim();
   if(channel==='STABLE') return {ok:true,source:'GITHUB_RELEASE',channel:'STABLE',available:false,reason:'NO_RELEASE'};
-  const version="0.4.2-beta.51", available=ppOtaCompare_(version,current)>0;
-  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:57,size:12995123,published_at:"2026-08-22T11:57:06Z",notes:"Tách Phát lại user pick và Phát lại user pack; User Pack không còn khóa theo ca; user đã dùng trong ngày chỉ hiện lại khi bấm phát lại và hiện không ACTIVE; PDA đã trả dùng lại bình thường; làm nổi bật Seri/Tình trạng PDA; đổi nhãn User Pick hy1.outbound, Không dùng và sort user theo số tự nhiên. Service replay contract đã triển khai production. Beta49 bị bỏ qua; Stable không thay đổi.",mandatory:false};
+  const version="0.4.2-beta.52", available=ppOtaCompare_(version,current)>0;
+  const out={ok:true,source:'GITHUB_RELEASE',channel:'BETA',available:available,version_name:version,version_code:58,size:13011507,published_at:"2026-08-22T13:17:08Z",notes:"Beta52: bỏ tab Nhân sự; danh sách bỏ tiền tố Mã nhân viên; lịch sử canonical đa thiết bị; nút đồng bộ nhanh; thông báo conflict/RA/SỬA rõ ràng hơn; MNV fallback phía app. Stable không thay đổi.",mandatory:false};
   if(!available)return out;
-  out.sha256="9714b96055a7025be4d2975021d751aeeb00dde36eb50be80ced3f930d209e06";
-  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.51-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.51.apk";
+  out.sha256="2845a17d0fb3ba6ff5fbf492d49073881ada831548b190bec59fede053420c38";
+  out.apk_url="https://github.com/tam95supra-source/pick-pack-1291/releases/download/v0.4.2-beta.52-publicbeta/pick-pack-1291-public-beta-0.4.2-beta.52.apk";
   return out;
 }
 
@@ -554,7 +555,7 @@ function ppForgotPassword_(body){
 }
 function ppLoginChallenge_(body) {
   const login=String(body.login_id||'').trim(), account=ppAccount_(login), cred=account?ppCredentialParts_(account.verifier):null, usable=cred && (cred.algorithm!=='reset_sha256'||cred.expires_at>Date.now()), fakeSalt=ppB64u_(ppRandom_(16));
-  const id=Utilities.getUuid(), challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:login,purpose:'LOGIN',challenge:challenge}),120);
+  const id=Utilities.getUuid(), challenge=ppB64u_(ppRandom_(32)); ppPutChallenge_(id,'LOGIN',login,challenge);
   return {ok:true,challenge_id:id,challenge:challenge,algorithm:usable?cred.algorithm:'pbkdf2_sha256',iterations:usable?cred.iterations:120000,salt:usable?cred.salt:fakeSalt};
 }
 function ppLogin_(body) {
@@ -568,7 +569,7 @@ function ppLogin_(body) {
   return {ok:true,token:token,account:{login_id:a.login_id,role:a.role,display_name:a.display_name,position:a.position||'',email:a.email||PP.RESET_ADMIN_EMAIL},session:{issued_at:session.issued_at,device_label:String(body._device_label||'').slice(0,120)}};
 }
 function ppPasswordChallenge_(auth) {
-  const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); CacheService.getScriptCache().put('PP_CHAL_'+id,JSON.stringify({login_id:auth.login_id,purpose:'PASSWORD',challenge:challenge}),120); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
+  const p=ppVerifierParts_(auth.verifier); if(!p)return {ok:false,error:'ACCOUNT_VERIFIER_INVALID'}; const id=Utilities.getUuid(),challenge=ppB64u_(ppRandom_(32)); ppPutChallenge_(id,'PASSWORD',auth.login_id,challenge); return {ok:true,challenge_id:id,challenge:challenge,iterations:p.iterations,salt:p.salt};
 }
 function ppChangePassword_(auth,body) {
   const id=String(body.challenge_id||''),proof=String(body.proof||''),newVerifier=String(body.new_verifier||''),c=ppTakeChallenge_(id,'PASSWORD',auth.login_id),p=ppVerifierParts_(auth.verifier),np=ppVerifierParts_(newVerifier); if(!c||!p||!ppVerifyProof_(p.key,c.challenge,proof))return {ok:false,error:'CURRENT_PASSWORD_INVALID'}; if(!np)return {ok:false,error:'PASSWORD_POLICY'};
@@ -631,7 +632,10 @@ function ppBindSession_(login,deviceId){/* S44_LOGIN_SESSION_LOCK_ISOLATION: log
 function ppClearActiveSessionForLogin_(login){PropertiesService.getScriptProperties().deleteProperty(ppSessionKey_(login));}
 function ppLogout_(auth){const lock=LockService.getScriptLock();lock.waitLock(10000);try{const cur=ppActiveSession_(auth.login_id);if(cur&&cur.session_id===auth._session_id&&cur.device_id===auth._device_id)ppClearActiveSessionForLogin_(auth.login_id);return {ok:true};}finally{lock.releaseLock();}}
 function ppTokenSecret_() {const p=PropertiesService.getScriptProperties();let v=p.getProperty('PP_TOKEN_SECRET');if(!v){v=ppB64u_(ppRandom_(32));p.setProperty('PP_TOKEN_SECRET',v);}return ppB64uDecode_(v);}
-function ppTakeChallenge_(id,purpose,login) {if(!id)return null;const cache=CacheService.getScriptCache(),key='PP_CHAL_'+id,raw=cache.get(key);cache.remove(key);if(!raw)return null;try{const c=JSON.parse(raw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}}
+// S46_DURABLE_AUTH_CHALLENGE: authentication correctness must not depend on best-effort CacheService.
+function ppChallengeKey_(purpose,login){return 'PP_CHAL_V2_'+String(purpose||'')+'_'+ppSha256Hex_(String(login||'')).slice(0,48);}
+function ppPutChallenge_(id,purpose,login,challenge){const key=ppChallengeKey_(purpose,login),value={id:String(id||''),purpose:String(purpose||''),login_id:String(login||''),challenge:String(challenge||''),expires_at:Date.now()+120000};PropertiesService.getScriptProperties().setProperty(key,JSON.stringify(value));}
+function ppTakeChallenge_(id,purpose,login) {if(!id)return null;const props=PropertiesService.getScriptProperties(),key=ppChallengeKey_(purpose,login),raw=props.getProperty(key);if(raw){try{const c=JSON.parse(raw),valid=c.id===id&&c.purpose===purpose&&c.login_id===login&&Number(c.expires_at||0)>Date.now();if(c.id===id||Number(c.expires_at||0)<=Date.now())props.deleteProperty(key);if(valid)return c;}catch(_){props.deleteProperty(key);}}const cache=CacheService.getScriptCache(),legacyKey='PP_CHAL_'+id,legacyRaw=cache.get(legacyKey);cache.remove(legacyKey);if(!legacyRaw)return null;try{const c=JSON.parse(legacyRaw);return c.purpose===purpose&&c.login_id===login?c:null;}catch(_){return null;}}
 function ppVerifyProof_(keyB64,challenge,proof) {try{const expected=ppB64u_(Utilities.computeHmacSha256Signature(Utilities.newBlob(challenge).getBytes(),ppB64uDecode_(keyB64)));return ppSafeEq_(expected,proof);}catch(_){return false;}}
 function ppRandom_(n){const out=[];for(let i=0;i<n;i++)out.push(Math.floor(Math.random()*256)-128);return out;}
 function ppB64u_(bytes){return Utilities.base64EncodeWebSafe(bytes).replace(/=+$/,'');}

@@ -1,0 +1,14 @@
+checked_at=2026-08-22T13:17:19Z
+version=0.4.2-beta.52
+version_code=58
+source_sha=e8701604f5b0cb61fb6c47eaa02c5753d081f912
+signed_run=32575146335
+release_id=374935311
+gas_version=128
+apk_sha256=2845a17d0fb3ba6ff5fbf492d49073881ada831548b190bec59fede053420c38
+apk_size=13011507
+ota_from=0.4.2-beta.51
+ota_target=0.4.2-beta.52
+stable=UNTOUCHED
+beta49=ABANDONED
+verdict=PASS
