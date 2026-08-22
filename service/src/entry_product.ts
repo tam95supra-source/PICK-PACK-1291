@@ -4,6 +4,7 @@ import { exchangeGasSession, mobileRead } from "./mobile_hotfix";
 import { resourceAdminList, resourceAdminMutate } from "./resource_admin";
 import { attendanceExitDelete, attendanceTimeCorrect, flushSessionSpecialProjections, sessionExitGuarded, sessionWorkUpdate } from "./session_hotfix";
 import { serviceConnections, superadminDeleteAccounts } from "./beta44_owner";
+import { historyDelete } from "./history_delete";
 import { apiError, json } from "./util";
 
 export { RealtimeHub };
@@ -28,6 +29,7 @@ export default {
     if(u.pathname==="/v1/admin/accounts/delete"&&method==="POST")return superadminDeleteAccounts(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="GET")return resourceAdminList(request,env);
     if(u.pathname==="/v1/admin/resources"&&method==="POST")return resourceAdminMutate(request,env);
+    if(u.pathname==="/v1/history/delete"&&method==="POST")return historyDelete(request,env);
     if(u.pathname==="/v1/session/work"&&method==="POST")return sessionWorkUpdate(request,env);
     if(u.pathname==="/v1/session/exit"&&method==="POST")return sessionExitGuarded(request,env);
     if(u.pathname==="/v1/session/time-correction"&&method==="POST")return attendanceTimeCorrect(request,env);
