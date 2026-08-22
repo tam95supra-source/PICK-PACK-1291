@@ -1,5 +1,6 @@
 import { authenticate } from "./auth";
 import { currentAuthority } from "./core";
+import { ensureCurrentBangkokBusinessDate } from "./business_date";
 import { apiError, b64u, b64uDecode, hmacB64u, json, nowIso, readJsonBody } from "./util";
 
 const GAS_API_URL = "https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec";
@@ -40,14 +41,9 @@ export async function exchangeGasSession(request:Request,env:Env):Promise<Respon
 
   const account=await env.DB.prepare("SELECT login_id,role,display_name,position,email,verifier_hash,status FROM accounts WHERE login_id=?1")
     .bind(String(payload.l)).first<{login_id:string;role:string;display_name:string;position:string;email:string;verifier_hash:string;status:string}>();
-  // S41_SERVICE_SESSION_BRIDGE_FIX: GAS already validated the signed, active GAS session above.
-  // D1 is a replica for account verifier material and may lag a password/verifier update; requiring
-  // byte-for-byte verifier equality here can deadlock every PDA background outbox while both GAS
-  // and Service are healthy. Keep the authoritative security checks: active GAS token, ACTIVE D1
-  // account and matching role. Do not make replica verifier freshness a transport availability gate.
+  // GAS already validated the signed active session. D1 verifier replica freshness is not a transport gate.
   if(!account||account.status!=="ACTIVE"||account.role!==String(payload.r))return apiError("SESSION_EXCHANGE_ACCOUNT_MISMATCH","AUTH",401);
 
-  // S44_IDEMPOTENT_PDA_SESSION_ATTENDANCE: same device reuses its active PDA session.
   const current=await env.DB.prepare("SELECT session_id,device_id FROM auth_sessions WHERE login_id=?1").bind(account.login_id).first<{session_id:string;device_id:string}>();
   const reused=Boolean(current?.session_id&&current.device_id===deviceId);
   const sessionId=reused?String(current?.session_id):crypto.randomUUID(),issuedAt=nowIso();
@@ -61,8 +57,7 @@ export async function exchangeGasSession(request:Request,env:Env):Promise<Respon
 }
 
 async function businessDate(db:D1Database):Promise<string>{
-  const row=await db.prepare("SELECT business_date FROM business_dates ORDER BY sequence_no DESC LIMIT 1").first<{business_date:string}>();
-  return row?.business_date||new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Bangkok",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+  return ensureCurrentBangkokBusinessDate(db);
 }
 
 function employeeJson(e:Employee|null){return e?{mnv:e.mnv,full_name:e.full_name,phone:e.phone,main_position:e.main_position,supplier:e.supplier,department:e.department,site:e.site,warehouse:e.warehouse,start_date:e.start_date,note:e.note}:null;}
@@ -80,7 +75,9 @@ async function resourceOptions(db:D1Database,date:string,mnv:string):Promise<Rec
   const picksRaw=(await db.prepare("SELECT resource_id FROM resources WHERE resource_type='USER_PICK' AND available=1 ORDER BY resource_id").all<{resource_id:string}>()).results??[];
   const user_picks=picksRaw.map(x=>x.resource_id).filter(id=>(!busy.has(`USER_PICK|${id}`)&&!used.has(`USER_PICK|${id}`))||id===current?.user_pick);
   const packsRaw=(await db.prepare("SELECT pack_table,shift,user_pack FROM resource_pack_map WHERE available=1 ORDER BY pack_table,shift,user_pack").all<{pack_table:string;shift:string;user_pack:string}>()).results??[];
-  const pack_tables=packsRaw.filter(x=>((!busy.has(`PACK_TABLE|${x.pack_table}`)&&!busy.has(`USER_PACK|${x.user_pack}`)&&!used.has(`USER_PACK|${x.user_pack}`))||(x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack))).map(x=>({table:x.pack_table,shift:x.shift,user_pack:x.user_pack}));
+  // USER_PACK/PACK_TABLE availability is session-active, not once-per-calendar-day. Both shift mappings
+  // remain visible; an active lease still guarantees exactly one winner.
+  const pack_tables=packsRaw.filter(x=>(!busy.has(`PACK_TABLE|${x.pack_table}`)&&!busy.has(`USER_PACK|${x.user_pack}`))||(x.pack_table===current?.pack_table&&x.user_pack===current?.user_pack)).map(x=>({table:x.pack_table,shift:x.shift,user_pack:x.user_pack}));
   return{ok:true,business_date:date,pdas,user_picks,pack_tables,current};
 }
 
@@ -91,7 +88,7 @@ async function employeeContext(env:Env,body:Record<string,unknown>):Promise<Resp
   if(!employee)return apiError("EMPLOYEE_NOT_FOUND","VALIDATION",404);
   const session=await env.DB.prepare("SELECT session_id,mnv,business_date,shift,work_choice,state,pda_serial,user_pick,pack_table,user_pack,pda_enter_status,pda_exit_status,resource_note,enter_at,exit_at,entered_by,exited_by,version FROM attendance_sessions WHERE business_date=?1 AND mnv=?2").bind(date,mnv).first<Record<string,unknown>>();
   const state=!session?"NOT_ENTERED":String(session.state)==="ACTIVE"?"ACTIVE":"ENDED";
-  let sessionOut:Record<string,unknown>|null=session?{...session,work_choice:visibleWork(String(session.work_choice||""))}:null;
+  const sessionOut:Record<string,unknown>|null=session?{...session,work_choice:visibleWork(String(session.work_choice||""))}:null;
   const activeLabor=body.include_labor===true?await env.DB.prepare("SELECT labor_id,mnv,business_date,shift,labor_type,time_marker,state,start_at,end_at,note,deduct_staff,start_event_id,finish_event_id,version FROM labor_sessions WHERE business_date=?1 AND mnv=?2 AND state='OPEN' ORDER BY start_at DESC LIMIT 1").bind(date,mnv).first<Record<string,unknown>>():null;
   const options=body.include_options===true&&state==="NOT_ENTERED"?await resourceOptions(env.DB,date,mnv):null;
   return json({ok:true,source:"SERVICE_D1",business_date:date,employee:employeeJson(employee),state,session:sessionOut,active_labor:activeLabor,options});
@@ -100,7 +97,7 @@ async function employeeContext(env:Env,body:Record<string,unknown>):Promise<Resp
 function eventLabel(type:string):string{return type==="ATTENDANCE_ENTER"?"Vào ca":type==="ATTENDANCE_EXIT"?"Ra ca":type==="RESOURCE_CHANGE"?"Đổi tài nguyên":type==="LABOR_START"?"Bắt đầu công nhật":type==="LABOR_FINISH"?"Hoàn thành công nhật":type;}
 
 async function sharedHistory(env:Env,body:Record<string,unknown>):Promise<Response>{
-  const date=await businessDate(env.DB),target=String(body.mnv||"").trim();
+  const requested=String(body.business_date||"").trim();const date=requested||await businessDate(env.DB),target=String(body.mnv||"").trim();
   const raw=(await env.DB.prepare("SELECT event_id,event_type,actor_id,committed_at,payload_json FROM events WHERE business_date=?1 ORDER BY authority_seq").bind(date).all<{event_id:string;event_type:string;actor_id:string;committed_at:string;payload_json:string}>()).results??[];
   const employeeRows=(await env.DB.prepare("SELECT mnv,full_name FROM employees").all<{mnv:string;full_name:string}>()).results??[];const names=new Map(employeeRows.map(x=>[x.mnv,x.full_name]));
   const timeline=raw.map(e=>{let p:Record<string,unknown>={};try{p=JSON.parse(e.payload_json) as Record<string,unknown>;}catch{}const mnv=String(p.mnv||"");return{scope:"SESSION",session_id:`${date}|${mnv}`,mnv,full_name:names.get(mnv)||"",shift:String(p.shift||""),event_type:e.event_type,label:eventLabel(e.event_type),at:e.committed_at,at_iso:e.committed_at,actor:e.actor_id,detail:String(p.labor_type||p.note||""),event_id:e.event_id};}).filter(x=>x.mnv&&(!target||x.mnv===target));
