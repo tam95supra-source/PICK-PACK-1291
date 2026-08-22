@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: beta48-signed-candidate-carrier
@@ -68,25 +68,23 @@ jobs:
             echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
             exit 0
           fi
-          SDK="$RUNNER_TEMP/android-sdk"
-          ZIP="$RUNNER_TEMP/commandlinetools.zip"
+          SDK="$RUNNER_TEMP/android-sdk"; ZIP="$RUNNER_TEMP/commandlinetools.zip"
           curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip -o "$ZIP"
           echo "4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583  $ZIP" | sha256sum -c -
-          mkdir -p "$SDK/cmdline-tools"
-          unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"
-          mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          mkdir -p "$SDK/cmdline-tools"; unzip -q "$ZIP" -d "$RUNNER_TEMP/android-cmdline"; mv "$RUNNER_TEMP/android-cmdline/cmdline-tools" "$SDK/cmdline-tools/latest"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
 
       - name: Build Beta and Stable validation APKs
+        id: build
         shell: bash
         run: |
           set -euo pipefail
           gradle --no-daemon --build-cache --parallel :app:assembleBetaRelease :app:assembleStableRelease
 
       - name: Verify owner contracts and package identity
+        id: package
         shell: bash
         run: |
           set -euxo pipefail
@@ -111,8 +109,7 @@ jobs:
           BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
           BETA=app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           STABLE=app/build/outputs/apk/stable/release/app-stable-release-unsigned.apk
-          test -s "$BETA"
-          test -s "$STABLE"
+          test -s "$BETA"; test -s "$STABLE"
           "$BT/aapt" dump badging "$BETA" | tee /tmp/beta-badging.txt
           "$BT/aapt" dump badging "$STABLE" | tee /tmp/stable-badging.txt
           grep -q "package: name='vn.pickpack1291.app.beta.publicbeta'" /tmp/beta-badging.txt
@@ -123,6 +120,7 @@ jobs:
           grep -q "versionName='0.1.0-stable'" /tmp/stable-badging.txt
 
       - name: Sign Beta48 and verify locked signer
+        id: sign
         shell: bash
         run: |
           set -euxo pipefail
@@ -137,9 +135,10 @@ jobs:
           "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$SIGNING_ALIAS" --ks-pass "file:$RUNNER_TEMP/store.pass" --key-pass "file:$RUNNER_TEMP/key.pass" --out "$OUT" app/build/outputs/apk/beta/release/app-beta-release-unsigned.apk
           "$BT/apksigner" verify --verbose --print-certs "$OUT" | tee /tmp/cert.txt
           grep -qi "Signer #1 certificate SHA-256 digest: $EXPECTED_SIGNER_SHA256" /tmp/cert.txt
-          sha256sum "$OUT" | tee dist/beta/SHA256SUMS-0.4.2-beta.48.txt
-          stat -c 'apk_size=%s' "$OUT" | tee dist/beta/APK_SIZE-0.4.2-beta.48.txt
-          "$BT/aapt" dump badging "$OUT" | tee dist/beta/APK_BADGING-0.4.2-beta.48.txt
+          sha=$(sha256sum "$OUT" | awk '{print $1}'); size=$(stat -c '%s' "$OUT"); file=$(basename "$OUT")
+          printf '%s  %s\n' "$sha" "$file" > dist/beta/SHA256SUMS-0.4.2-beta.48.txt
+          "$BT/aapt" dump badging "$OUT" > dist/beta/APK_BADGING-0.4.2-beta.48.txt
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"; echo "size=$size" >> "$GITHUB_OUTPUT"; echo "file=$file" >> "$GITHUB_OUTPUT"
 
       - name: Upload exact signed Beta48 candidate
         id: upload
@@ -148,6 +147,43 @@ jobs:
           name: pick-pack-1291-0.4.2-beta.48-signed
           path: dist/beta/*
           retention-days: 14
+
+      - name: Persist exact candidate receipt
+        shell: bash
+        env:
+          APK_SHA: ${{ steps.sign.outputs.sha }}
+          APK_SIZE: ${{ steps.sign.outputs.size }}
+          APK_FILE: ${{ steps.sign.outputs.file }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          set -euo pipefail
+          git reset --hard HEAD
+          mkdir -p ops
+          cat > ops/beta-release-candidate-result.txt <<EOF
+          checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          source_sha=$GITHUB_SHA
+          run_id=$GITHUB_RUN_ID
+          beta_name=0.4.2-beta.48
+          beta_code=54
+          stable_name=0.1.0-stable
+          stable_code=1
+          build=success
+          package=success
+          sign=success
+          artifact_id=$ARTIFACT_ID
+          apk_file=$APK_FILE
+          apk_sha256=$APK_SHA
+          apk_size=$APK_SIZE
+          signer_sha256=$EXPECTED_SIGNER_SHA256
+          stable_publish=FORBIDDEN
+          verdict=PASS
+          EOF
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/beta-release-candidate-result.txt
+          git commit -m 'ops: record Beta48 exact signed candidate'
+          git pull --rebase origin agent/service-migration-m2
+          git push origin HEAD:agent/service-migration-m2
 
       - name: Cleanup signing material
         if: always()
