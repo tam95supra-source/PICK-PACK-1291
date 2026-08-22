@@ -43,11 +43,10 @@ s = gas_path.read_text(encoding="utf-8")
 start = s.find("function ppUpdateCheck_(body) {")
 if start < 0:
     raise SystemExit("ppUpdateCheck_ start not found")
-end_marker = "\n}\n\nfunction ppJson_"
-end = s.find(end_marker, start)
-if end < 0:
-    raise SystemExit("ppUpdateCheck_ end not found")
-end += 2
-s = s[:start] + new + s[end:]
+next_fn = s.find("function ppJson_(obj)", start)
+if next_fn < 0:
+    raise SystemExit("ppJson_ anchor not found")
+# Replace the entire ppUpdateCheck_ block plus any intervening whitespace.
+s = s[:start] + new + "\n" + s[next_fn:]
 gas_path.write_text(s, encoding="utf-8")
 print(f"Applied canonical GitHub OTA: {version} -> {url}")
