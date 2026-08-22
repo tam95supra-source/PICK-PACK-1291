@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 45
     env:
       SIGNED_RUN_ID: '32583881510'
-      SIGNED_ARTIFACT_ID: '9925284720'
+      SIGNED_ARTIFACT_ID: '9478539694'
       SOURCE_SHA: a0a4c73fd5564afe083a563078d8927b00710694
       VERSION: 0.4.2-beta.54
       VERSION_CODE: '60'
@@ -24,8 +24,8 @@ jobs:
       TAG: v0.4.2-beta.54-publicbeta
       APK_NAME: pick-pack-1291-public-beta-0.4.2-beta.54.apk
       ARTIFACT_NAME: pick-pack-1291-public-beta-0.4.2-beta.54-signed-candidate
-      EXPECTED_SHA: 77639236c72ad6d5f9a74742d0f84265854f3f97a25808c8ab78b4269c96893e
-      EXPECTED_SIZE: '13020342'
+      EXPECTED_SHA: 96e9c7922698ecf039f0bd2d990d9b8fd4896ebd9388d881632c999563f276d4
+      EXPECTED_SIZE: '13027947'
       EXPECTED_PACKAGE: vn.pickpack1291.app.beta.publicbeta
       EXPECTED_SIGNER_SHA256: d180450ae47ac6e8daf26840308e62bd602d5f8d6ac12ee0da58e5eb1a44731e
       GAS_URL: https://script.google.com/macros/s/AKfycbzbEoGfbNg6s2HnP-gUpcBJ7mMIkVBtYuQKMndb9seDV2c55lQwSUO1GZ-LtQ2CxMCauA/exec
@@ -179,10 +179,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          check(){ local current="$1" want="$2" channel="$3" out="$4"; curl -sSL --connect-timeout 20 --max-time 90 -o "$out" -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"update_check\",\"channel\":\"$channel\",\"current_version\":\"$current\"}"; }
+          check(){ local current="$1" channel="$2" out="$3"; curl -sSL --connect-timeout 20 --max-time 90 -o "$out" -w '%{http_code}' -H 'content-type: application/json' "$GAS_URL" -d "{\"action\":\"update_check\",\"channel\":\"$channel\",\"current_version\":\"$current\"}"; }
           good=false
           for n in $(seq 1 30); do
-            code=$(check "$PREVIOUS_VERSION" yes BETA /tmp/update.json || true)
+            code=$(check "$PREVIOUS_VERSION" BETA /tmp/update.json || true)
             if [[ "$code" == 200 ]] && python3 - <<'PY'
           import json,os
           j=json.load(open('/tmp/update.json'))
@@ -198,17 +198,17 @@ jobs:
           test -n "$URL"; curl -fL --connect-timeout 20 --max-time 180 "$URL" -o /tmp/live.apk
           [[ "$(sha256sum /tmp/live.apk|awk '{print $1}')" == "$EXPECTED_SHA" ]]
           [[ "$(stat -c '%s' /tmp/live.apk)" == "$EXPECTED_SIZE" ]]
-          code=$(check "$VERSION" no BETA /tmp/self.json); [[ "$code" == 200 ]]
+          code=$(check "$VERSION" BETA /tmp/self.json); [[ "$code" == 200 ]]
           python3 - <<'PY'
           import json
           j=json.load(open('/tmp/self.json')); assert j.get('ok') is True; assert j.get('available',j.get('update_available')) is not True
           PY
-          code=$(check '0.4.2-beta.49' yes BETA /tmp/b49.json); [[ "$code" == 200 ]]
+          code=$(check '0.4.2-beta.49' BETA /tmp/b49.json); [[ "$code" == 200 ]]
           python3 - <<'PY'
           import json,os
           j=json.load(open('/tmp/b49.json')); assert j.get('ok') is True; assert j.get('available',j.get('update_available')) is True; assert str(j.get('version_name',j.get('version','')))==os.environ['VERSION']
           PY
-          code=$(check '0.1.0-stable' no STABLE /tmp/stable.json); [[ "$code" == 200 ]]
+          code=$(check '0.1.0-stable' STABLE /tmp/stable.json); [[ "$code" == 200 ]]
           python3 - <<'PY'
           import json
           j=json.load(open('/tmp/stable.json')); assert j.get('ok') is True; assert j.get('available',j.get('update_available')) is not True
