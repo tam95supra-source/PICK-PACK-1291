@@ -32,8 +32,8 @@ android {
         create("beta") {
             dimension = "channel"
             applicationId = "vn.pickpack1291.app.beta.publicbeta"
-            versionCode = 59
-            versionName = "0.4.2-beta.53"
+            versionCode = 60
+            versionName = "0.4.2-beta.54"
             manifestPlaceholders["appLabel"] = "Pick Pack 1291 Beta"
             buildConfigField("String", "CHANNEL", "\"BETA\"")
         }
@@ -73,7 +73,7 @@ dependencies {
 // Firebase client identifiers are injected at build time and default blank so source never contains project config.
 // GSHEET_API_URL remains public discovery/fallback configuration and manual update lookup path; no Service URL is compiled into APK.
 // Signing material remains outside this repository and the Android signer is owner-locked.
-// Beta53: restore Staff tab, remove Sync tab, circular refresh, detailed Vietnamese status cards, provider label and scan keyboard UX.
+// Beta54: durable RA CA local-first, true pending counts, factual status details, richer settings and device-local SUPERADMIN service fault tests.
 // Legacy Beta44 candidate-workflow compatibility markers only; actual beta metadata above is authoritative:
 // versionCode = 50
 // versionName = "0.4.2-beta.44"
